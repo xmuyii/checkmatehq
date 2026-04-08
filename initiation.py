@@ -8,11 +8,23 @@ from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from database import (
-    get_user, register_user, add_silver, set_sector,
-    add_inventory_item, get_profile, add_xp, save_user, load_sectors,
-    add_unclaimed_item, get_sector_display, get_unclaimed_items
-)
+# Try Supabase first, fall back to JSON for local development
+try:
+    from supabase_db import (
+        get_user, register_user, add_silver, set_sector,
+        add_inventory_item, get_profile, add_xp, save_user, load_sectors,
+        add_unclaimed_item, get_sector_display, get_unclaimed_items
+    )
+    DB_SOURCE = "Supabase"
+except Exception as e:
+    print(f"⚠️  Supabase connection failed: {e}")
+    print("Fallback: Using JSON database")
+    from database import (
+        get_user, register_user, add_silver, set_sector,
+        add_inventory_item, get_profile, add_xp, save_user, load_sectors,
+        add_unclaimed_item, get_sector_display, get_unclaimed_items
+    )
+    DB_SOURCE = "JSON"
 
 # ── Config (Read from Environment Variables) ──────────────────────────────────
 API_TOKEN    = os.environ.get('API_TOKEN', '8770224655:AAElFUaS_9ZMFsowhkWPtSU_9LwzdKMqGoU')
@@ -82,7 +94,7 @@ async def first_contact(message: types.Message, state: FSMContext):
     user_id = str(message.from_user.id)
 
     # Skip commands — they have their own handlers in main.py
-    if message.text and message.text.startswith("!"):
+    if message.text and message.text.startswith(('!', '/')):
         return
 
     # Already registered: just greet them
@@ -90,7 +102,7 @@ async def first_contact(message: types.Message, state: FSMContext):
         await message.answer(
             "🃏 *GameMaster:* \"Oh, it's you again. Your soul is already in my ledger. "
             "Go play — type `!fusion` in the group.\"\n\n"
-            "Need help? Type `!help`.",
+            "Need help? Type `!help`. Want to restart trials? Type `!tutorial`.",
             parse_mode="Markdown"
         )
         return
@@ -158,6 +170,10 @@ async def accept_entry(callback: types.CallbackQuery, state: FSMContext):
 
 @initiation_router.message(Trial.awaiting_username)
 async def capture_username(message: types.Message, state: FSMContext):
+    # Skip commands and special inputs
+    if not message.text or message.text.startswith(('!', '/')):
+        return
+    
     username = message.text.strip()[:20]
     user_id  = str(message.from_user.id)
 
@@ -209,16 +225,26 @@ async def send_trial_letters(message: types.Message, state: FSMContext, round_nu
 @initiation_router.message(Trial.trial_round_2)
 @initiation_router.message(Trial.trial_round_3)
 async def on_trial_guess(message: types.Message, state: FSMContext):
+    # Ensure message has text
+    if not message.text:
+        return
+    
     data  = await state.get_data()
-    guess = message.text.lower().strip() if message.text else ""
+    guess = message.text.lower().strip()
 
-    if guess == "!done":
+    # End trial if user types !done or /done
+    if guess in ("!done", "/done"):
         await end_trial_round(message, state)
+        return
+
+    # Skip commands and special prefixes - they shouldn't be treated as words
+    if guess.startswith(('!', '/')):
         return
 
     letters = data.get('trial_letters', '')
     used    = data.get('trial_used', [])
 
+    # Check if it's a valid anagram from our available letters
     if is_anagram(guess, letters) and guess not in used:
         if await check_dict(guess):
             pts   = max(len(guess) - 2, 1)
@@ -226,6 +252,10 @@ async def on_trial_guess(message: types.Message, state: FSMContext):
             used.append(guess)
             await state.update_data(trial_round_score=score, trial_used=used)
             await message.reply(f"✅ `{guess.upper()}` +{pts} pts", parse_mode="Markdown")
+        else:
+            # Word not in dictionary - silently skip
+            pass
+    # If not an anagram or already used - silently skip (player might be confused)
 
 
 # ── End of each trial round ───────────────────────────────────────────────
@@ -345,16 +375,19 @@ async def backpack_choice_handler(callback: types.CallbackQuery, state: FSMConte
     sector_env  = info.get("environment", "") if info else ""
     sector_perks = info.get("perks", "") if info else ""
 
-    set_sector(user_id, sector_id)
-
-    # Persist tutorial completion
+    # ── Update all user data BEFORE final save ─────────────────────────
     if user:
+        user["sector"] = sector_id
         user["backpack_image"]     = "normal_backpack"
         user["backpack_slots"]     = 5
         user["completed_tutorial"] = True
-        save_user(user_id, user)
+        user["inventory"] = user.get("inventory", [])
+        user["unclaimed_items"] = user.get("unclaimed_items", [])
+    
+    # Persist tutorial completion with sector
+    save_user(user_id, user)
 
-    # Award starter items as unclaimed
+    # Award starter items as unclaimed (these update the saved user)
     add_unclaimed_item(user_id, "shield", 1)
     for crate_type, xp in [
         ("wood_crate",   random.randint(50, 100)),
@@ -363,6 +396,9 @@ async def backpack_choice_handler(callback: types.CallbackQuery, state: FSMConte
     ]:
         add_unclaimed_item(user_id, crate_type, amount=1, xp_reward=xp)
     add_unclaimed_item(user_id, "teleport", 1)
+    
+    # Add starting silver
+    add_silver(user_id, 100, user.get("username", "Unknown"))
 
     item_count = len(get_unclaimed_items(user_id))
 

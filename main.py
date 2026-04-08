@@ -1,45 +1,103 @@
 import asyncio
 import random
 import httpx
-from aiogram import Bot, Dispatcher, types, F
+from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from database import (
-    get_user,
-    register_user,
-    add_points,
-    get_weekly_leaderboard,
-    get_alltime_leaderboard,
-    add_silver,
-    set_sector,
-    upgrade_backpack,
-    get_inventory,
-    get_profile,
-    add_xp,
-    use_xp,
-    use_silver,
-    remove_inventory_item,
-    load_sectors,
-    save_user,
-    calculate_level,
-    check_level_up,
-    add_unclaimed_item,
-    get_unclaimed_items,
-    claim_item,
-    remove_unclaimed_item,
-    award_powerful_locked_item,
-    add_inventory_item
-)
+
+# ── Database Initialization ────────────────────────────────────────────────
+print("\n" + "="*70)
+print("INITIALIZING DATABASE CONNECTION")
+print("="*70)
+
+DB_SOURCE = None
+# Try Supabase first, fall back to JSON for local development
+try:
+    print("\n🔄 Attempting Supabase connection...")
+    from supabase_db import (
+        get_user,
+        register_user,
+        add_points,
+        get_weekly_leaderboard,
+        get_alltime_leaderboard,
+        add_silver,
+        set_sector,
+        upgrade_backpack,
+        get_inventory,
+        get_profile,
+        add_xp,
+        use_xp,
+        use_silver,
+        remove_inventory_item,
+        load_sectors,
+        save_user,
+        calculate_level,
+        check_level_up,
+        add_unclaimed_item,
+        get_unclaimed_items,
+        claim_item,
+        remove_unclaimed_item,
+        award_powerful_locked_item,
+        add_inventory_item
+    )
+    
+    # Verify connection works
+    print("✅ Supabase module imported successfully")
+    print("✅ Database: SUPABASE (persistent across restarts)")
+    DB_SOURCE = "Supabase"
+    
+except ImportError as e:
+    print(f"❌ Supabase import failed: {e}")
+    print("   Fallback: Using JSON database (temporary storage)")
+    from database import (
+        get_user,
+        register_user,
+        add_points,
+        get_weekly_leaderboard,
+        get_alltime_leaderboard,
+        add_silver,
+        set_sector,
+        upgrade_backpack,
+        get_inventory,
+        get_profile,
+        add_xp,
+        use_xp,
+        use_silver,
+        remove_inventory_item,
+        load_sectors,
+        save_user,
+        calculate_level,
+        check_level_up,
+        add_unclaimed_item,
+        get_unclaimed_items,
+        claim_item,
+        remove_unclaimed_item,
+        award_powerful_locked_item,
+        add_inventory_item
+    )
+    DB_SOURCE = "JSON"
+    print("❌ Database: JSON (local file - resets on restart/redeploy)")
+    print("\n⚠️  To enable persistent storage:")
+    print("    1. Install: pip install supabase")
+    print("    2. Create tables in Supabase using SUPABASE_SETUP.sql")
+    print("    3. Restart the bot")
+    
+print("="*70 + "\n")
 from fusion_handlers import word_fusion_router
 from initiation import initiation_router
 
 # --- CONFIG ---
-API_TOKEN = '8770224655:AAFAHmPzdwCRbi5Y7VfO6cCBpuHZdT_dI2I'
+API_TOKEN = '8770224655:AAElFUaS_9ZMFsowhkWPtSU_9LwzdKMqGoU'
 SUPABASE_URL = 'https://basniiolppmtpzishhtn.supabase.co'.rstrip('/')
 SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhc25paW9scHBtdHB6aXNoaHRuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTQ3NjMwOCwiZXhwIjoyMDkxMDUyMzA4fQ.qrj1BO5dNilRDvgKtvTdwIWjBhFTRyGzuHPD271Xcac'
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
+
+# Create commands router for highest priority
+commands_router = Router()
+
+dp.include_router(commands_router)  # Commands FIRST (highest priority)
 dp.include_router(initiation_router)
 dp.include_router(word_fusion_router)
 
@@ -65,6 +123,7 @@ class GameEngine:
         self.crates_dropping = 0
         self.crate_claimers = []
         self.crate_drop_message_id = None
+        self.words_displayed = False  # Track if words have been shown
         # This event fires when a round ends (so the loop can move on)
         self.round_over_event = asyncio.Event()
 
@@ -123,16 +182,19 @@ def get_help_message() -> str:
     return """🃏 *GameMaster:* \"Oh, look who's struggling already.\"
 
 *COMMANDS* _(if your tiny brain can manage it)_
-`!fusion` — Start the game. Shocking, I know.
-`!forcerestart` — Force-end the current round and reset (admins/anyone in an emergency)
-`!changename NewName` — Change your username _(DM only)_
-`!tutorial` — Restart the tutorial _(DM only)_
-`!profile` — Check your stats _(DM only)_
-`!inventory` — View claimed items _(DM only)_
-`!claims` — Check unclaimed rewards _(DM only)_ ⚠️
-`!weekly` — This week's leaderboard
-`!alltime` — All-time leaderboard. Spoiler: it's not you.
-`!help` — This message
+`/fusion` or `!fusion` — Start the game. Shocking, I know.
+`/words` or `!words` — Show current game words (group only)
+`/forcerestart` or `!forcerestart` — Force-end current round and start fresh _(ADMINS ONLY)_
+`/forcestop` or `!forcestop` — Completely stop the game _(ADMINS ONLY)_
+`/changename NewName` or `!changename NewName` — Change your username _(DM only)_
+`/tutorial` or `!tutorial` — Restart the tutorial _(DM only)_
+`/profile` or `!profile` — Check your stats _(DM only)_
+`/inventory` or `!inventory` — View claimed items _(DM only)_
+`/claims` or `!claims` — Check unclaimed rewards _(DM only)_ ⚠️
+`/mystats` or `!mystats` — Personal round stats
+`/weekly` or `!weekly` — This week's leaderboard
+`/alltime` or `!alltime` — All-time leaderboard. Spoiler: it's not you.
+`/help` or `!help` — This message
 
 *PROGRESSION*
 ⭐ 1 XP per point earned
@@ -163,72 +225,74 @@ async def run_auto_harvest(message: types.Message, chat_id: int):
     enforced via asyncio.wait_for so it always ends on time.
     """
     engine = get_or_create_engine(chat_id)
-    engine.running = True
     engine.empty_rounds = 0
 
     try:
         while engine.running:
-            # ── Reset for new round ──────────────────────────
-            engine.scores = {}
-            engine.used_words = []
-            engine.message_count = 0
-            engine.active = True
-            engine.round_over_event.clear()
-
-            engine.word1, engine.word2 = await fetch_supabase_words()
-            engine.letters = (engine.word1 + engine.word2).lower()
-
-            # Random crate drop (20 % chance)
-            crate_msg_text = ""
-            if random.random() < 0.2:
-                num_crates = random.randint(1, 2)
-                crate_msg_text = (
-                    f"\n\n🎁 *BONUS:* {num_crates} CRATE(S) will drop mid-round!"
-                )
-                engine.crates_dropping = num_crates
-                engine.crate_claimers = []
-            else:
-                engine.crates_dropping = 0
-
-            await bot.send_message(
-                chat_id,
-                f"🃏 *GameMaster:* \"New round. Try not to starve.\"\n\n"
-                f"🎯 `{engine.word1}`  `{engine.word2}`"
-                f"{crate_msg_text}\n\n"
-                f"⏱️ You have *2 minutes*. Go.",
-                parse_mode="Markdown"
-            )
-
-            # ── Run the timed round ───────────────────────────
             try:
-                await asyncio.wait_for(
-                    _run_round_timer(chat_id, engine, message),
-                    timeout=engine.round_duration
+                # ── Reset for new round ──────────────────────────
+                engine.scores = {}
+                engine.used_words = []
+                engine.message_count = 0
+                engine.active = True
+                engine.round_over_event.clear()
+
+                engine.word1, engine.word2 = await fetch_supabase_words()
+                engine.letters = (engine.word1 + engine.word2).lower()
+                engine.words_displayed = False
+
+                # Random crate drop (20 % chance)
+                crate_msg_text = ""
+                if random.random() < 0.2:
+                    num_crates = random.randint(1, 2)
+                    crate_msg_text = (
+                        f"\n\n🎁 *BONUS:* {num_crates} CRATE(S) will drop mid-round!"
+                    )
+                    engine.crates_dropping = num_crates
+                    engine.crate_claimers = []
+                else:
+                    engine.crates_dropping = 0
+
+                await bot.send_message(
+                    chat_id,
+                    f"🃏 *GameMaster:* \"New round. Try not to starve.\"\n\n"
+                    f"📝 *WORDS:* `{engine.word1}` + `{engine.word2}`"
+                    f"{crate_msg_text}\n\n"
+                    f"⏱️ You have *2 minutes*. Go.",
+                    parse_mode="Markdown"
                 )
-            except asyncio.TimeoutError:
-                # Normal path – round timer expired
-                pass
+                engine.words_displayed = True
 
-            # ── Mark round inactive IMMEDIATELY ──────────────
-            engine.active = False
+                # ── Run the timed round ───────────────────────────
+                try:
+                    await asyncio.wait_for(
+                        _run_round_timer(chat_id, engine, message),
+                        timeout=engine.round_duration
+                    )
+                except asyncio.TimeoutError:
+                    # Normal path – round timer expired
+                    pass
 
-            # ── Score summary ─────────────────────────────────
-            sorted_scores = sorted(
-                engine.scores.values(), key=lambda x: x['pts'], reverse=True
-            )
+                # ── Mark round inactive IMMEDIATELY ──────────────
+                engine.active = False
 
-            lead_text = "🏆 *ROUND OVER*\n━━━━━━━━━━━━━━━\n"
+                # ── Score summary ─────────────────────────────────
+                sorted_scores = sorted(
+                    engine.scores.values(), key=lambda x: x['pts'], reverse=True
+                )
 
-            if not sorted_scores:
-                lead_text += "Nobody scored. Pathetic. Absolutely pathetic."
-                engine.empty_rounds += 1
-            else:
-                engine.empty_rounds = 0
+                lead_text = "🏆 *ROUND OVER*\n━━━━━━━━━━━━━━━\n"
 
-                # Award crates to reaction-claimers
-                if engine.crates_dropping > 0 and engine.crate_claimers:
-                    for claimer in engine.crate_claimers:
-                        add_unclaimed_item(str(claimer['user_id']), "super_crate", 1)
+                if not sorted_scores:
+                    lead_text += "Nobody scored. Pathetic. Absolutely pathetic."
+                    engine.empty_rounds += 1
+                else:
+                    engine.empty_rounds = 0
+
+                    # Award crates to reaction-claimers
+                    if engine.crates_dropping > 0 and engine.crate_claimers:
+                        for claimer in engine.crate_claimers:
+                            add_unclaimed_item(str(claimer['user_id']), "super_crate", 1, xp_reward=random.randint(1, 200))
                     lead_text += (
                         f"🎁 *CRATE AWARDS:* "
                         f"{len(engine.crate_claimers)} player(s) claimed crates!\n\n"
@@ -240,61 +304,82 @@ async def run_auto_harvest(message: types.Message, chat_id: int):
 
                     # Bonus crates for top 3
                     if i < 3:
-                        add_unclaimed_item(p['user_id'], "super_crate", 1)
+                        add_unclaimed_item(p['user_id'], "super_crate", 1, xp_reward=random.randint(1, 200))
 
-            lead_text += "\n📊 `!weekly` | `!alltime` for full stats"
-            await bot.send_message(chat_id, lead_text, parse_mode="Markdown")
-
-            # ── Level-up celebrations ─────────────────────────
-            for user_id, score_data in engine.scores.items():
-                if score_data.get("leveled_up"):
-                    user = get_user(user_id)
-                    if user:
-                        current_level = user.get('level', 1)
-                        lvl_msg = (
-                            f"🎊 *LEVEL UP!* {score_data['name']} reached "
-                            f"*LEVEL {current_level}*!\n\n"
-                            f"🃏 *GameMaster:* \"Managed not to embarrass yourself. "
-                            f"Here's your pathetic reward.\"\n\n"
-                            f"✨ Bonus items added! Use `!claims` in DM to collect."
-                        )
-                        add_unclaimed_item(user_id, "super_crate", 1)
-                        if random.random() < 0.5:
-                            add_unclaimed_item(user_id, "xp_multiplier", 1, multiplier_value=2)
-                        else:
-                            add_unclaimed_item(user_id, "silver_multiplier", 1, multiplier_value=2)
-
-                        if current_level % 5 == 0:
-                            item_name, item_desc = award_powerful_locked_item(user_id)
-                            lvl_msg += (
-                                f"\n\n⚡ *MILESTONE!* Unlocked: *{item_name}*\n"
-                                f"_{item_desc}_\n"
-                                f"⚠️ Too powerful to use. You'll need a bigger backpack."
+                # ── Level-up celebrations ─────────────────────────
+                for user_id, score_data in engine.scores.items():
+                    if score_data.get("leveled_up"):
+                        user = get_user(user_id)
+                        if user:
+                            current_level = user.get('level', 1)
+                            lvl_msg = (
+                                f"🎊 *LEVEL UP!* {score_data['name']} reached "
+                                f"*LEVEL {current_level}*!\n\n"
+                                f"🃏 *GameMaster:* \"Managed not to embarrass yourself. "
+                                f"Here's your pathetic reward.\"\n\n"
+                                f"✨ Bonus items added! Use `/claims` in DM to collect."
                             )
-                        await bot.send_message(chat_id, lvl_msg, parse_mode="Markdown")
+                            add_unclaimed_item(user_id, "super_crate", 1, xp_reward=random.randint(1, 200))
+                            if random.random() < 0.5:
+                                add_unclaimed_item(user_id, "xp_multiplier", 1, multiplier_value=2)
+                            else:
+                                add_unclaimed_item(user_id, "silver_multiplier", 1, multiplier_value=2)
 
-            # ── Dormancy check ───────────────────────────────
-            if engine.empty_rounds >= 3:
-                engine.running = False
-                engine.active = False
-                await bot.send_message(
-                    chat_id,
-                    "🃏 *GameMaster:* \"Silence. Bore me again and I'll make it permanent. "
-                    "Type `!fusion` when you actually want to play.\"",
-                    parse_mode="Markdown"
-                )
-                break
+                            if current_level % 5 == 0:
+                                item_name, item_desc = award_powerful_locked_item(user_id)
+                                lvl_msg += (
+                                    f"\n\n⚡ *MILESTONE!* Unlocked: *{item_name}*\n"
+                                    f"_{item_desc}_\n"
+                                    f"⚠️ Too powerful to use. You'll need a bigger backpack."
+                                )
+                            await bot.send_message(chat_id, lvl_msg, parse_mode="Markdown")
 
-            # ── Help message interval ────────────────────────
-            engine.games_played += 1
-            if engine.games_played >= engine.games_until_help:
-                await bot.send_message(chat_id, get_help_message(), parse_mode="Markdown")
-                engine.games_until_help = engine.games_played + random.randint(3, 7)
+                # ── Dormancy check ───────────────────────────────
+                if engine.empty_rounds >= 3:
+                    engine.running = False
+                    engine.active = False
+                    await bot.send_message(
+                        chat_id,
+                        "🃏 *GameMaster:* \"Silence. Bore me again and I'll make it permanent. "
+                        "Type `/fusion` when you actually want to play.\"",
+                        parse_mode="Markdown"
+                    )
+                    break
 
-            # ── Short break between rounds ───────────────────
-            await asyncio.sleep(15)
+                # ── Help message interval ────────────────────────
+                engine.games_played += 1
+                if engine.games_played >= engine.games_until_help:
+                    await bot.send_message(chat_id, get_help_message(), parse_mode="Markdown")
+                    engine.games_until_help = engine.games_played + random.randint(3, 7)
+                
+                # ── Auto-post weekly rankings every 10 rounds ─────
+                if engine.games_played % 10 == 0 and engine.games_played > 0:
+                    try:
+                        lb = get_weekly_leaderboard()
+                        if lb:
+                            text = "🏆 *AUTO-POST: WEEKLY RANKINGS*\n━━━━━━━━━━━━━━━━━━━\n"
+                            for i, p in enumerate(lb[:5], 1):
+                                medal = ["🥇", "🥈", "🥉"][i-1] if i <= 3 else f"{i}."
+                                text += f"{medal} {p['username']} — {p['points']} pts\n"
+                            await bot.send_message(chat_id, text, parse_mode="Markdown")
+                    except Exception:
+                        pass  # Silent fail - don't interrupt game
+
+                # ── Short break between rounds ───────────────────
+                await asyncio.sleep(15)
+
+            except Exception as e:
+                # Catch any round-specific errors and log them
+                print(f"ERROR in round loop: {type(e).__name__}: {e}")
+                # Continue to try the next round instead of crashing
+                await asyncio.sleep(5)
+                continue
 
     except asyncio.CancelledError:
+        engine.active = False
+        engine.running = False
+    finally:
+        # ALWAYS set running to False when exiting, regardless of how we exited
         engine.active = False
         engine.running = False
 
@@ -306,9 +391,8 @@ async def _run_round_timer(chat_id: int, engine: GameEngine, message: types.Mess
     """
     # Crate drop at 50-second mark
     if engine.crates_dropping > 0:
-        done = engine.round_over_event.wait()
         try:
-            await asyncio.wait_for(asyncio.shield(done), timeout=50)
+            await asyncio.wait_for(engine.round_over_event.wait(), timeout=50)
             return  # round_over_event was set — bail early
         except asyncio.TimeoutError:
             pass
@@ -370,7 +454,76 @@ def _sadistic_unreg_reply() -> str:
     return random.choice(opts)
 
 
-@dp.message(F.text == "!fusion")
+async def is_admin(user_id: int, chat_id: int) -> bool:
+    """Check if user is admin in the group."""
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+        return member.status in ["creator", "administrator"]
+    except Exception:
+        return False
+
+
+# ─────────────────────────────────────────────
+#  MASTER COMMAND DISPATCHER
+# ─────────────────────────────────────────────
+
+@commands_router.message(F.text.regexp(r"^[/!]"))
+async def command_dispatcher(message: types.Message, state: FSMContext):
+    """Single dispatcher for all commands."""
+    if not message.text:
+        return
+    
+    text = message.text.strip()
+    # Extract command name (remove / or ! prefix)
+    parts = text.split()
+    cmd_raw = parts[0].lstrip('/')
+    cmd_raw = cmd_raw.lstrip('!')
+    cmd = cmd_raw.lower()
+    
+    # Command to handler mapping
+    handlers = {
+        'fusion': start_game,
+        'forcerestart': force_restart,
+        'forcestop': force_stop,
+        'weekly': show_weekly,
+        'alltime': show_alltime,
+        'mystats': show_mystats,
+        'profile': show_profile,
+        'inventory': show_inventory,
+        'claims': show_claims,
+        'words': show_current_words,
+        'help': show_help,
+        'shop': show_shop,
+        'upgrade': upgrade_backpack_cmd,
+        'changename': change_name,
+        'tutorial': trigger_tutorial,
+        'start': manual_start,
+        'open': crate_open_handler,
+        'use': use_item_handler,
+    }
+    
+    if cmd in handlers:
+        handler = handlers[cmd]
+        try:
+            # Pass state to all handlers (they ignore it if not needed)
+            await handler(message, state)
+        except TypeError as e:
+            # Handler doesn't accept state, call without it
+            try:
+                await handler(message)
+            except Exception as ex:
+                print(f"ERROR in {cmd}: {type(ex).__name__}: {ex}")
+                await message.answer(f"🃏 *Error:* {type(ex).__name__}", parse_mode="Markdown")
+        except Exception as ex:
+            print(f"ERROR in {cmd}: {type(ex).__name__}: {ex}")
+            await message.answer(f"🃏 *Error:* {type(ex).__name__}", parse_mode="Markdown")
+    else:
+        await message.answer(
+            f"🃏 *GameMaster:* \"I don't know `{cmd}`. Try `/help`.\"",
+            parse_mode="Markdown"
+        )
+
+
 async def start_game(message: types.Message):
     if message.chat.type not in ["group", "supergroup"]:
         await message.answer(
@@ -390,6 +543,9 @@ async def start_game(message: types.Message):
         )
         return
 
+    # Mark running IMMEDIATELY to prevent race condition
+    engine.running = True
+
     # Warn unregistered caller but still start the game
     u_id = str(message.from_user.id)
     if not get_user(u_id):
@@ -404,12 +560,19 @@ async def start_game(message: types.Message):
     asyncio.create_task(run_auto_harvest(message, chat_id))
 
 
-@dp.message(F.text == "!forcerestart")
 async def force_restart(message: types.Message):
-    """Force-end the current round immediately."""
+    """Force-end current round and restart the game. Admin only."""
     if message.chat.type not in ["group", "supergroup"]:
         await message.answer(
             "🃏 *GameMaster:* \"Use this in the group, fool.\"",
+            parse_mode="Markdown"
+        )
+        return
+
+    # Check if user is admin
+    if not await is_admin(message.from_user.id, message.chat.id):
+        await message.answer(
+            "🃏 *GameMaster:* \"Only admins can force restart. Back to your place.\"",
             parse_mode="Markdown"
         )
         return
@@ -420,7 +583,7 @@ async def force_restart(message: types.Message):
     if not engine.running:
         await message.answer(
             "🃏 *GameMaster:* \"Nothing is running. "
-            "You can't restart what doesn't exist. Type `!fusion` to start.\"",
+            "You can't restart what doesn't exist. Type `/fusion` to start.\"",
             parse_mode="Markdown"
         )
         return
@@ -428,11 +591,48 @@ async def force_restart(message: types.Message):
     # Signal the round timer to stop immediately
     engine.round_over_event.set()
     engine.active = False
+    # Reset empty rounds so game continues
+    engine.empty_rounds = 0
 
     await message.answer(
-        "🃏 *GameMaster:* \"Fine. FINE. Round terminated. "
-        "I'll conjure fresh words momentarily. "
-        "This better not be a habit.\"",
+        "🃏 *GameMaster:* \"Fine. FINE. Round terminated. Fresh words coming momentarily.\"",
+        parse_mode="Markdown"
+    )
+
+
+async def force_stop(message: types.Message):
+    """Completely stop the game. Admin only."""
+    if message.chat.type not in ["group", "supergroup"]:
+        await message.answer(
+            "🃏 *GameMaster:* \"Use this in the group, fool.\"",
+            parse_mode="Markdown"
+        )
+        return
+
+    # Check if user is admin
+    if not await is_admin(message.from_user.id, message.chat.id):
+        await message.answer(
+            "🃏 *GameMaster:* \"Only admins can force stop. Back to your place.\"",
+            parse_mode="Markdown"
+        )
+        return
+
+    chat_id = message.chat.id
+    engine = get_or_create_engine(chat_id)
+
+    if not engine.running:
+        await message.answer(
+            "🃏 *GameMaster:* \"Nothing is running to stop, fool.\"",
+            parse_mode="Markdown"
+        )
+        return
+
+    # Stop the game completely
+    engine.running = False
+    engine.active = False
+
+    await message.answer(
+        "🃏 *GameMaster:* \"Game terminated. It's over. Type `/fusion` to start again when you're ready.\"",
         parse_mode="Markdown"
     )
 
@@ -440,31 +640,28 @@ async def force_restart(message: types.Message):
 @dp.message_reaction()
 async def on_message_reaction(event: types.MessageReactionUpdated):
     """Track reactions to crate drop messages."""
-    if not event.user_id:
+    if not event.user or not event.user.id:
         return
     chat_id = event.chat.id
     engine = get_or_create_engine(chat_id)
+    user_id = event.user.id
 
     if (
         engine.crate_drop_message_id == event.message_id
         and engine.crates_dropping > 0
-        and event.user_id not in [c['user_id'] for c in engine.crate_claimers]
+        and user_id not in [c['user_id'] for c in engine.crate_claimers]
         and len(engine.crate_claimers) < 3
     ):
-        engine.crate_claimers.append({'user_id': event.user_id, 'username': ''})
+        engine.crate_claimers.append({'user_id': user_id, 'username': ''})
 
 
-@dp.message(F.chat.type.in_({"group", "supergroup"}))
+@dp.message(F.chat.type.in_({"group", "supergroup"}), ~F.text.regexp(r"^[/!]"))
 async def on_group_message(message: types.Message):
     """Process word guesses from group chat."""
     if not message.text:
         return
 
     text = message.text.strip()
-
-    # Ignore commands
-    if text.startswith("!"):
-        return
 
     chat_id = message.chat.id
     engine = get_or_create_engine(chat_id)
@@ -498,7 +695,7 @@ async def on_group_message(message: types.Message):
         if len(guess) >= 3 and engine.letters and is_anagram(guess, engine.letters):
             await message.reply(
                 "🛑 *GameMaster:* \"The round is OVER. "
-                "Are you slow? Type `!fusion` to start a new one.\"",
+                "Are you slow? Type `/fusion` (or `!fusion`) to start a new one.\"",
                 parse_mode="Markdown"
             )
         return
@@ -514,42 +711,49 @@ async def on_group_message(message: types.Message):
         await message.reply(f"❌ `{guess.upper()}` was already guessed this round!")
         return
 
-    # Anagram check
+    # Anagram check - silently ignore if not anagram
     if not is_anagram(guess, engine.letters):
-        return  # silently ignore non-anagrams
+        return
 
-    # Dictionary check
-    if await check_supabase_dict(guess):
-        pts = len(guess) - 2
-        engine.used_words.append(guess)
+    # Dictionary check - silently ignore if not in dictionary
+    if not await check_supabase_dict(guess):
+        return
+    
+    # Valid word! Award points
+    pts = len(guess) - 2
+    engine.used_words.append(guess)
 
-        add_points(u_id, pts, message.from_user.first_name)
-        add_xp(u_id, pts)
-        old_level, new_level = check_level_up(u_id)
+    # Get registered username from profile (not Telegram default name)
+    user = get_user(u_id)
+    username = user.get('username', message.from_user.first_name) if user else message.from_user.first_name
 
-        if u_id not in engine.scores:
-            engine.scores[u_id] = {
-                "pts": 0,
-                "name": message.from_user.first_name,
-                "user_id": u_id,
-                "leveled_up": False
-            }
-        engine.scores[u_id]["pts"] += pts
+    add_points(u_id, pts, username)
+    add_xp(u_id, pts)
+    old_level, new_level = check_level_up(u_id)
 
-        feedback = f"✅ `{guess.upper()}` +{pts} pts  ⭐ +{pts} XP"
-        if old_level and new_level:
-            feedback += f"\n🎊 *LEVEL UP!* {old_level} → {new_level}"
-            engine.scores[u_id]["leveled_up"] = True
+    if u_id not in engine.scores:
+        engine.scores[u_id] = {
+            "pts": 0,
+            "name": username,
+            "user_id": u_id,
+            "leveled_up": False
+        }
+    engine.scores[u_id]["pts"] += pts
 
-        await message.reply(feedback, parse_mode="Markdown")
+    feedback = f"✅ `{guess.upper()}` +{pts} pts  ⭐ +{pts} XP"
+    if old_level and new_level:
+        feedback += f"\n🎊 *LEVEL UP!* {old_level} → {new_level}"
+        engine.scores[u_id]["leveled_up"] = True
+
+    await message.reply(feedback, parse_mode="Markdown")
 
 
 # ─────────────────────────────────────────────
 #  LEADERBOARDS
 # ─────────────────────────────────────────────
 
-@dp.message(F.text == "!weekly")
-async def show_weekly(message: types.Message):
+async def show_weekly(message: types.Message, state: FSMContext = None):
+    """Show weekly leaderboard in any chat."""
     u_id = str(message.from_user.id)
     if not get_user(u_id):
         await message.answer(_sadistic_unreg_reply(), parse_mode="Markdown")
@@ -570,8 +774,8 @@ async def show_weekly(message: types.Message):
     await message.answer(text, parse_mode="Markdown")
 
 
-@dp.message(F.text == "!alltime")
-async def show_alltime(message: types.Message):
+async def show_alltime(message: types.Message, state: FSMContext = None):
+    """Show all-time leaderboard in any chat."""
     u_id = str(message.from_user.id)
     if not get_user(u_id):
         await message.answer(_sadistic_unreg_reply(), parse_mode="Markdown")
@@ -592,12 +796,62 @@ async def show_alltime(message: types.Message):
     await message.answer(text, parse_mode="Markdown")
 
 
+async def show_mystats(message: types.Message, state: FSMContext = None):
+    """Show personal stats for current round (group or DM)."""
+    u_id = str(message.from_user.id)
+    if not get_user(u_id):
+        await message.answer(_sadistic_unreg_reply(), parse_mode="Markdown")
+        return
+
+    # Get current round engine if in group
+    if message.chat.type in ("group", "supergroup"):
+        chat_id = message.chat.id
+        engine = get_or_create_engine(chat_id)
+        
+        if u_id in engine.scores:
+            score_data = engine.scores[u_id]
+            await message.answer(
+                f"📊 *YOUR ROUND STATS*\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"🎖️ *{score_data['name']}*\n"
+                f"📈 Points: {score_data['pts']}\n"
+                f"⭐ XP Earned: {score_data['pts']}\n"
+                f"(Final stats after round ends)",
+                parse_mode="Markdown"
+            )
+        else:
+            await message.answer(
+                "🃏 *GameMaster:* \"You haven't scored yet. "
+                "Type some words and THEN check your stats.\"",
+                parse_mode="Markdown"
+            )
+    else:
+        # DM: show lifetime stats
+        profile = get_profile(u_id)
+        if not profile:
+            await message.answer(
+                "🃏 *GameMaster:* \"No stats. Pure mediocrity.\"",
+                parse_mode="Markdown"
+            )
+            return
+
+        await message.answer(
+            f"📊 *YOUR STATS*\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"👤 {profile['username']}\n"
+            f"📈 Weekly: {profile['weekly_points']} pts\n"
+            f"🏆 All-Time: {profile['all_time_points']} pts\n"
+            f"⭐ Level: {profile['level']}\n"
+            f"💎 XP: {profile['xp']}",
+            parse_mode="Markdown"
+        )
+
+
 # ─────────────────────────────────────────────
 #  PROFILE  (DM ONLY)
 # ─────────────────────────────────────────────
 
-@dp.message(F.text.startswith("!profile"))
-async def show_profile(message: types.Message):
+async def show_profile(message: types.Message, state: FSMContext = None):
     if message.chat.type != "private":
         await message.answer(
             "🃏 *GameMaster:* \"Oh, trying to broadcast your pitiful stats to the WHOLE group? "
@@ -653,8 +907,7 @@ async def show_profile(message: types.Message):
 #  INVENTORY  (DM ONLY)
 # ─────────────────────────────────────────────
 
-@dp.message(F.text == "!inventory")
-async def show_inventory(message: types.Message):
+async def show_inventory(message: types.Message, state: FSMContext = None):
     if message.chat.type != "private":
         await message.answer(
             "🃏 *GameMaster:* \"Exposing your inventory to the whole group? "
@@ -680,40 +933,66 @@ async def show_inventory(message: types.Message):
         )
         return
 
-    keyboard = []
+    # Group items by type and characteristics
+    grouped_items = {}
     for i, item in enumerate(inventory):
         item_type = item.get("type", "").lower()
         xp_reward = item.get("xp_reward", 0)
+        mult_value = item.get("multiplier_value", 0)
+        
+        # Create unique key for grouping (type + identifying characteristics)
+        if "crate" in item_type:
+            key = f"{item_type}_{xp_reward}"
+        elif "multiplier" in item_type:
+            key = f"{item_type}_{mult_value}"
+        else:
+            key = item_type
+        
+        if key not in grouped_items:
+            grouped_items[key] = {'indices': [], 'item': item, 'xp_reward': xp_reward, 'mult_value': mult_value}
+        grouped_items[key]['indices'].append(i)
+
+    keyboard = []
+    for key, group_data in grouped_items.items():
+        item = group_data['item']
+        first_index = group_data['indices'][0]
+        count = len(group_data['indices'])
+        item_type = item.get("type", "").lower()
+        xp_reward = group_data['xp_reward']
+        mult_value = group_data['mult_value']
+
+        # Count suffix for duplicates
+        count_suffix = f" X{count}" if count > 1 else ""
 
         if "wood" in item_type and "crate" in item_type:
-            text = f"🪵 WOOD CRATE ({xp_reward} XP)"
-            cb = f"open_{i}"
+            text = f"🪵 WOOD CRATE ({xp_reward} XP){count_suffix}"
+            cb = f"open_{first_index}"
         elif "bronze" in item_type and "crate" in item_type:
-            text = f"🥉 BRONZE CRATE ({xp_reward} XP)"
-            cb = f"open_{i}"
+            text = f"🥉 BRONZE CRATE ({xp_reward} XP){count_suffix}"
+            cb = f"open_{first_index}"
         elif "iron" in item_type and "crate" in item_type:
-            text = f"⚙️ IRON CRATE ({xp_reward} XP)"
-            cb = f"open_{i}"
+            text = f"⚙️ IRON CRATE ({xp_reward} XP){count_suffix}"
+            cb = f"open_{first_index}"
         elif "super" in item_type and "crate" in item_type:
-            text = f"🎁 SUPER CRATE ({xp_reward} XP)"
-            cb = f"open_{i}"
+            text = f"🎁 SUPER CRATE ({xp_reward} XP){count_suffix}"
+            cb = f"open_{first_index}"
         elif item_type == "shield":
-            text = "🛡️ SHIELD [LOCKED]"
-            cb = f"use_{i}"
+            text = f"🛡️ SHIELD [LOCKED]{count_suffix}"
+            cb = f"use_{first_index}"
         elif item_type == "teleport":
-            text = "🌀 TELEPORT (Choose Sector)"
-            cb = f"teleport_{i}"
+            text = f"🌀 TELEPORT (Choose Sector){count_suffix}"
+            cb = f"teleport_{first_index}"
         elif "multiplier" in item_type:
-            mult = item.get("multiplier_value", 2)
+            mult = mult_value
             label = "XP" if "xp" in item_type else "SILVER"
-            text = f"⚡ {label} MULTIPLIER x{mult}"
-            cb = f"use_{i}"
+            text = f"⚡ {label} MULTIPLIER x{mult}{count_suffix}"
+            cb = f"use_{first_index}"
         elif "locked_" in item_type:
-            text = f"🔒 LEGENDARY ITEM [TOO POWERFUL]"
-            cb = f"info_{i}"
+            text = f"🔒 LEGENDARY ITEM [TOO POWERFUL]{count_suffix}"
+            cb = f"info_{first_index}"
         else:
-            text = f"❓ {item_type.upper()}"
-            cb = f"use_{i}"
+            text = f"❓ {item_type.upper()}{count_suffix}"
+            cb = f"use_{first_index}"
 
         keyboard.append([InlineKeyboardButton(text=text, callback_data=cb)])
 
@@ -722,11 +1001,13 @@ async def show_inventory(message: types.Message):
     slots_total = profile['backpack_slots'] if profile else 5
 
     markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
+    unique_items = len(grouped_items)
     await message.answer(
         f"📦 *YOUR INVENTORY*\n"
         f"━━━━━━━━━━━━━━━\n"
         f"📊 Slots: {slots_used}/{slots_total}\n"
-        f"💡 Tap an item to use it\n\n"
+        f"🎁 Unique Items: {unique_items}\n"
+        f"💡 Tap an item to use it (X# = quantity)\n\n"
         f"*Your Items:*",
         reply_markup=markup,
         parse_mode="Markdown"
@@ -737,8 +1018,7 @@ async def show_inventory(message: types.Message):
 #  CLAIMS  (DM ONLY)
 # ─────────────────────────────────────────────
 
-@dp.message(F.text == "!claims")
-async def show_claims(message: types.Message):
+async def show_claims(message: types.Message, state: FSMContext = None):
     if message.chat.type != "private":
         await message.answer(
             "🃏 *GameMaster:* \"Exposing your unclaimed loot publicly? "
@@ -777,10 +1057,9 @@ async def show_claims(message: types.Message):
     }
 
     keyboard = []
-    for item in unclaimed:
+    for idx, item in enumerate(unclaimed):
         item_type = item.get("type", "").lower()
         mult = item.get("multiplier_value", 0)
-        item_id = item.get("id")
 
         if "locked_" in item_type:
             names = {
@@ -797,7 +1076,7 @@ async def show_claims(message: types.Message):
             label = fn(mult)
             text = f"{label} [CLAIM]"
 
-        keyboard.append([InlineKeyboardButton(text=text, callback_data=f"claim_{item_id}")])
+        keyboard.append([InlineKeyboardButton(text=text, callback_data=f"claim_{idx}")])
 
     markup = InlineKeyboardMarkup(inline_keyboard=keyboard)
     await message.answer(
@@ -813,32 +1092,71 @@ async def show_claims(message: types.Message):
 
 @dp.callback_query(F.data.startswith("claim_"))
 async def claim_item_callback(query: types.CallbackQuery):
+    await query.answer()  # Acknowledge immediately
+    
     u_id = str(query.from_user.id)
     try:
-        item_id = int(query.data.split("_")[1])
+        item_index = int(query.data.split("_")[1])
     except (IndexError, ValueError):
         await query.answer("Invalid item.", show_alert=True)
         return
 
-    success, msg_text = claim_item(u_id, item_id)
-    if success:
-        await query.answer(f"✅ {msg_text}")
-        unclaimed = get_unclaimed_items(u_id)
-        if not unclaimed:
-            await query.message.edit_text(
-                "🃏 *GameMaster:* \"All claimed. Good little minion.\"",
-                parse_mode="Markdown"
+    # Get unclaimed items
+    unclaimed = get_unclaimed_items(u_id)
+    if item_index < 0 or item_index >= len(unclaimed):
+        await query.answer("❌ Item not found.", show_alert=True)
+        return
+    
+    item = unclaimed[item_index]
+    item_type = item.get('type', 'unknown')
+    
+    # Check if inventory is full
+    profile = get_profile(u_id)
+    if profile:
+        inventory_count = profile.get('inventory_count', 0)
+        backpack_slots = profile.get('backpack_slots', 5)
+        
+        if inventory_count >= backpack_slots:
+            await query.answer(
+                f'🃏 *GameMaster:* "Your pathetic childish fannypack is BURSTING at the seams, '
+                f'you greedy hoarder. Did you think infinite pockets existed? Go actually USE '
+                f'something before you dare to claim more."\n\n'
+                f'📦 Slots: {inventory_count}/{backpack_slots}',
+                show_alert=True
             )
-        else:
-            await query.message.edit_text(
-                f"🎁 *UNCLAIMED REWARDS*\n"
-                f"━━━━━━━━━━━━━━━━━━━\n"
-                f"Remaining: *{len(unclaimed)}* item(s)\n"
-                f"Send `!claims` again to see them.",
-                parse_mode="Markdown"
-            )
+            return
+    
+    # Claim the item
+    claim_item(u_id, item_index)
+    
+    # Refresh unclaimed list
+    unclaimed = get_unclaimed_items(u_id)
+    
+    # Show success message
+    item_name = {
+        "shield": "SHIELD",
+        "wood_crate": "WOOD CRATE",
+        "bronze_crate": "BRONZE CRATE",
+        "iron_crate": "IRON CRATE",
+        "teleport": "TELEPORT",
+        "super_crate": "SUPER CRATE",
+    }.get(item_type, item_type.upper())
+    
+    if not unclaimed:
+        await query.message.edit_text(
+            f"✅ *{item_name}* CLAIMED!\n\n"
+            f"🃏 *GameMaster:* \"All claimed. Good little minion.\"",
+            parse_mode="Markdown"
+        )
     else:
-        await query.answer(f"❌ {msg_text}", show_alert=True)
+        await query.message.edit_text(
+            f"✅ *{item_name}* CLAIMED!\n\n"
+            f"🎁 *UNCLAIMED REWARDS*\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"Remaining: *{len(unclaimed)}* item(s)\n"
+            f"Send `/claims` again to claim more.",
+            parse_mode="Markdown"
+        )
 
 
 # ─────────────────────────────────────────────
@@ -1029,13 +1347,46 @@ async def locked_sectors_info(callback: types.CallbackQuery):
 #  MISC COMMANDS
 # ─────────────────────────────────────────────
 
-@dp.message(F.text == "!help")
-async def show_help(message: types.Message):
+async def show_current_words(message: types.Message, state: FSMContext = None):
+    """Show the current game words in the group."""
+    # This command only makes sense in a group
+    if message.chat.type not in ("group", "supergroup"):
+        await message.answer(
+            "🃏 *GameMaster:* \"This command only works in group chats, you fool.\"",
+            parse_mode="Markdown"
+        )
+        return
+    
+    chat_id = message.chat.id
+    engine = get_or_create_engine(chat_id)
+    
+    if not engine.active:
+        await message.answer(
+            "🃏 *GameMaster:* \"No round is active. Type `/fusion` to start one, you dunce.\"",
+            parse_mode="Markdown"
+        )
+        return
+    
+    if not engine.words_displayed or not engine.word1 or not engine.word2:
+        await message.answer(
+            "🃏 *GameMaster:* \"The words exist somewhere. Squint harder.\"",
+            parse_mode="Markdown"
+        )
+        return
+    
+    await message.answer(
+        f"📝 *CURRENT WORDS:*\n"
+        f"`{engine.word1}` + `{engine.word2}`\n\n"
+        f"Form words from these letters.",
+        parse_mode="Markdown"
+    )
+
+
+async def show_help(message: types.Message, state: FSMContext = None):
     await message.answer(get_help_message(), parse_mode="Markdown")
 
 
-@dp.message(F.text == "!shop")
-async def show_shop(message: types.Message):
+async def show_shop(message: types.Message, state: FSMContext = None):
     await message.answer(
         "🃏 *GameMaster:* \"The shop is still under construction. "
         "Patience, you impatient worm.\"",
@@ -1043,8 +1394,7 @@ async def show_shop(message: types.Message):
     )
 
 
-@dp.message(F.text == "!upgrade")
-async def upgrade_backpack_cmd(message: types.Message):
+async def upgrade_backpack_cmd(message: types.Message, state: FSMContext = None):
     await message.answer(
         "🃏 *GameMaster:* \"The Queen's Satchel upgrade is not ready yet.\n\n"
         "When it launches: 5 → 20 slots for 900 Naira.\n\n"
@@ -1053,8 +1403,7 @@ async def upgrade_backpack_cmd(message: types.Message):
     )
 
 
-@dp.message(F.text.startswith("!changename"))
-async def change_name(message: types.Message):
+async def change_name(message: types.Message, state: FSMContext = None):
     if message.chat.type != "private":
         await message.answer(
             "🃏 *GameMaster:* \"Handle identity crises in *private*, not here.\"",
@@ -1075,7 +1424,7 @@ async def change_name(message: types.Message):
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2 or not parts[1].strip():
         await message.answer(
-            "🃏 *GameMaster:* \"Usage: `!changename NewName`\"",
+            "🃏 *GameMaster:* \"Usage: `/changename NewName` (or `!changename NewName`)\"",
             parse_mode="Markdown"
         )
         return
@@ -1099,8 +1448,6 @@ async def change_name(message: types.Message):
         parse_mode="Markdown"
     )
 
-
-@dp.message(F.text == "!tutorial")
 async def trigger_tutorial(message: types.Message, state: FSMContext):
     if message.chat.type != "private":
         await message.answer(
@@ -1109,22 +1456,39 @@ async def trigger_tutorial(message: types.Message, state: FSMContext):
         )
         return
 
+    # Clear state and use the initiation flow's first_contact handler
+    await state.clear()
+    
+    # Get the user's current state
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    
+    if user and user.get("completed_tutorial"):
+        # Already completed - offer to restart
+        await message.answer(
+            "🃏 *GameMaster:* \"You've already been through the trials. "
+            "Try `!fusion` in the group before wasting my time again.\"",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Send them through first_contact (from initiation router)
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     from initiation import Trial
-
+    
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⚔️ I'm ready", callback_data="trial_yes")],
-        [InlineKeyboardButton(text="🚪 Never mind", callback_data="trial_no")]
+        [InlineKeyboardButton(text="⚔️ I'm ready to enter", callback_data="trial_yes")],
+        [InlineKeyboardButton(text="🚪 I'm just lost",       callback_data="trial_no")],
     ])
     await message.answer(
-        "🃏 *GameMaster:* \"So you want to relive the trials. How... *entertaining*.\"",
+        "🃏 *GameMaster:* \"Well, well, well. Back for more pain?\"\n\n"
+        "\"Last chance to back out. Are you SURE you're ready?\"",
         parse_mode="Markdown",
         reply_markup=markup
     )
     await state.set_state(Trial.awaiting_username)
 
 
-@dp.message(F.text == "!start")
 async def manual_start(message: types.Message, state: FSMContext):
     if message.chat.type != "private":
         await message.answer(
@@ -1164,8 +1528,7 @@ async def manual_start(message: types.Message, state: FSMContext):
 #  CRATE OPEN COMMAND
 # ─────────────────────────────────────────────
 
-@dp.message(F.text.regexp(r"^!open\s+\d+$"))
-async def crate_open_handler(message: types.Message):
+async def crate_open_handler(message: types.Message, state: FSMContext = None):
     if message.chat.type != "private":
         await message.answer(
             "🃏 *GameMaster:* \"Open crates in *private*, not here.\"",
@@ -1178,8 +1541,7 @@ async def crate_open_handler(message: types.Message):
         await _open_crate(message, str(message.from_user.id), int(m.group()) - 1)
 
 
-@dp.message(F.text.regexp(r"^!use\s+\d+$"))
-async def use_item_handler(message: types.Message):
+async def use_item_handler(message: types.Message, state: FSMContext = None):
     if message.chat.type != "private":
         await message.answer(
             "🃏 *GameMaster:* \"Use items in *private*, fool.\"",

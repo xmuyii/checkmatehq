@@ -10,12 +10,20 @@ intercept traffic before main.py's handlers get a chance to run.
 """
 
 from aiogram import Router, types, F
-from database import get_weekly_leaderboard, get_alltime_leaderboard, get_user
+
+# Try Supabase first, fall back to JSON
+try:
+    from supabase_db import get_weekly_leaderboard, get_alltime_leaderboard, get_user
+    DB_SOURCE = "Supabase"
+except Exception as e:
+    print(f"⚠️  Supabase connection failed in fusion_handlers: {e}")
+    from database import get_weekly_leaderboard, get_alltime_leaderboard, get_user
+    DB_SOURCE = "JSON"
 
 word_fusion_router = Router()
 
 
-@word_fusion_router.message(F.text == "!mystats")
+@word_fusion_router.message(F.text.in_({"!mystats", "/mystats"}))
 async def show_personal_stats(message: types.Message):
     user_id  = str(message.from_user.id)
     username = message.from_user.first_name or f"User{user_id}"

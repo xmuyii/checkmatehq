@@ -120,10 +120,12 @@ def register_user(user_id, username):
 
 def get_current_week_start() -> datetime:
     today = datetime.now()
-    days_since_monday = (today.weekday() + 1) % 7
-    return (today - timedelta(days=days_since_monday)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
+    # weeks run Sunday to Saturday; get Sunday of current week
+    # weekday() returns Monday=0, Tuesday=1, ..., Sunday=6
+    days_since_sunday = (today.weekday() + 1) % 7
+    week_sunday = today - timedelta(days=days_since_sunday)
+    # Set to 11:59 PM on Sunday (end of week reset time)
+    return week_sunday.replace(hour=23, minute=59, second=0, microsecond=0)
 
 
 # ── Points / XP / Silver ──────────────────────────────────────────────────
