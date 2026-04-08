@@ -126,16 +126,16 @@ def get_help_message() -> str:
     return (
         "🃏 *GameMaster:* \"Oh, look who's struggling already.\"\n\n"
         "*COMMANDS*\n"
-        "`!fusion` — Start the game _(group only)_\n"
-        "`!forcerestart` — Force-end current round _(group, admins only)_\n"
-        "`!weekly` — Weekly leaderboard\n"
-        "`!alltime` — All-time leaderboard\n"
-        "`!profile` — Your stats _(DM only)_\n"
-        "`!inventory` — Your items _(DM only)_\n"
-        "`!claims` — Unclaimed rewards _(DM only)_\n"
-        "`!changename Name` — Change your name _(DM only)_\n"
-        "`!tutorial` — Replay the tutorial _(DM only)_\n"
-        "`!help` — This message\n\n"
+        "`\\!fusion` — Start the game _(group only)_\n"
+        "`\\!forcerestart` — Force-end current round _(group, admins only)_\n"
+        "`\\!weekly` — Weekly leaderboard\n"
+        "`\\!alltime` — All-time leaderboard\n"
+        "`\\!profile` — Your stats _(DM only)_\n"
+        "`\\!inventory` — Your items _(DM only)_\n"
+        "`\\!claims` — Unclaimed rewards _(DM only)_\n"
+        "`\\!changename Name` — Change your name _(DM only)_\n"
+        "`\\!tutorial` — Replay the tutorial _(DM only)_\n"
+        "`\\!help` — This message\n\n"
         "*HOW TO PLAY*\n"
         "1️⃣ Two 7-letter words appear in the group.\n"
         "2️⃣ Type any real word you can form from their combined letters.\n"
@@ -496,12 +496,13 @@ async def show_alltime(message: types.Message):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _dm_only_group_reply(cmd: str) -> str:
+    safe_cmd = cmd.replace("!", "\\!")
     return random.choice([
-        f"🃏 *GameMaster:* \"Did you just try to use `{cmd}` *in public*? "
+        f"🃏 *GameMaster:* \"Did you just try to use `{safe_cmd}` *in public*? "
         "I don't expose private information to the masses. DM me, fool.\"",
-        f"🃏 *GameMaster:* \"Oh how embarrassing. `{cmd}` is for *private* use. "
+        f"🃏 *GameMaster:* \"Oh how embarrassing. `{safe_cmd}` is for *private* use. "
         "Message me directly, you absolute amateur.\"",
-        f"🃏 *GameMaster:* \"`{cmd}` in the group chat? Really? "
+        f"🃏 *GameMaster:* \"`{safe_cmd}` in the group chat? Really? "
         "Come to my DMs and handle your personal business there.\"",
     ])
 
@@ -919,7 +920,7 @@ async def change_name(message: types.Message):
         return
     parts = message.text.split(maxsplit=1)
     if len(parts) < 2 or not parts[1].strip():
-        await message.answer("🃏 *GameMaster:* \"Usage: `!changename NewName`\"", parse_mode="Markdown")
+        await message.answer("🃏 *GameMaster:* \"Usage: `\\!changename NewName`\"", parse_mode="Markdown")
         return
     new_name = parts[1].strip()[:20]
     old_name = user.get("username", message.from_user.first_name)
