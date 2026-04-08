@@ -6,6 +6,15 @@ __pycache__/
 # C extensions
 *.so
 
+players.json
+*.pyc
+.vscode/
+.env
+*.tmp
+SupaDB.csv
+SupaDB1.txt
+sow.csv
+
 # Distribution / packaging
 .Python
 build/
