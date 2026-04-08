@@ -349,7 +349,7 @@ def _unreg() -> str:
 #  GROUP COMMANDS
 # ═══════════════════════════════════════════════════════════════════════════
 
-@dp.message(F.text == "!fusion")
+@dp.message(F.text == "!fusion", F.chat.type.in_({"group", "supergroup"}))
 async def start_game(message: types.Message):
     if message.chat.type not in ["group", "supergroup"]:
         await message.answer(
@@ -381,7 +381,7 @@ async def start_game(message: types.Message):
     asyncio.create_task(run_auto_harvest(chat_id))
 
 
-@dp.message(F.text == "!forcerestart")
+@dp.message(F.text == "!forcerestart", F.chat.type.in_({"group", "supergroup"}))
 async def force_restart(message: types.Message):
     if message.chat.type not in ["group", "supergroup"]:
         await message.answer(
@@ -524,9 +524,13 @@ async def on_group_message(message: types.Message):
 #  LEADERBOARDS
 # ═══════════════════════════════════════════════════════════════════════════
 
-@dp.message(F.text == "!weekly")
+@dp.message(F.text.lower().startswith("!weekly"), F.chat.type.in_({"group", "supergroup", "private"}))
 async def show_weekly(message: types.Message):
-    if not get_user(str(message.from_user.id)):
+    logger.info(f"!weekly command received in chat {message.chat.id}")
+    user_id = str(message.from_user.id)
+    user = get_user(user_id)
+    if not user:
+        logger.info(f"User {user_id} not registered")
         await message.answer(_unreg(), parse_mode="Markdown")
         return
     lb   = get_weekly_leaderboard()
@@ -540,9 +544,13 @@ async def show_weekly(message: types.Message):
     await message.answer(text, parse_mode="Markdown")
 
 
-@dp.message(F.text == "!alltime")
+@dp.message(F.text.lower().startswith("!alltime"), F.chat.type.in_({"group", "supergroup", "private"}))
 async def show_alltime(message: types.Message):
-    if not get_user(str(message.from_user.id)):
+    logger.info(f"!alltime command received in chat {message.chat.id}")
+    user_id = str(message.from_user.id)
+    user = get_user(user_id)
+    if not user:
+        logger.info(f"User {user_id} not registered")
         await message.answer(_unreg(), parse_mode="Markdown")
         return
     lb   = get_alltime_leaderboard()
@@ -571,7 +579,7 @@ def _dm_only_group_reply(cmd: str) -> str:
     ])
 
 
-@dp.message(F.text.startswith("!profile"))
+@dp.message(F.text.startswith("!profile"), F.chat.type.in_({"private", "group", "supergroup"}))
 async def show_profile(message: types.Message):
     if message.chat.type != "private":
         await message.answer(_dm_only_group_reply("!profile"), parse_mode="Markdown")
@@ -620,7 +628,7 @@ async def show_profile(message: types.Message):
     )
 
 
-@dp.message(F.text == "!inventory")
+@dp.message(F.text == "!inventory", F.chat.type.in_({"private", "group", "supergroup"}))
 async def show_inventory(message: types.Message):
     if message.chat.type != "private":
         await message.answer(_dm_only_group_reply("!inventory"), parse_mode="Markdown")
@@ -678,7 +686,7 @@ async def show_inventory(message: types.Message):
     )
 
 
-@dp.message(F.text == "!claims")
+@dp.message(F.text == "!claims", F.chat.type.in_({"private", "group", "supergroup"}))
 async def show_claims(message: types.Message):
     if message.chat.type != "private":
         await message.answer(_dm_only_group_reply("!claims"), parse_mode="Markdown")
@@ -944,12 +952,12 @@ async def locked_sectors_info(callback: types.CallbackQuery):
 #  MISC COMMANDS
 # ═══════════════════════════════════════════════════════════════════════════
 
-@dp.message(F.text == "!help")
+@dp.message(F.text == "!help", F.chat.type.in_({"private", "group", "supergroup"}))
 async def show_help(message: types.Message):
     await message.answer(get_help_message(), parse_mode="Markdown")
 
 
-@dp.message(F.text == "!shop")
+@dp.message(F.text == "!shop", F.chat.type.in_({"private", "group", "supergroup"}))
 async def show_shop(message: types.Message):
     await message.answer(
         "🃏 *GameMaster:* \"The shop is still under construction. "
@@ -958,7 +966,7 @@ async def show_shop(message: types.Message):
     )
 
 
-@dp.message(F.text == "!upgrade")
+@dp.message(F.text == "!upgrade", F.chat.type.in_({"private", "group", "supergroup"}))
 async def upgrade_backpack_cmd(message: types.Message):
     await message.answer(
         "🃏 *GameMaster:* \"The Queen's Satchel upgrade is not ready yet.\n\n"
@@ -968,7 +976,7 @@ async def upgrade_backpack_cmd(message: types.Message):
     )
 
 
-@dp.message(F.text.startswith("!changename"))
+@dp.message(F.text.startswith("!changename"), F.chat.type.in_({"private", "group", "supergroup"}))
 async def change_name(message: types.Message):
     if message.chat.type != "private":
         await message.answer(_dm_only_group_reply("!changename"), parse_mode="Markdown")
@@ -1003,7 +1011,7 @@ async def change_name(message: types.Message):
     )
 
 
-@dp.message(F.text == "!tutorial")
+@dp.message(F.text == "!tutorial", F.chat.type.in_({"private", "group", "supergroup"}))
 async def trigger_tutorial(message: types.Message, state: FSMContext):
     if message.chat.type != "private":
         await message.answer(_dm_only_group_reply("!tutorial"), parse_mode="Markdown")
@@ -1021,7 +1029,7 @@ async def trigger_tutorial(message: types.Message, state: FSMContext):
     await state.set_state(Trial.awaiting_username)
 
 
-@dp.message(F.text == "!start")
+@dp.message(F.text == "!start", F.chat.type.in_({"private", "group", "supergroup"}))
 async def manual_start(message: types.Message, state: FSMContext):
     if message.chat.type != "private":
         await message.answer("🃏 *GameMaster:* \"Message me privately, fool.\"", parse_mode="Markdown")
@@ -1052,7 +1060,7 @@ async def manual_start(message: types.Message, state: FSMContext):
 
 # ── Text-command versions of open/use ─────────────────────────────────────
 
-@dp.message(F.text.regexp(r"^!open\s+\d+$"))
+@dp.message(F.text.regexp(r"^!open\s+\d+$"), F.chat.type.in_({"private", "group", "supergroup"}))
 async def crate_open_handler(message: types.Message):
     if message.chat.type != "private":
         await message.answer("🃏 *GameMaster:* \"Open crates in *private*, not here.\"", parse_mode="Markdown")
@@ -1066,7 +1074,7 @@ async def crate_open_handler(message: types.Message):
             await _open_crate(message, str(message.from_user.id), inventory[pos]["id"])
 
 
-@dp.message(F.text.regexp(r"^!use\s+\d+$"))
+@dp.message(F.text.regexp(r"^!use\s+\d+$"), F.chat.type.in_({"private", "group", "supergroup"}))
 async def use_item_handler(message: types.Message):
     if message.chat.type != "private":
         await message.answer("🃏 *GameMaster:* \"Use items in *private*, fool.\"", parse_mode="Markdown")
