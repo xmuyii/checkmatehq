@@ -1,384 +1,470 @@
 """
-Supabase database backend for The 64 game.
-Replaces JSON persistence with persistent Supabase tables.
+supabase_db.py — Supabase persistence layer for The 64 Game
+============================================================
+Key fixes vs previous version:
+  - add_points: accumulates; never resets within same week; week key is ISO date
+  - add_unclaimed_item: xp_reward stored correctly on each item
+  - claim_item: moves item by its unique 'id', not fragile list index
+  - remove_inventory_item: uses unique item 'id'
+  - Shield: stored with expiry timestamp; is_shielded() helper
+  - Crate XP: super_crate=50-200, wood=50-100, bronze=100-150, iron=150-200
 """
 
 import os
 import json
+import random
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
-# ── Environment Configuration ──────────────────────────────────────────────
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://basniiolppmtpzishhtn.supabase.co')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhc25paW9scHBtdHB6aXNoaHRuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTQ3NjMwOCwiZXhwIjoyMDkxMDUyMzA4fQ.qrj1BO5dNilRDvgKtvTdwIWjBhFTRyGzuHPD271Xcac')
-SECTORS_FILE = os.environ.get("SECTORS_FILE", "sectors.txt")
+SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://basniiolppmtpzishhtn.supabase.co').rstrip('/')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', (
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.'
+    'eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhc25paW9scHBtdHB6aXNoaHRuIiwicm9sZSI6'
+    'InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTQ3NjMwOCwiZXhwIjoyMDkxMDUyMzA4fQ.'
+    'qrj1BO5dNilRDvgKtvTdwIWjBhFTRyGzuHPD271Xcac'
+))
+SECTORS_FILE = os.environ.get('SECTORS_FILE', 'sectors.txt')
 
-# Initialize Supabase client
-supabase: Client = create_client(SUPABASE_URL.rstrip('/'), SUPABASE_KEY)
-
-# ── Verify Supabase Connection ────────────────────────────────────────────
-def verify_supabase_connection() -> bool:
-    """Test that Supabase connection is working."""
-    try:
-        # Try a simple query to verify connection
-        response = supabase.table('players').select('count', count='exact').limit(1).execute()
-        print(f"   ✅ Supabase connection verified!")
-        print(f"   📊 Players table is accessible")
-        return True
-    except Exception as e:
-        print(f"   ❌ Supabase connection failed: {e}")
-        print(f"   🔍 Troubleshooting:")
-        print(f"      1. Check SUPABASE_URL and SUPABASE_KEY are correct")
-        print(f"      2. Verify Supabase project is active")
-        print(f"      3. Run SUPABASE_SETUP.sql to create tables")
-        raise
-
-# Test connection on import
-verify_supabase_connection()
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+print("[OK] Supabase module loaded")
 
 
-# ── Helper Functions ──────────────────────────────────────────────────────
+# ── Week helper ────────────────────────────────────────────────────────────
 
-def get_current_week_start() -> datetime:
-    today = datetime.now()
-    # weeks run Sunday to Saturday; get Sunday of current week
-    # weekday() returns Monday=0, Tuesday=1, ..., Sunday=6
-    days_since_sunday = (today.weekday() + 1) % 7
-    week_sunday = today - timedelta(days=days_since_sunday)
-    # Set to 11:59 PM on Sunday (end of week reset time)
-    return week_sunday.replace(hour=23, minute=59, second=0, microsecond=0)
+def _current_week_key() -> str:
+    """ISO date string of the Sunday that starts this week (Sun–Sat)."""
+    today = datetime.utcnow()
+    days_since_sunday = (today.weekday() + 1) % 7   # Monday=0 … Sunday=6
+    sunday = today - timedelta(days=days_since_sunday)
+    return sunday.date().isoformat()   # e.g. "2026-04-06"
 
 
-# ── User Management ─────────────────────────────────────────────────────
+def _next_id(lst: list) -> int:
+    """Generate a unique integer ID that is 1 higher than any existing id."""
+    if not lst:
+        return 0
+    return max(it.get('id', 0) for it in lst) + 1
 
-def register_user(user_id, username):
-    """Create a new player account. Doesn't overwrite existing."""
+
+# ── Raw DB helpers ─────────────────────────────────────────────────────────
+
+def _row_to_user(row: dict) -> dict:
+    """Normalise a raw Supabase row into the in-memory user dict."""
+    u = dict(row)
+    # Integers
+    for k, default in [('weekly_points', 0), ('all_time_points', 0),
+                        ('total_words', 0), ('xp', 0), ('silver', 0),
+                        ('level', 1), ('last_level', 1), ('backpack_slots', 5)]:
+        u[k] = int(u.get(k) or default)
+    # JSONB fields may arrive as string or list/dict
+    for k in ('inventory', 'unclaimed_items'):
+        val = u.get(k, '[]')
+        if isinstance(val, str):
+            try:
+                u[k] = json.loads(val)
+            except Exception:
+                u[k] = []
+        elif val is None:
+            u[k] = []
+    return u
+
+
+def get_user(user_id) -> dict | None:
+    r = supabase.table('players').select('*').eq('user_id', str(user_id)).execute()
+    return _row_to_user(r.data[0]) if r.data else None
+
+
+def save_user(user_id, data: dict):
+    d = dict(data)
+    d.pop('id', None)
+    for k in ('inventory', 'unclaimed_items'):
+        if isinstance(d.get(k), (list, dict)):
+            d[k] = json.dumps(d[k])
+    supabase.table('players').update(d).eq('user_id', str(user_id)).execute()
+
+
+def register_user(user_id, username: str):
     uid = str(user_id)
-    
-    # Check if already exists
-    response = supabase.table('players').select('*').eq('user_id', uid).execute()
-    if response.data:
-        # User exists - just update username if different
-        existing = response.data[0]
-        if existing.get('username') != username:
+    r = supabase.table('players').select('user_id, username').eq('user_id', uid).execute()
+    if r.data:
+        if r.data[0].get('username') != username:
             supabase.table('players').update({'username': username}).eq('user_id', uid).execute()
         return
-    
-    # Create new player
-    new_player = {
+    supabase.table('players').insert({
         'user_id': uid,
         'username': username,
         'all_time_points': 0,
         'weekly_points': 0,
-        'week_start': get_current_week_start().isoformat(),
+        'week_start': _current_week_key(),
         'total_words': 0,
         'silver': 0,
         'xp': 0,
         'level': 1,
+        'last_level': 1,
         'backpack_slots': 5,
         'backpack_image': 'normal_backpack',
         'inventory': json.dumps([]),
         'unclaimed_items': json.dumps([]),
         'sector': None,
         'completed_tutorial': False,
-        'last_level': 1,
-        'created_at': datetime.now().isoformat(),
-    }
-    supabase.table('players').insert(new_player).execute()
+    }).execute()
 
 
-def get_user(user_id):
-    """Fetch player data."""
-    uid = str(user_id)
-    response = supabase.table('players').select('*').eq('user_id', uid).execute()
-    if not response.data:
-        return None
-    
-    user = response.data[0]
-    # Convert JSON fields
-    try:
-        user['inventory'] = json.loads(user.get('inventory', '[]')) if isinstance(user.get('inventory'), str) else user.get('inventory', [])
-        user['unclaimed_items'] = json.loads(user.get('unclaimed_items', '[]')) if isinstance(user.get('unclaimed_items'), str) else user.get('unclaimed_items', [])
-    except:
-        user['inventory'] = []
-        user['unclaimed_items'] = []
-    
-    return user
+# ── Points (weekly + all-time) ─────────────────────────────────────────────
 
-
-def save_user(user_id, data):
-    """Save player data."""
-    uid = str(user_id)
-    
-    # Convert complex fields to JSON strings
-    data_copy = data.copy()
-    if 'inventory' in data_copy and isinstance(data_copy['inventory'], (list, dict)):
-        data_copy['inventory'] = json.dumps(data_copy['inventory'])
-    if 'unclaimed_items' in data_copy and isinstance(data_copy['unclaimed_items'], (list, dict)):
-        data_copy['unclaimed_items'] = json.dumps(data_copy['unclaimed_items'])
-    
-    # Remove the id field if present
-    data_copy.pop('id', None)
-    
-    supabase.table('players').update(data_copy).eq('user_id', uid).execute()
-
-
-# ── Points & Scoring ──────────────────────────────────────────────────────
-
-def add_points(user_id, points, username):
-    """Add points and track weekly reset."""
+def add_points(user_id, points: int, username: str = ''):
+    """Accumulate points. Resets weekly bucket if the week has turned over."""
     uid = str(user_id)
     user = get_user(uid)
-    
     if not user:
-        register_user(user_id, username)
+        register_user(uid, username)
         user = get_user(uid)
-    
-    current_week = get_current_week_start().isoformat()
-    
-    # Reset weekly points if needed
-    if user.get('week_start') != current_week:
+
+    this_week = _current_week_key()
+    if user.get('week_start', '') != this_week:
+        # New week — wipe weekly bucket
         user['weekly_points'] = 0
-        user['week_start'] = current_week
-    
-    # Add points
+        user['week_start'] = this_week
+
     user['all_time_points'] = user.get('all_time_points', 0) + points
-    user['weekly_points'] = user.get('weekly_points', 0) + points
-    user['total_words'] = user.get('total_words', 0) + 1
-    
+    user['weekly_points']   = user.get('weekly_points',   0) + points
+    user['total_words']     = user.get('total_words',     0) + 1
     save_user(uid, user)
 
 
-def add_xp(user_id, amount) -> bool:
-    """Add XP and return True if level up."""
-    uid = str(user_id)
-    user = get_user(uid)
+def add_xp(user_id, amount: int) -> bool:
+    user = get_user(str(user_id))
     if not user:
         return False
-    
     user['xp'] = user.get('xp', 0) + amount
-    old_level = user.get('level', 1)
     user['level'] = 1 + (user['xp'] // 100)
-    
-    save_user(uid, user)
-    return user['level'] > old_level
+    save_user(str(user_id), user)
+    return True
 
 
-def add_silver(user_id, amount, username):
-    """Add silver to player."""
-    uid = str(user_id)
-    user = get_user(uid)
+def use_xp(user_id, amount: int) -> bool:
+    user = get_user(str(user_id))
+    if not user or user.get('xp', 0) < amount:
+        return False
+    user['xp'] -= amount
+    save_user(str(user_id), user)
+    return True
+
+
+def add_silver(user_id, amount: int, username: str = ''):
+    user = get_user(str(user_id))
     if not user:
         register_user(user_id, username)
-        user = get_user(uid)
-    
+        user = get_user(str(user_id))
     user['silver'] = user.get('silver', 0) + amount
-    save_user(uid, user)
+    save_user(str(user_id), user)
+
+
+def use_silver(user_id, amount: int) -> bool:
+    user = get_user(str(user_id))
+    if not user or user.get('silver', 0) < amount:
+        return False
+    user['silver'] -= amount
+    save_user(str(user_id), user)
+    return True
 
 
 def set_sector(user_id, sector_id):
-    """Set player's current sector."""
-    uid = str(user_id)
-    user = get_user(uid)
-    if not user:
-        return
-    
-    user['sector'] = sector_id
-    save_user(uid, user)
+    user = get_user(str(user_id))
+    if user:
+        user['sector'] = sector_id
+        save_user(str(user_id), user)
 
 
-# ── Leaderboards ──────────────────────────────────────────────────────────
+# ── Leaderboards ───────────────────────────────────────────────────────────
 
 def get_weekly_leaderboard(limit: int = 10) -> list:
-    """Get top weekly scorers."""
-    response = supabase.table('players')\
-        .select('user_id, username, weekly_points')\
-        .order('weekly_points', desc=True)\
-        .limit(limit)\
-        .execute()
-    
-    return [
-        {'id': p['user_id'], 'username': p['username'], 'points': p['weekly_points']}
-        for p in response.data
-    ] if response.data else []
+    """Return top players by weekly_points. Handles week rollover."""
+    this_week = _current_week_key()
+    try:
+        r = supabase.table('players') \
+            .select('user_id, username, weekly_points, week_start') \
+            .order('weekly_points', desc=True) \
+            .limit(50) \
+            .execute()
+        results = []
+        for p in (r.data or []):
+            # If player's week_start is old, their weekly score is stale — treat as 0
+            pts = int(p.get('weekly_points') or 0)
+            if p.get('week_start', '') != this_week:
+                pts = 0
+            if pts > 0:
+                results.append({
+                    'id': p['user_id'],
+                    'username': p.get('username', 'Unknown'),
+                    'points': pts,
+                })
+        results.sort(key=lambda x: x['points'], reverse=True)
+        return results[:limit]
+    except Exception as e:
+        print(f"[ERROR] get_weekly_leaderboard: {e}")
+        return []
 
 
 def get_alltime_leaderboard(limit: int = 10) -> list:
-    """Get all-time top scorers."""
-    response = supabase.table('players')\
-        .select('user_id, username, all_time_points, total_words')\
-        .order('all_time_points', desc=True)\
-        .limit(limit)\
-        .execute()
-    
-    return [
-        {'id': p['user_id'], 'username': p['username'], 'points': p['all_time_points'], 'words': p['total_words']}
-        for p in response.data
-    ] if response.data else []
+    try:
+        r = supabase.table('players') \
+            .select('user_id, username, all_time_points, total_words') \
+            .order('all_time_points', desc=True) \
+            .limit(limit) \
+            .execute()
+        return [
+            {'id': p['user_id'], 'username': p.get('username', 'Unknown'),
+             'points': int(p.get('all_time_points') or 0), 'words': int(p.get('total_words') or 0)}
+            for p in (r.data or [])
+        ]
+    except Exception as e:
+        print(f"[ERROR] get_alltime_leaderboard: {e}")
+        return []
 
 
-# ── Inventory Management ──────────────────────────────────────────────────
+# ── Inventory ──────────────────────────────────────────────────────────────
 
 def get_inventory(user_id) -> list:
-    """Get player's inventory items."""
-    uid = str(user_id)
-    user = get_user(uid)
+    user = get_user(str(user_id))
+    return user.get('inventory', []) if user else []
+
+
+def add_inventory_item(user_id, item_type: str, xp_reward: int = 0,
+                        expires_at: str = None, multiplier_value: int = 0) -> bool:
+    user = get_user(str(user_id))
     if not user:
-        return []
-    
-    return user.get('inventory', [])
+        return False
+    inv = user.get('inventory', [])
+    if len(inv) >= user.get('backpack_slots', 5):
+        return False
+    item = {
+        'id':               _next_id(inv),
+        'type':             item_type,
+        'xp_reward':        xp_reward,
+        'multiplier_value': multiplier_value,
+        'expires_at':       expires_at,
+        'acquired':         datetime.utcnow().isoformat(),
+    }
+    inv.append(item)
+    user['inventory'] = inv
+    save_user(str(user_id), user)
+    return True
 
 
-def add_inventory_item(user_id, item_type, amount=1, xp_reward=0):
-    """Add item to player inventory."""
-    uid = str(user_id)
-    user = get_user(uid)
+def remove_inventory_item(user_id, item_id) -> bool:
+    """Remove by unique item['id'], not list index."""
+    user = get_user(str(user_id))
     if not user:
-        return
-    
-    inventory = user.get('inventory', [])
-    
-    # Find existing stack
-    existing = None
-    for item in inventory:
-        if item.get('type') == item_type:
-            existing = item
-            break
-    
-    if existing:
-        existing['amount'] = existing.get('amount', 0) + amount
-    else:
-        inventory.append({
-            'type': item_type,
-            'amount': amount,
-            'xp_reward': xp_reward,
-            'acquired': datetime.now().isoformat()
-        })
-    
-    user['inventory'] = inventory
-    save_user(uid, user)
+        return False
+    user['inventory'] = [it for it in user.get('inventory', []) if it.get('id') != item_id]
+    save_user(str(user_id), user)
+    return True
 
 
-def remove_inventory_item(user_id, item_type, amount=1):
-    """Remove item from inventory."""
-    uid = str(user_id)
-    user = get_user(uid)
+def upgrade_backpack(user_id, new_slots: int = 20):
+    user = get_user(str(user_id))
     if not user:
         return
-    
-    inventory = user.get('inventory', [])
-    for item in inventory:
-        if item.get('type') == item_type:
-            item['amount'] = max(0, item.get('amount', 0) - amount)
-            break
-    
-    user['inventory'] = [i for i in inventory if i.get('amount', 0) > 0]
-    save_user(uid, user)
+    user['backpack_slots'] = new_slots
+    user['backpack_image'] = 'premium_backpack' if new_slots > 5 else 'normal_backpack'
+    save_user(str(user_id), user)
+
+
+# ── Shield helpers ─────────────────────────────────────────────────────────
+
+def activate_shield(user_id) -> bool:
+    """Move a shield from inventory to the 'shield_expires' field. Returns True if done."""
+    user = get_user(str(user_id))
+    if not user:
+        return False
+    inv = user.get('inventory', [])
+    shield = next((it for it in inv if it.get('type', '') == 'shield'), None)
+    if not shield:
+        return False
+    # Remove from inventory
+    user['inventory'] = [it for it in inv if it.get('id') != shield['id']]
+    # Set expiry 24 h from now
+    expires = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+    user['shield_expires'] = expires
+    save_user(str(user_id), user)
+    return True
+
+
+def is_shielded(user: dict) -> bool:
+    """Return True if user has an active (non-expired) shield."""
+    exp = user.get('shield_expires')
+    if not exp:
+        return False
+    try:
+        return datetime.utcnow() < datetime.fromisoformat(exp)
+    except Exception:
+        return False
+
+
+# ── Unclaimed items ────────────────────────────────────────────────────────
+
+def _crate_xp(item_type: str) -> int:
+    """Return a proper random XP value for a given crate type."""
+    t = item_type.lower()
+    if 'super' in t:
+        return random.randint(50, 200)
+    elif 'wood' in t:
+        return random.randint(50, 100)
+    elif 'bronze' in t:
+        return random.randint(100, 150)
+    elif 'iron' in t:
+        return random.randint(150, 200)
+    return random.randint(30, 80)
+
+
+def add_unclaimed_item(user_id, item_type: str, amount: int = 1,
+                        xp_reward: int = None, multiplier_value: int = 0):
+    """Add an unclaimed reward. xp_reward is auto-set for crates if not supplied."""
+    user = get_user(str(user_id))
+    if not user:
+        return
+    unclaimed = user.get('unclaimed_items', [])
+    # Auto-assign XP for crates
+    if xp_reward is None:
+        xp_reward = _crate_xp(item_type) if 'crate' in item_type.lower() else 0
+
+    unclaimed.append({
+        'id':               _next_id(unclaimed),
+        'type':             item_type,
+        'amount':           amount,
+        'xp_reward':        xp_reward,
+        'multiplier_value': multiplier_value,
+        'created_at':       datetime.utcnow().isoformat(),
+    })
+    user['unclaimed_items'] = unclaimed
+    save_user(str(user_id), user)
 
 
 def get_unclaimed_items(user_id) -> list:
-    """Get player's unclaimed reward items."""
+    user = get_user(str(user_id))
+    return user.get('unclaimed_items', []) if user else []
+
+
+def claim_item(user_id, item_id: int):
+    """
+    Claim ONE unclaimed item identified by its unique 'id' field.
+    Moves it into inventory. Returns (True, msg) or (False, reason).
+    """
     uid = str(user_id)
     user = get_user(uid)
     if not user:
-        return []
-    
-    return user.get('unclaimed_items', [])
+        return False, "Not registered"
 
-
-def add_unclaimed_item(user_id, item_type, amount=1, xp_reward=0):
-    """Add unclaimed reward item."""
-    uid = str(user_id)
-    user = get_user(uid)
-    if not user:
-        return
-    
     unclaimed = user.get('unclaimed_items', [])
-    unclaimed.append({
-        'type': item_type,
-        'amount': amount,
-        'xp_reward': xp_reward,
-        'claimed': False,
-        'created_at': datetime.now().isoformat()
+    item = next((it for it in unclaimed if it.get('id') == item_id), None)
+    if not item:
+        return False, "Item not found"
+
+    inv = user.get('inventory', [])
+    if len(inv) >= user.get('backpack_slots', 5):
+        return False, "Inventory full — use or open an item first"
+
+    # Move to inventory
+    inv.append({
+        'id':               _next_id(inv),
+        'type':             item.get('type'),
+        'xp_reward':        item.get('xp_reward', 0),
+        'multiplier_value': item.get('multiplier_value', 0),
+        'acquired':         datetime.utcnow().isoformat(),
     })
-    
-    user['unclaimed_items'] = unclaimed
+    user['inventory']      = inv
+    user['unclaimed_items'] = [it for it in unclaimed if it.get('id') != item_id]
     save_user(uid, user)
+    return True, "Item claimed successfully"
 
 
-def claim_item(user_id, index: int):
-    """Claim an unclaimed reward item and move to inventory."""
-    uid = str(user_id)
-    user = get_user(uid)
-    if not user:
-        return False
-    
-    unclaimed = user.get('unclaimed_items', [])
-    if not (0 <= index < len(unclaimed)):
-        return False
-    
-    item = unclaimed[index]
-    if item.get('claimed'):
-        return False
-    
-    # Step 1: Move item to inventory
-    add_inventory_item(uid, item['type'], item['amount'], item.get('xp_reward', 0))
-    
-    # Step 2: Fetch fresh user data (after add_inventory_item has saved)
-    user = get_user(uid)
-    
-    # Step 3: Remove from unclaimed list
-    unclaimed = user.get('unclaimed_items', [])
-    if 0 <= index < len(unclaimed):
-        unclaimed.pop(index)
-        user['unclaimed_items'] = unclaimed
-        save_user(uid, user)
-        return True
-    
-    return False
-
-
-def remove_unclaimed_item(user_id, index: int):
-    """Remove unclaimed item by index."""
-    uid = str(user_id)
-    user = get_user(uid)
+def remove_unclaimed_item(user_id, item_id: int):
+    user = get_user(str(user_id))
     if not user:
         return
-    
-    unclaimed = user.get('unclaimed_items', [])
-    if 0 <= index < len(unclaimed):
-        unclaimed.pop(index)
-        user['unclaimed_items'] = unclaimed
-        save_user(uid, user)
+    user['unclaimed_items'] = [it for it in user.get('unclaimed_items', []) if it.get('id') != item_id]
+    save_user(str(user_id), user)
 
 
-# ── Sector Management ──────────────────────────────────────────────────────
+# ── Levels ─────────────────────────────────────────────────────────────────
+
+def calculate_level(xp: int) -> int:
+    return 1 + (xp // 100)
+
+
+def check_level_up(user_id):
+    """Return (old_level, new_level) if leveled up, else (None, None)."""
+    user = get_user(str(user_id))
+    if not user:
+        return None, None
+    old = user.get('last_level', 1)
+    new = user.get('level', 1)
+    if new > old:
+        user['last_level'] = new
+        save_user(str(user_id), user)
+        return old, new
+    return None, None
+
+
+# ── Profile ────────────────────────────────────────────────────────────────
+
+def get_profile(user_id) -> dict | None:
+    user = get_user(str(user_id))
+    if not user:
+        return None
+    inv      = user.get('inventory', [])
+    uncl     = user.get('unclaimed_items', [])
+    xp       = user.get('xp', 0)
+    level    = user.get('level', 1)
+    xp_prog  = xp % 100
+    shielded = is_shielded(user)
+    return {
+        'username':        user.get('username', 'Unknown'),
+        'level':           level,
+        'xp':              xp,
+        'xp_progress':     xp_prog,
+        'xp_needed':       100,
+        'silver':          user.get('silver', 0),
+        'all_time_points': user.get('all_time_points', 0),
+        'weekly_points':   user.get('weekly_points', 0),
+        'total_words':     user.get('total_words', 0),
+        'sector':          user.get('sector'),
+        'sector_display':  get_sector_display(user.get('sector')),
+        'backpack_slots':  user.get('backpack_slots', 5),
+        'inventory_count': len(inv),
+        'unclaimed_count': len(uncl),
+        'crate_count':     sum(1 for i in inv if 'crate' in i.get('type','').lower()),
+        'shield_count':    sum(1 for i in inv if i.get('type','') == 'shield'),
+        'shielded':        shielded,
+        'shield_expires':  user.get('shield_expires'),
+    }
+
+
+# ── Sectors ────────────────────────────────────────────────────────────────
 
 def load_sectors() -> dict:
-    """Load sectors from file."""
     sectors = {}
     if not os.path.exists(SECTORS_FILE):
         return sectors
-    
     try:
-        with open(SECTORS_FILE, "r", encoding="utf-8") as f:
+        with open(SECTORS_FILE, 'r', encoding='utf-8') as f:
             lines = f.readlines()
     except OSError:
         return sectors
-    
     for line in lines[1:]:
         line = line.strip()
-        if not line or line.startswith("SectorID"):
+        if not line or line.startswith('SectorID'):
             continue
-        parts = line.split("\t")
+        parts = line.split('\t')
         if len(parts) >= 4:
             try:
-                sector_id = int(parts[0])
-                sectors[sector_id] = {
-                    "name": parts[3].strip(),
-                    "environment": parts[1].strip() if len(parts) > 1 else "",
-                    "energy": parts[2].strip() if len(parts) > 2 else "",
-                    "perks": parts[4].strip() if len(parts) > 4 else "",
+                sid = int(parts[0])
+                sectors[sid] = {
+                    'name':        parts[3].strip(),
+                    'environment': parts[1].strip() if len(parts) > 1 else '',
+                    'energy':      parts[2].strip() if len(parts) > 2 else '',
+                    'perks':       parts[4].strip() if len(parts) > 4 else '',
                 }
             except Exception:
                 pass
@@ -386,129 +472,28 @@ def load_sectors() -> dict:
 
 
 def get_sector_display(sector_id, sectors=None) -> str:
-    """Get sector display name."""
     if sector_id is None:
-        return "Not Assigned"
+        return 'Not Assigned'
     if sectors is None:
         sectors = load_sectors()
     try:
-        sid = int(sector_id)
+        sid  = int(sector_id)
+        info = sectors.get(sid)
+        return f'#{sid} {info["name"]}' if info else f'Sector {sid}'
     except (TypeError, ValueError):
-        return f"Sector {sector_id}"
-    info = sectors.get(sid)
-    if info:
-        return f"#{sid} {info['name']}"
-    return f"Sector {sid}"
+        return f'Sector {sector_id}'
 
 
-# ── Level Management ──────────────────────────────────────────────────────
-
-def calculate_level(xp: int) -> int:
-    """Calculate level from XP."""
-    return 1 + (xp // 100)
-
-
-def check_level_up(user_id) -> tuple[int, int]:
-    """Check for level up. Returns (old_level, new_level) or (None, None) if no level up."""
-    uid = str(user_id)
-    user = get_user(uid)
-    if not user:
-        return None, None
-    
-    old_level = user.get('last_level', 1)
-    new_level = user.get('level', 1)
-    
-    if new_level > old_level:
-        user['last_level'] = new_level
-        save_user(uid, user)
-        return old_level, new_level
-    return None, None
-
-
-# ── Item Rewards ──────────────────────────────────────────────────────────
+# ── Powerful milestone items ───────────────────────────────────────────────
 
 def award_powerful_locked_item(user_id):
-    """Award a rare milestone item."""
     items = [
-        ("legendary_artifact", "⚔️ LEGENDARY ARTIFACT"),
-        ("mythic_shard", "🌟 MYTHIC SHARD"),
-        ("dimensional_rift", "🌀 DIMENSIONAL RIFT"),
-        ("cosmic_crown", "👑 COSMIC CROWN"),
+        ('legendary_artifact', '⚔️ LEGENDARY ARTIFACT', 'An ancient weapon of unimaginable power.'),
+        ('mythical_crown',     '👑 MYTHICAL CROWN',      'The crown of a forgotten god.'),
+        ('void_stone',         '🌑 VOID STONE',          'A stone from beyond the stars.'),
+        ('eternal_flame',      '🔥 ETERNAL FLAME',       'A flame that never dies.'),
+        ('celestial_key',      '🗝️ CELESTIAL KEY',       'A key to dimensions you cannot yet comprehend.'),
     ]
-    import random
-    item_type, display = random.choice(items)
-    add_unclaimed_item(user_id, item_type, 1)
-    return display
-
-
-def get_profile(user_id) -> dict:
-    """Get player profile display data."""
-    uid = str(user_id)
-    user = get_user(uid)
-    if not user:
-        return {}
-    
-    inventory = user.get('inventory', [])
-    unclaimed = user.get('unclaimed_items', [])
-    sectors = load_sectors()
-    sector_display = get_sector_display(user.get('sector'), sectors)
-    
-    # XP calculations
-    total_xp = user.get('xp', 0)
-    current_level = user.get('level', 1)
-    xp_for_next_level = 100
-    xp_progress = total_xp % 100
-    
-    return {
-        "username": user.get('username', 'Unknown'),
-        "level": current_level,
-        "xp": total_xp,
-        "xp_progress": xp_progress,
-        "xp_needed": xp_for_next_level,
-        "silver": user.get('silver', 0),
-        "all_time_points": user.get('all_time_points', 0),
-        "weekly_points": user.get('weekly_points', 0),
-        "total_words": user.get('total_words', 0),
-        "sector": sector_display,
-        "backpack_slots": user.get('backpack_slots', 5),
-        "inventory_count": len(inventory),
-        "unclaimed_count": len(unclaimed),
-        "crate_count": sum(1 for i in inventory if "crate" in i.get("type", "").lower()),
-        "shield_count": sum(1 for i in inventory if i.get("type", "").lower() == "shield"),
-    }
-
-
-def upgrade_backpack(user_id, new_slots: int):
-    """Upgrade player backpack."""
-    uid = str(user_id)
-    user = get_user(uid)
-    if not user:
-        return
-    
-    user['backpack_slots'] = new_slots
-    user['backpack_image'] = 'premium_backpack' if new_slots > 5 else 'normal_backpack'
-    save_user(uid, user)
-
-
-def use_xp(user_id, amount) -> bool:
-    """Spend XP. Returns True if successful."""
-    uid = str(user_id)
-    user = get_user(uid)
-    if not user or user.get('xp', 0) < amount:
-        return False
-    
-    user['xp'] = user.get('xp', 0) - amount
-    save_user(uid, user)
-    return True
-
-
-def use_silver(user_id, amount) -> bool:
-    """Spend silver. Returns True if successful."""
-    uid = str(user_id)
-    user = get_user(uid)
-    if not user or user.get('silver', 0) < amount:
-        return False
-    
-    user['silver'] = user.get('silver', 0) - amount
-    save_user(uid, user)
-    return True
+    item_type, display, desc = random.choice(items)
+    add_unclaimed_item(user_id, f'locked_{item_type}', 1, xp_reward=0)
+    return display, desc
