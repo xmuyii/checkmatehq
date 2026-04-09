@@ -15,18 +15,14 @@ import json
 import random
 from datetime import datetime, timedelta
 from supabase import create_client, Client
+from config import DB_TABLE, SUPABASE_URL as CONFIG_SUPABASE_URL, SUPABASE_KEY as CONFIG_SUPABASE_KEY, ENV_NAME
 
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://basniiolppmtpzishhtn.supabase.co').rstrip('/')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', (
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.'
-    'eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhc25paW9scHBtdHB6aXNoaHRuIiwicm9sZSI6'
-    'InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTQ3NjMwOCwiZXhwIjoyMDkxMDUyMzA4fQ.'
-    'qrj1BO5dNilRDvgKtvTdwIWjBhFTRyGzuHPD271Xcac'
-))
+SUPABASE_URL = os.environ.get('SUPABASE_URL', CONFIG_SUPABASE_URL).rstrip('/')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', CONFIG_SUPABASE_KEY)
 SECTORS_FILE = os.environ.get('SECTORS_FILE', 'sectors.txt')
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-print("[OK] Supabase module loaded")
+print(f"[OK] Supabase module loaded (Environment: {ENV_NAME}, Table: {DB_TABLE})")
 
 
 # ── Week helper ────────────────────────────────────────────────────────────
@@ -56,6 +52,9 @@ def _row_to_user(row: dict) -> dict:
                         ('total_words', 0), ('xp', 0), ('silver', 0),
                         ('level', 1), ('last_level', 1), ('backpack_slots', 5)]:
         u[k] = int(u.get(k) or default)
+    # Normalize week_start to just the date part (Supabase may return full timestamp)
+    if u.get('week_start'):
+        u['week_start'] = u['week_start'].split('T')[0]
     # JSONB fields may arrive as string or list/dict
     for k in ('inventory', 'unclaimed_items'):
         val = u.get(k, '[]')
@@ -70,7 +69,7 @@ def _row_to_user(row: dict) -> dict:
 
 
 def get_user(user_id) -> dict | None:
-    r = supabase.table('players').select('*').eq('user_id', str(user_id)).execute()
+    r = supabase.table(DB_TABLE).select('*').eq('user_id', str(user_id)).execute()
     return _row_to_user(r.data[0]) if r.data else None
 
 
@@ -80,17 +79,17 @@ def save_user(user_id, data: dict):
     for k in ('inventory', 'unclaimed_items'):
         if isinstance(d.get(k), (list, dict)):
             d[k] = json.dumps(d[k])
-    supabase.table('players').update(d).eq('user_id', str(user_id)).execute()
+    supabase.table(DB_TABLE).update(d).eq('user_id', str(user_id)).execute()
 
 
 def register_user(user_id, username: str):
     uid = str(user_id)
-    r = supabase.table('players').select('user_id, username').eq('user_id', uid).execute()
+    r = supabase.table(DB_TABLE).select('user_id, username').eq('user_id', uid).execute()
     if r.data:
         if r.data[0].get('username') != username:
-            supabase.table('players').update({'username': username}).eq('user_id', uid).execute()
+            supabase.table(DB_TABLE).update({'username': username}).eq('user_id', uid).execute()
         return
-    supabase.table('players').insert({
+    supabase.table(DB_TABLE).insert({
         'user_id': uid,
         'username': username,
         'all_time_points': 0,
@@ -121,11 +120,18 @@ def add_points(user_id, points: int, username: str = ''):
         user = get_user(uid)
 
     this_week = _current_week_key()
-    if user.get('week_start', '') != this_week:
-        # New week — wipe weekly bucket
+    last_week = user.get('week_start', '')
+    
+    # Compare dates explicitly - extract just the date portion for both
+    last_week_date = last_week.split('T')[0] if last_week else ''
+    
+    if last_week_date != this_week:
+        # New week — wipe weekly bucket and update week marker
         user['weekly_points'] = 0
         user['week_start'] = this_week
-
+        print(f"[POINTS] Week boundary for {username}: {last_week_date} → {this_week}")
+    
+    # Add the points (whether it's a new week or not)
     user['all_time_points'] = user.get('all_time_points', 0) + points
     user['weekly_points']   = user.get('weekly_points',   0) + points
     user['total_words']     = user.get('total_words',     0) + 1
@@ -182,16 +188,18 @@ def get_weekly_leaderboard(limit: int = 10) -> list:
     """Return top players by weekly_points. Handles week rollover."""
     this_week = _current_week_key()
     try:
-        r = supabase.table('players') \
+        r = supabase.table(DB_TABLE) \
             .select('user_id, username, weekly_points, week_start') \
             .order('weekly_points', desc=True) \
             .limit(50) \
             .execute()
         results = []
         for p in (r.data or []):
-            # If player's week_start is old, their weekly score is stale — treat as 0
             pts = int(p.get('weekly_points') or 0)
-            if p.get('week_start', '') != this_week:
+            player_week = p.get('week_start', '')
+            # Extract just the date part (Supabase may return full timestamp)
+            player_week_date = player_week.split('T')[0] if player_week else ''
+            if player_week_date != this_week:
                 pts = 0
             if pts > 0:
                 results.append({
@@ -203,12 +211,14 @@ def get_weekly_leaderboard(limit: int = 10) -> list:
         return results[:limit]
     except Exception as e:
         print(f"[ERROR] get_weekly_leaderboard: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
 def get_alltime_leaderboard(limit: int = 10) -> list:
     try:
-        r = supabase.table('players') \
+        r = supabase.table(DB_TABLE) \
             .select('user_id, username, all_time_points, total_words') \
             .order('all_time_points', desc=True) \
             .limit(limit) \
