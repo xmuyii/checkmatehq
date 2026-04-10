@@ -171,9 +171,9 @@ async def game_loop(chat_id: int):
 
                 await bot.send_message(
                     chat_id,
-                    f"🃏 *GameMaster:* \"New round. Try not to starve.\"\n\n"
+                    f"🃏 *GameMaster:* \"Fresh meat. Let's see if you've learned *anything* since last time.\"\n\n"
                     f"📝 *WORDS:* `{eng.word1}`  `{eng.word2}`"
-                    f"{crate_note}\n\n⏱️ You have *2 minutes*. Go.",
+                    f"{crate_note}\n\n⏱️ 2 minutes. Don't disappoint me again.",
                     parse_mode="Markdown"
                 )
 
@@ -194,7 +194,7 @@ async def game_loop(chat_id: int):
                     if eng.crates_dropping == 0 and elapsed == 60:
                         await bot.send_message(
                             chat_id,
-                            "⏱️ *GameMaster:* \"One minute left. Your attempts remain pathetic, but there's still time.\"",
+                            "⏱️ *GameMaster:* \"60 seconds remaining. PROVE you're not brain-dead. *Tick tock*.\"",
                             parse_mode="Markdown"
                         )
 
@@ -236,8 +236,8 @@ async def game_loop(chat_id: int):
                                 lvl = user.get('level', 1)
                                 msg = (
                                     f"🎊 *LEVEL UP!* {sd['name']} reached *LEVEL {lvl}*!\n\n"
-                                    f"🃏 *GameMaster:* \"Managed not to embarrass yourself.\"\n\n"
-                                    f"✨ Use `!claims` in DM to collect bonus items."
+                                    f"🃏 *GameMaster:* \"Congratulations. You've achieved the bare minimum. Collect your participation trophy.\"; use `!claims` in DM.\n\n"
+                                    f"✨ Bonus items awaiting."
                                 )
                                 add_unclaimed_item(uid, "super_crate", 1)
                                 k = "xp_multiplier" if random.random() < 0.5 else "silver_multiplier"
@@ -253,7 +253,7 @@ async def game_loop(chat_id: int):
                     eng.running = False
                     await bot.send_message(
                         chat_id,
-                        "🃏 *GameMaster:* \"Silence. I'm bored. Type `!fusion` when you want to play.\"",
+                        "🃏 *GameMaster:* \"*Three* empty rounds? Are you all *asleep*?! This is pathetic. Tell me when you grow a brain and type `!fusion` again.\"",
                         parse_mode="Markdown"
                     )
                     break
@@ -301,7 +301,7 @@ async def game_loop(chat_id: int):
 
 def _help_text() -> str:
     return (
-        "🃏 *GameMaster:* \"Oh, look who's struggling.\"\n\n"
+        "🃏 *GameMaster:* \"Oh great, another lost soul needing hand-holding. How *delightful*.\"\n\n"
         "*QUICK START*\n"
         "`!tutorial` — Complete game walkthrough (DM only)\n"
         "`!fusion` — Start a word game round (group only)\n"
@@ -328,16 +328,16 @@ def _help_text() -> str:
 
 def _unreg() -> str:
     return random.choice([
-        "🃏 *GameMaster:* \"A ghost? Message me *privately* to register first.\"",
-        "🃏 *GameMaster:* \"Who are you? Nobody. DM me and prove you exist.\"",
-        "🃏 *GameMaster:* \"Unregistered souls are invisible. DM me, beg, register, then come back.\"",
+        "🃏 *GameMaster:* \"Who even *are* you? An unregistered ghost. How pathetic. DM me to exist.\"",
+        "🃏 *GameMaster:* \"You're not real to me. Register in my DMs and *maybe* I'll acknowledge you.\"",
+        "🃏 *GameMaster:* \"Nobody cares about unregistered nobodies. Go beg me for registration in private. *Now*.\"",
     ])
 
 def _dm_only(cmd: str) -> str:
     return random.choice([
-        f"🃏 *GameMaster:* \"Did you just use `{cmd}` *in public*? DM me, fool.\"",
-        f"🃏 *GameMaster:* \"`{cmd}` is *private*. Message me directly, amateur.\"",
-        f"🃏 *GameMaster:* \"Handle your personal business in my DMs, not here.\"",
+        f"🃏 *GameMaster:* \"Did you just expose your business to *everyone*? Brilliant move. Use `{cmd}` in my *PRIVATE* DMs, genius.\"",
+        f"🃏 *GameMaster:* \"`{cmd}` is for PRIVATE conversations only. Stop embarrassing yourself publicly, idiot.\"",
+        f"🃏 *GameMaster:* \"Oh look, another moron broadcasting personal stuff to the whole group. DM me next time, *please*.\"",
     ])
 
 
@@ -361,34 +361,35 @@ def _cmd(*names):
 @dp.message(_cmd("fusion"))
 async def cmd_fusion(message: types.Message):
     if message.chat.type not in ("group","supergroup"):
-        await message.answer("🃏 *GameMaster:* \"This is a GROUP game. Stop pestering me in private.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"This is a *GROUP* game, genius. Why are you DMing me? Go to a group chat.\"", parse_mode="Markdown"); return
     eng = get_engine(message.chat.id)
     if eng.running:
-        await message.answer("🃏 *GameMaster:* \"The souls are already being harvested. Open your eyes.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"A game is ALREADY running, you blind buffoon. Pay attention next time.\"", parse_mode="Markdown"); return
     if not get_user(str(message.from_user.id)):
-        await message.answer("🃏 *GameMaster:* \"An unregistered nomad triggering my game. Bold, stupid. DM me — but fine, I'll start.\"\n\n_(DM me to register!)_", parse_mode="Markdown")
+        await message.answer("🃏 *GameMaster:* \"An unregistered peasant summoning me? Fine. *Fine.* I'll start. But YOU—go beg for registration in my DMs. *NOW*.\"
+_Nobody plays unregistered._", parse_mode="Markdown")
     asyncio.create_task(game_loop(message.chat.id))
 
 
 @dp.message(_cmd("forcerestart"))
 async def cmd_forcerestart(message: types.Message):
     if message.chat.type not in ("group","supergroup"):
-        await message.answer("🃏 *GameMaster:* \"Use this in the group, fool.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"This command is for GROUPS only. Stop wasting my time in private.\"", parse_mode="Markdown"); return
     eng = get_engine(message.chat.id)
     if not eng.running:
-        await message.answer("🃏 *GameMaster:* \"Nothing is running. Type `!fusion` to start.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"No round is running, numbskull. Type `!fusion` to start one.\"", parse_mode="Markdown"); return
     eng.force_stop = True
     eng.active = False
-    await message.answer("🃏 *GameMaster:* \"Fine. Round terminated. Fresh words incoming.\"", parse_mode="Markdown")
+    await message.answer("🃏 *GameMaster:* \"FINE. Terminating round because apparently you can't handle it. Fresh words incoming. Try not to mess this up.\"", parse_mode="Markdown")
 
 
 @dp.message(_cmd("words"))
 async def cmd_words(message: types.Message):
     if message.chat.type not in ("group","supergroup"):
-        await message.answer("🃏 *GameMaster:* \"This only works in groups.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"Groups ONLY. What part of that is confusing?\"", parse_mode="Markdown"); return
     eng = get_engine(message.chat.id)
     if not eng.active or not eng.word1:
-        await message.answer("🃏 *GameMaster:* \"No round active. Type `!fusion` to start.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"No round running. Stop asking stupid questions and type `!fusion`.\"", parse_mode="Markdown"); return
     await message.answer(f"📝 *CURRENT WORDS:* `{eng.word1}` + `{eng.word2}`", parse_mode="Markdown")
 
 
@@ -732,11 +733,11 @@ Good luck, warrior. The GameMaster is watching. 👀
 
 @dp.message(_cmd("shop"))
 async def cmd_shop(message: types.Message):
-    await message.answer("🃏 *GameMaster:* \"The shop is under construction. Patience, worm.\"", parse_mode="Markdown")
+    await message.answer("🃏 *GameMaster:* \"The shop? Still under construction. Your impatience amuses me. Come back later, peasant.\"", parse_mode="Markdown")
 
 @dp.message(_cmd("upgrade"))
 async def cmd_upgrade(message: types.Message):
-    await message.answer("🃏 *GameMaster:* \"Queen's Satchel not ready yet.\n\nWhen it launches: 5 → 20 slots for 900 Naira.\n\nManage your 5 slots and stop complaining.\"", parse_mode="Markdown")
+    await message.answer("🃏 *GameMaster:* \"*Queen's Satchel!* Nice try. Not ready yet.\n\nWhen it arrives: unlocks 20 inventory slots for 900 Naira.\n\nUntil then? Manage your pathetic 5 slots like an adult. Stop asking.\"", parse_mode="Markdown")
 
 
 @dp.message(_cmd("profile"))
@@ -746,7 +747,7 @@ async def cmd_profile(message: types.Message):
     u_id = str(message.from_user.id)
     profile = get_profile(u_id)
     if not profile:
-        await message.answer("🃏 *GameMaster:* \"You have no profile. Complete the tutorial first.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"No profile? You haven't even *started* the tutorial? What are you doing here, fool? DM me, run `!start`, and actually play the game.\"", parse_mode="Markdown"); return
     bar = "█" * int(profile['xp_progress'] / profile['xp_needed'] * 20) + "░" * (20 - int(profile['xp_progress'] / profile['xp_needed'] * 20))
     shield_str = "🛡️ SHIELDED" if profile.get('shielded') else "⚔️ UNPROTECTED"
     
@@ -2122,34 +2123,42 @@ async def round_reset_task():
 
 
 async def gamemaster_announcement_task(bot: Bot, chat_id: int):
-    """Background task: Drop random GameMaster announcements every 60-180 seconds."""
+    """Background task: Drop random GameMaster announcements every 7-10 minutes."""
     announcements = [
-        "🛡️ *SHIELD BROADCAST*\nAll warriors have been granted *PERMANENT SHIELDS*. Your bases are protected while you gather troops, fortify defenses, and amass resources. Soon, unshielded players beware.",
+        "🛡️ *PERMANENT SHIELDS ACTIVATED*\n\nI've gifted you all *eternal protection*. Not because you deserve it—but because watching you fumble around defenseless was getting *boring*. Your bases are now sacred ground. Try not to embarrass yourselves *too* much. 👀",
         
-        "📈 *LEADERBOARD MATTERS*\nYour ranking across the realm determines your power. Climb the *WEEKLY LEADERBOARD* for glory, or the *ALL-TIME LEADERBOARD* for eternal legend. Sectors hold the best resources—teleport wisely.",
+        "📈 *THE LEADERBOARD NEVER LIES*\n\nSome of you are absolutely CRUSHING it. Others... *exist*. The weak are separated from the strong here on the *WEEKLY LEADERBOARD*. Or stay unknown forever on the *ALLTIME LEADERBOARD*. Your choice, coward. 🃏",
         
-        "🏰 *BASE MASTERY*\nYour base grows strong with levels. Each level grants military capacity, trap slots, and defensive bonuses. Seek resources, open crates, and prepare your fortress for the coming war.",
+        "🏰 *YOUR FORTRESS IS PATHETIC*\n\nLook at your base. Just... *look* at it. Is that a fortress or a cardboard box? Level it up. Add military units. Place traps. Make it *worthy* of the GameMaster's attention. Otherwise, why should I bother watching? 😑",
         
-        "🪓 *PREPARE FOR WAR*\nThe *COMING WINTER* approaches. Mine resources obsessively. Claim every crate. Purchase powerful items. Build your military. Trap your perimeter. Soon, shields fall and conquest begins.",
+        "🪓 *SWORDS WILL SHARPEN SOON*\n\nCurrently, shields are making you soft. Enjoy the free pass while it lasts. Soon the *WARS BEGIN*. Right now? Build your armies like your life depends on it. Because eventually... *it will*. Frame that warning. 💀",
         
-        "🏪 *SHOPS OPENING SOON*\n• **Normal Shop**: Common items & resources\n• **Alliance Shop**: Faction-exclusive rewards\n• **Black Market**: Forbidden relics & dark treasures\n• **Ruler's Shop**: Sector rulers only\n• **Real Money**: For the impatient elite",
+        "🏪 *SHOPS = YOUR NEW ADDICTION*\n\n• **Normal Shop**: For mortals who like... normal things\n• **Black Market**: For those with *taste*\n• **Alliance Shop**: For actual friends (rare)\n• **Ruler's Shop**: For the cocky ones\n• **Premium**: For the desperately impatient ⏰\n\nYour coins are *begging* to be spent here.",
         
-        "🔬 *RESEARCH UNLOCKED*\nVisit the **Science Laboratory** to unlock powerful upgrades. Spend resources to research abilities that grant unmatched power. Strategic research wins wars.",
+        "🔬 *SCIENCE = POWER = DOMINANCE*\n\nThe research lab isn't just a building—it's an *IQ test*. Spend your precious resources on upgrades that'll make you 30% better at war. Or don't. I'll enjoy watching you lose. The choice is yours. 🧪",
         
-        "💎 *RESOURCES ARE POWER*\nWood, Bronze, Iron, Diamond, Relics—each builds your empire. Mine them from words, loot them from crates, hoard them jealously. No resources = no army. No army = conquered.",
+        "💎 *HOARD EVERYTHING LIKE YOUR LIFE DEPENDS ON IT*\n\nWood. Bronze. Iron. Diamond. Relics. \n\nEvery resource is a *weapon*. Every crate is a gift from me (you're welcome). Every item is *power*. Stop wasting them on stupid stuff. Build empires or die trying. 💰",
         
-        "👑 *SECTOR SUPREMACY*\nDifferent sectors hold different power. Better sectors = better resources, rarer items, greater prestige. Teleport to higher sectors to claim your dominance.",
+        "👑 *SECTOR WARS ARE COMING*\n\nYou think Sector 1 is tough? Try Sector 9. \nBetter resources = better rewards = *actual* power. Teleport to a high sector and watch yourself get *obliterated*. Or train harder and actually win. I'm *dying* to see which. 🌍",
         
-        "⚔️ *MILITARY MATTERS*\nPawns, Knights, Bishops, Rooks, Queens, Kings—each Unit serves a purpose. Build your army wisely. Numbers alone don't guarantee victory. Strategic composition dominates.",
+        "⚔️ *YOUR MILITARY STINKS*\n\nPawns attack like they're scared. Knights are hit-or-miss. Bishops are *trying*. Rooks are solid. Queens? Where are your Queens? Kings? Almost never seen those. \n\nBuild better armies. Stop embarrassing the realm. 👑💔",
         
-        "🔗 *ALLIANCE SYSTEMS COMING*\nBand together or stand alone. Alliances grant shared shops, war coordination, and collective power. Betray your allies, and the realm remembers.",
+        "🔗 *ALLIANCES = FRIENDSHIP BETRAYAL SIMULATORS*\n\nBand together with your friends... then stab them in the back for glory. The coming *Alliance Wars* will separate true friends from back-stabbers. Spoiler: everyone's a back-stabber. 😈",
         
-        "👥 *INVITE YOUR FRIENDS*\nIf you enjoy this game, and would love to play with your friends, share this link to others:\n\nhttps://t.me/checkmateHQ\n\n🃏 *GameMaster:* \"More players = More conquest. More conquest = More glory.\"",
+        "🎮 *YOUR FRIENDS ARE WEAK. RECRUIT THEM.*\n\nBored playing alone? Invite them here:\nhttps://t.me/checkmateHQ\n\nThen crush them mercilessly. Nothing says friendship like destroying their base while they sleep. *That's* what I'm here for. 🃏",
+        
+        "😴 *STOP LURKING AND START PLAYING*\n\nI know you're here. Watching. Waiting. *Scared*.\n\nType `!fusion` and face me. Or keep hiding like a coward. Either way, I'm *watching*. Always watching... 👀",
+        
+        "🤑 *YOUR RESOURCES ARE USELESS WITHOUT PURPOSE*\n\nHoarding wood? Cute. Building nothing with it? *Pathetic*. Use your resources. Upgrade your base. Train units. Research stronger abilities. Otherwise you're just collecting digital trash. 🗑️",
+        
+        "⏰ *TIME TO DOMINATE*\n\nEvery second you're NOT playing, someone else is getting stronger.\nEvery crate you don't open is power left on the table.\nEvery word game you skip is resources lost forever.\n\nFeeling the pressure yet? Good. 🔥",
+        
+        "🎯 *THE WEAK PERISH. THE STRONG CONQUER.*\n\nI watch you all. Some of you are *actually* trying. Others... are just taking up space. The leaderboard will judge you mercilessly. Will you rise... or fade into obscurity? 💀",
     ]
     
     while True:
         try:
-            wait_time = random.randint(60, 180)
+            wait_time = random.randint(420, 600)  # 7-10 minutes
             await asyncio.sleep(wait_time)
             announcement = random.choice(announcements)
             try:
@@ -2202,15 +2211,32 @@ async def main():
     round_task = asyncio.create_task(round_reset_task())
     print("[OK] Round timer started (120s rounds with streak reset)")
     
+    # Start GameMaster announcements task (if group chat ID provided)
+    announce_task = None
+    group_chat_id = os.environ.get('CHECKMATE_HQ_GROUP_ID')
+    if group_chat_id:
+        try:
+            announce_task = asyncio.create_task(gamemaster_announcement_task(bot, int(group_chat_id)))
+            print(f"[OK] Announcements started for group {group_chat_id}")
+        except (ValueError, TypeError) as e:
+            print(f"[WARN] Invalid CHECKMATE_HQ_GROUP_ID: {e}")
+    else:
+        print("[WARN] CHECKMATE_HQ_GROUP_ID not set - announcements disabled")
+    
     task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
     print("[OK] Polling started successfully - waiting for messages...")
     await stop.wait()
     task.cancel()
     round_task.cancel()
+    if announce_task:
+        announce_task.cancel()
     try: await task
     except asyncio.CancelledError: pass
     try: await round_task
     except asyncio.CancelledError: pass
+    if announce_task:
+        try: await announce_task
+        except asyncio.CancelledError: pass
     await bot.session.close()
     print("Bot stopped.")
 
