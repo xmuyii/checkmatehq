@@ -236,7 +236,7 @@ async def game_loop(chat_id: int):
                                 lvl = user.get('level', 1)
                                 msg = (
                                     f"🎊 *LEVEL UP!* {sd['name']} reached *LEVEL {lvl}*!\n\n"
-                                    f"🃏 *GameMaster:* \"Congratulations. You've achieved the bare minimum. Collect your participation trophy.\"; use `!claims` in DM.\n\n"
+                                    f"🃏 *GameMaster:* \"Congratulations. You've achieved the bare minimum. Collect your participation trophy. Use `!claims` in DM.\n\n"
                                     f"✨ Bonus items awaiting."
                                 )
                                 add_unclaimed_item(uid, "super_crate", 1)
@@ -366,8 +366,7 @@ async def cmd_fusion(message: types.Message):
     if eng.running:
         await message.answer("🃏 *GameMaster:* \"A game is ALREADY running, you blind buffoon. Pay attention next time.\"", parse_mode="Markdown"); return
     if not get_user(str(message.from_user.id)):
-        await message.answer("🃏 *GameMaster:* \"An unregistered peasant summoning me? Fine. *Fine.* I'll start. But YOU—go beg for registration in my DMs. *NOW*.\"
-_Nobody plays unregistered._", parse_mode="Markdown")
+        await message.answer("🃏 *GameMaster:* \"An unregistered peasant summoning me? Fine. *Fine.* I'll start. But YOU—go beg for registration in my DMs. *NOW*.\"\n\n_Nobody plays unregistered._", parse_mode="Markdown")
     asyncio.create_task(game_loop(message.chat.id))
 
 
