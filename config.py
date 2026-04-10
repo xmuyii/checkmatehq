@@ -1,9 +1,19 @@
 """
 Configuration management for production and test environments.
+
+IMPORTANT: Create a .env file in your workspace root with your real credentials:
+    BOT_TOKEN=your_real_bot_token
+    SUPABASE_URL=your_real_supabase_url
+    SUPABASE_KEY=your_real_supabase_key
+
 Set ENVIRONMENT environment variable to 'prod' or 'test' before running.
 """
 
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Determine environment (default to prod for safety)
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'prod').lower()
@@ -12,9 +22,9 @@ ENVIRONMENT = os.getenv('ENVIRONMENT', 'prod').lower()
 # PRODUCTION CONFIG
 # ============================================================================
 if ENVIRONMENT == 'prod':
-    BOT_TOKEN = '8770224655:AAElFUaS_9ZMFsowhkWPtSU_9LwzdKMqGoU'
-    SUPABASE_URL = 'https://basniiolppmtpzishhtn.supabase.co'
-    SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhc25paW9scHBtdHB6aXNoaHRuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTQ3NjMwOCwiZXhwIjoyMDkxMDUyMzA4fQ.qrj1BO5dNilRDvgKtvTdwIWjBhFTRyGzuHPD271Xcac'
+    BOT_TOKEN = os.getenv('BOT_TOKEN', 'your_bot_token_here')
+    SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://your-project.supabase.co')
+    SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'your_supabase_anon_key_here')
     DB_TABLE = 'players'  # Production table
     ENV_NAME = 'PRODUCTION'
     
@@ -22,9 +32,9 @@ if ENVIRONMENT == 'prod':
 # TEST CONFIG
 # ============================================================================
 elif ENVIRONMENT == 'test':
-    BOT_TOKEN = '8625871733:AAEwODvBBGxkDnq6DiB9TNqdcTXAnVPWNoI'
-    SUPABASE_URL = 'https://basniiolppmtpzishhtn.supabase.co'
-    SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhc25paW9scHBtdHB6aXNoaHRuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTQ3NjMwOCwiZXhwIjoyMDkxMDUyMzA4fQ.qrj1BO5dNilRDvgKtvTdwIWjBhFTRyGzuHPD271Xcac'
+    BOT_TOKEN = os.getenv('TEST_BOT_TOKEN', 'your_test_bot_token_here')
+    SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://your-project.supabase.co')
+    SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'your_supabase_anon_key_here')
     DB_TABLE = 'players_test'  # Test table (separate from production)
     ENV_NAME = 'TEST'
 

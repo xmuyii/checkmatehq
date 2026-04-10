@@ -27,10 +27,12 @@ except Exception as e:
     DB_SOURCE = "JSON"
 
 # ── Config (Read from Environment Variables) ──────────────────────────────────
-API_TOKEN    = os.environ.get('API_TOKEN', '8770224655:AAElFUaS_9ZMFsowhkWPtSU_9LwzdKMqGoU')
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://basniiolppmtpzishhtn.supabase.co').rstrip('/')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhc25paW9scHBtdHB6aXNoaHRuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTQ3NjMwOCwiZXhwIjoyMDkxMDUyMzA4fQ.qrj1BO5dNilRDvgKtvTdwIWjBhFTRyGzuHPD271Xcac')
-CHECKMATE_HQ_GROUP_ID = int(os.environ.get('CHECKMATE_HQ_GROUP_ID', '-1003835925366'))
+from config import BOT_TOKEN, SUPABASE_URL as CONFIG_SUPABASE_URL, SUPABASE_KEY as CONFIG_SUPABASE_KEY
+
+API_TOKEN    = os.environ.get('API_TOKEN', BOT_TOKEN)
+SUPABASE_URL = os.environ.get('SUPABASE_URL', CONFIG_SUPABASE_URL).rstrip('/')
+SUPABASE_KEY = os.environ.get('SUPABASE_KEY', CONFIG_SUPABASE_KEY)
+CHECKMATE_HQ_GROUP_ID = int(os.environ.get('CHECKMATE_HQ_GROUP_ID', '-1001234567890'))
 
 bot = Bot(token=API_TOKEN)
 initiation_router = Router()
@@ -78,7 +80,7 @@ async def check_dict(word: str) -> bool:
     async with httpx.AsyncClient() as client:
         try:
             r = await client.get(
-                f"{SUPABASE_URL}/rest/v1/Dictionary?word=eq.{word}&select=word",
+                f"{SUPABASE_URL}/rest/v1/Dictionary?word=ilike.{word}&select=word",
                 headers=headers, timeout=5.0
             )
             return len(r.json()) > 0

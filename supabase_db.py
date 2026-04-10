@@ -25,6 +25,22 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 print(f"[OK] Supabase module loaded (Environment: {ENV_NAME}, Table: {DB_TABLE})")
 
 
+# ── Random Base Names ──────────────────────────────────────────────────────
+
+DEFAULT_BASE_NAMES = [
+    "Iron Fortress", "Stone Keep", "Bronze Citadel", "The Stronghold",
+    "Crystal Tower", "Shadow Bastion", "Eagle's Nest", "Dragon's Lair",
+    "Obsidian Hall", "Midnight Manor", "The Throne", "Kingdom's Crown",
+    "Warrior's Peak", "Sentinel Post", "The Ramparts", "Silver Spire",
+    "Timber Lodge", "Crimson Hold", "The Garrison", "Paladin's Rest",
+    "Raven's Keep", "Phoenix Rising", "Stormhold", "Avalon Castle",
+    "Winterfort", "Sunkeep", "Moonlight Bridge", "Starlight Citadel",
+    "Ironheart Keep", "Ravenstorm", "The Bulwark", "Dreadfort",
+    "Whitewall", "Blackthorne", "Mystic Tower", "The Sanctuary",
+    "Skyward Spire", "Earthen Vault", "Twilight Realm", "The Citadel",
+]
+
+
 # ── Week helper ────────────────────────────────────────────────────────────
 
 def _current_week_key() -> str:
@@ -35,11 +51,33 @@ def _current_week_key() -> str:
     return sunday.date().isoformat()   # e.g. "2026-04-06"
 
 
+def _fix_item_ids(items_list: list) -> list:
+    """Fix items with None/missing IDs by assigning them proper sequential IDs."""
+    if not items_list:
+        return []
+    
+    # Find the highest existing ID
+    valid_ids = [it.get('id') for it in items_list if it.get('id') is not None]
+    next_id = (max(valid_ids) if valid_ids else 0) + 1
+    
+    # Fix items with None IDs
+    for item in items_list:
+        if item.get('id') is None:
+            item['id'] = next_id
+            next_id += 1
+    
+    return items_list
+
+
 def _next_id(lst: list) -> int:
     """Generate a unique integer ID that is 1 higher than any existing id."""
     if not lst:
-        return 0
-    return max(it.get('id', 0) for it in lst) + 1
+        return 1
+    # Get max ID, treating None as 0
+    valid_ids = [it.get('id', 0) for it in lst if it.get('id') is not None]
+    if not valid_ids:
+        return 1
+    return max(valid_ids) + 1
 
 
 # ── Raw DB helpers ─────────────────────────────────────────────────────────
@@ -55,6 +93,7 @@ def _row_to_user(row: dict) -> dict:
     # Normalize week_start to just the date part (Supabase may return full timestamp)
     if u.get('week_start'):
         u['week_start'] = u['week_start'].split('T')[0]
+    
     # JSONB fields may arrive as string or list/dict
     for k in ('inventory', 'unclaimed_items'):
         val = u.get(k, '[]')
@@ -65,6 +104,57 @@ def _row_to_user(row: dict) -> dict:
                 u[k] = []
         elif val is None:
             u[k] = []
+    
+    # Parse military, traps, buffs JSONB fields
+    for k in ('military', 'traps', 'buffs'):
+        val = u.get(k, '{}')
+        if isinstance(val, str):
+            try:
+                u[k] = json.loads(val)
+            except Exception:
+                u[k] = {}
+        elif val is None:
+            u[k] = {}
+    
+    # Parse base_resources JSONB field with COMPLETE structure
+    val = u.get('base_resources', '{}')
+    if isinstance(val, str):
+        try:
+            base_res = json.loads(val)
+        except Exception:
+            base_res = {}
+    elif val is None:
+        base_res = {}
+    else:
+        base_res = dict(val) if val else {}
+    
+    # CRITICAL: Ensure base_resources has complete resource types (wood, bronze, iron, diamond, relics)
+    # NOT silver - we use diamond as the 4th tier
+    if 'resources' not in base_res or not isinstance(base_res.get('resources'), dict):
+        base_res['resources'] = {}
+    
+    # Ensure ALL resource types exist (don't rely on stored value which might have old structure)
+    default_resources = {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0}
+    stored_resources = base_res.get('resources', {})
+    
+    # Merge: keep stored values but ensure all keys exist
+    for res_type, default_val in default_resources.items():
+        if res_type not in stored_resources:
+            stored_resources[res_type] = default_val
+    
+    # Remove 'silver' if it exists (migration from old structure)
+    stored_resources.pop('silver', None)
+    
+    base_res['resources'] = stored_resources
+    
+    # Ensure food and streak exist
+    if 'food' not in base_res:
+        base_res['food'] = 0
+    if 'current_streak' not in base_res:
+        base_res['current_streak'] = 0
+    
+    u['base_resources'] = base_res
+    
     return u
 
 
@@ -76,9 +166,28 @@ def get_user(user_id) -> dict | None:
 def save_user(user_id, data: dict):
     d = dict(data)
     d.pop('id', None)
-    for k in ('inventory', 'unclaimed_items'):
+    # Extract base/resources data to save separately
+    base_data = d.pop('base', None)
+    resources_data = d.pop('resources', None)
+    
+    # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources)
+    for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs'):
         if isinstance(d.get(k), (list, dict)):
             d[k] = json.dumps(d[k])
+    
+    # Serialize base resources data if present
+    if base_data or resources_data:
+        # Combine base and resources into one structure
+        base_structure = base_data or {}
+        if resources_data and 'resources' not in base_structure:
+            base_structure['resources'] = resources_data
+        if base_structure:
+            d['base_resources'] = json.dumps(base_structure)
+    
+    # Also serialize base_resources if it's a dict (not already JSON string)
+    if isinstance(d.get('base_resources'), dict):
+        d['base_resources'] = json.dumps(d['base_resources'])
+    
     supabase.table(DB_TABLE).update(d).eq('user_id', str(user_id)).execute()
 
 
@@ -89,6 +198,7 @@ def register_user(user_id, username: str):
         if r.data[0].get('username') != username:
             supabase.table(DB_TABLE).update({'username': username}).eq('user_id', uid).execute()
         return
+    random_base_name = random.choice(DEFAULT_BASE_NAMES)
     supabase.table(DB_TABLE).insert({
         'user_id': uid,
         'username': username,
@@ -106,6 +216,14 @@ def register_user(user_id, username: str):
         'unclaimed_items': json.dumps([]),
         'sector': None,
         'completed_tutorial': False,
+        'base_name': random_base_name,
+        'base_resources': json.dumps({
+            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
+            'food': 0,
+            'current_streak': 0
+        }),
+        'military': json.dumps({}),
+        'traps': json.dumps({}),
     }).execute()
 
 
@@ -175,6 +293,102 @@ def use_silver(user_id, amount: int) -> bool:
     return True
 
 
+def add_resources_from_word_length(user_id, word_length: int, username: str = '') -> dict:
+    """Award resources based on word length: 3L→Wood, 4L→Bronze, 5L→Iron, 6L→Silver, 7L→Relics"""
+    uid = str(user_id)
+    user = get_user(uid)
+    if not user:
+        register_user(uid, username)
+        user = get_user(uid)
+    
+    # Initialize resources if not present
+    if 'resources' not in user or not isinstance(user.get('resources'), dict):
+        user['resources'] = {'wood': 0, 'bronze': 0, 'iron': 0, 'silver': 0, 'relics': 0}
+    
+    resources_awarded = {}
+    
+    # Award resources based on word length
+    if word_length == 3:
+        user['resources']['wood'] = user['resources'].get('wood', 0) + 1
+        resources_awarded['wood'] = 1
+    elif word_length == 4:
+        user['resources']['bronze'] = user['resources'].get('bronze', 0) + 1
+        resources_awarded['bronze'] = 1
+    elif word_length == 5:
+        user['resources']['iron'] = user['resources'].get('iron', 0) + 1
+        resources_awarded['iron'] = 1
+    elif word_length == 6:
+        user['resources']['silver'] = user['resources'].get('silver', 0) + 1
+        resources_awarded['silver'] = 1  # Different from the 'silver' currency
+    elif word_length >= 7:
+        user['resources']['relics'] = user['resources'].get('relics', 0) + 1
+        resources_awarded['relics'] = 1
+    
+    save_user(uid, user)
+    return resources_awarded
+
+
+def update_streak_and_award_food(user_id, correct: bool, username: str = '') -> dict:
+    """Track consecutive correct words and award food when streak >= 3.
+    Store streak and food in base_resources JSONB, not as separate columns."""
+    uid = str(user_id)
+    user = get_user(uid)
+    if not user:
+        register_user(uid, username)
+        user = get_user(uid)
+    
+    # Initialize base_resources if not present
+    if not user.get('base_resources'):
+        user['base_resources'] = {
+            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
+            'food': 0,
+            'current_streak': 0
+        }
+    
+    base_res = user['base_resources']
+    if not isinstance(base_res, dict):
+        base_res = {
+            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
+            'food': 0,
+            'current_streak': 0
+        }
+        user['base_resources'] = base_res
+    
+    food_awarded = 0
+    streak_status = "broken"
+    old_streak = base_res.get('current_streak', 0)
+    old_food = base_res.get('food', 0)
+    
+    if correct:
+        base_res['current_streak'] = base_res.get('current_streak', 0) + 1
+        current_streak = base_res['current_streak']
+        
+        # Award food based on streak
+        if current_streak >= 3:
+            # Award 1 food per streak (so 3-streak = 1 food, 4-streak = 2 food, etc.)
+            food_to_award = current_streak - 2
+            base_res['food'] = base_res.get('food', 0) + food_to_award
+            food_awarded = food_to_award
+            streak_status = f"streak_{current_streak}"
+            print(f"[STREAK_CALC] Streak {old_streak}→{current_streak}, Food: {old_food}→{base_res['food']} (+{food_to_award})")
+        else:
+            print(f"[STREAK_CALC] Streak {old_streak}→{current_streak}, Food: 0 (need 3)")
+    else:
+        # Wrong word - reset streak
+        base_res['current_streak'] = 0
+        streak_status = "broken"
+        print(f"[STREAK_CALC] Reset streak from {old_streak} to 0")
+    
+    user['base_resources'] = base_res
+    save_user(uid, user)
+    
+    return {
+        "streak": base_res.get('current_streak', 0),
+        "food_awarded": food_awarded,
+        "status": streak_status
+    }
+
+
 def set_sector(user_id, sector_id):
     user = get_user(str(user_id))
     if user:
@@ -237,7 +451,16 @@ def get_alltime_leaderboard(limit: int = 10) -> list:
 
 def get_inventory(user_id) -> list:
     user = get_user(str(user_id))
-    return user.get('inventory', []) if user else []
+    if not user:
+        return []
+    inv = user.get('inventory', [])
+    # Fix any items with None IDs
+    inv = _fix_item_ids(inv)
+    # Save the fixed inventory back if any items were fixed
+    if any(it.get('id') is None for it in user.get('inventory', [])):
+        user['inventory'] = inv
+        save_user(str(user_id), user)
+    return inv
 
 
 def add_inventory_item(user_id, item_type: str, xp_reward: int = 0,
@@ -263,12 +486,34 @@ def add_inventory_item(user_id, item_type: str, xp_reward: int = 0,
 
 
 def remove_inventory_item(user_id, item_id) -> bool:
-    """Remove by unique item['id'], not list index."""
+    """Remove by unique item['id'], not list index. Verify deletion succeeded."""
     user = get_user(str(user_id))
     if not user:
         return False
-    user['inventory'] = [it for it in user.get('inventory', []) if it.get('id') != item_id]
+    
+    old_inv = user.get('inventory', [])
+    
+    # First, fix any None IDs in the inventory
+    old_inv = _fix_item_ids(old_inv)
+    old_count = len(old_inv)
+    
+    # Filter out matching item - handle both int and string IDs
+    item_id_int = int(item_id) if isinstance(item_id, (int, str)) else item_id
+    new_inv = [it for it in old_inv if it.get('id') is not None and int(it.get('id')) != item_id_int]
+    
+    # Verify something was actually removed
+    if len(new_inv) == old_count:
+        print(f"[REMOVE_INV] WARNING: Item {item_id} not found in inventory. Old: {[it.get('id') for it in old_inv]}, New: {[it.get('id') for it in new_inv]}")
+        return False
+    
+    user['inventory'] = new_inv
     save_user(str(user_id), user)
+    
+    # Double-check by re-fetching
+    user_after = get_user(str(user_id))
+    inv_after = user_after.get('inventory', [])
+    final_ids = [it.get('id') for it in inv_after]
+    print(f"[REMOVE_INV] VERIFIED: Removed item {item_id}. Remaining IDs: {final_ids}")
     return True
 
 
@@ -302,14 +547,47 @@ def activate_shield(user_id) -> bool:
 
 
 def is_shielded(user: dict) -> bool:
-    """Return True if user has an active (non-expired) shield."""
+    """Return True if user has an active (non-expired) shield. All players now have permanent shields."""
     exp = user.get('shield_expires')
+    if exp == 'permanent':
+        return True
     if not exp:
-        return False
+        return True  # Default to shielded (everyone is protected)
     try:
         return datetime.utcnow() < datetime.fromisoformat(exp)
     except Exception:
-        return False
+        return True  # Assume shielded on parse error
+
+
+def give_automatic_shield(user_id):
+    """Grant permanent shield to a player."""
+    user = get_user(str(user_id))
+    if user:
+        user['shield_expires'] = 'permanent'
+        save_user(str(user_id), user)
+        return True
+    return False
+
+
+def give_shields_to_all():
+    """Give permanent shields to all players (call once during startup)."""
+    try:
+        users = get_all_users()
+        shield_count = 0
+        for user_data in users:
+            try:
+                user = _row_to_user(user_data)
+                if user and user.get('shield_expires') != 'permanent':
+                    user['shield_expires'] = 'permanent'
+                    save_user(user.get('user_id'), user)
+                    shield_count += 1
+            except Exception:
+                continue
+        print(f"[SHIELDS] Confirmed permanent shields for {shield_count} players")
+        return shield_count
+    except Exception as e:
+        print(f"[ERROR] give_shields_to_all failed: {e}")
+        return 0
 
 
 # ── Unclaimed items ────────────────────────────────────────────────────────
@@ -351,9 +629,43 @@ def add_unclaimed_item(user_id, item_type: str, amount: int = 1,
     save_user(str(user_id), user)
 
 
+def add_randomized_gift(user_id):
+    """Award random gift: XP crate, powerful item, or resources bundle."""
+    choice = random.randint(1, 3)
+    if choice == 1:
+        # XP Crate
+        gift_type = random.choice(['wood_crate', 'bronze_crate', 'iron_crate', 'super_crate'])
+        add_unclaimed_item(user_id, gift_type, 1, xp_reward=None)
+    elif choice == 2:
+        # Powerful locked item
+        award_powerful_locked_item(user_id)
+    else:
+        # Resources bundle (give direct resources)
+        user = get_user(str(user_id))
+        if user:
+            base_res = user.get('base_resources', {})
+            resources = base_res.get('resources', {})
+            # Random resource boost
+            res_choice = random.choice(['wood', 'bronze', 'iron', 'diamond'])
+            amount = random.randint(50, 200) if res_choice != 'diamond' else random.randint(10, 50)
+            resources[res_choice] = resources.get(res_choice, 0) + amount
+            base_res['resources'] = resources
+            user['base_resources'] = base_res
+            save_user(str(user_id), user)
+
+
 def get_unclaimed_items(user_id) -> list:
     user = get_user(str(user_id))
-    return user.get('unclaimed_items', []) if user else []
+    if not user:
+        return []
+    unclaimed = user.get('unclaimed_items', [])
+    # Fix any items with None IDs
+    unclaimed = _fix_item_ids(unclaimed)
+    # Save the fixed unclaimed back if any items were fixed
+    if any(it.get('id') is None for it in user.get('unclaimed_items', [])):
+        user['unclaimed_items'] = unclaimed
+        save_user(str(user_id), user)
+    return unclaimed
 
 
 def claim_item(user_id, item_id: int):
@@ -429,6 +741,12 @@ def get_profile(user_id) -> dict | None:
     level    = user.get('level', 1)
     xp_prog  = xp % 100
     shielded = is_shielded(user)
+    
+    # Get resources and food from base_resources
+    base_res = user.get('base_resources', {})
+    resources_dict = base_res.get('resources', {})
+    food = base_res.get('food', 0)
+    
     return {
         'username':        user.get('username', 'Unknown'),
         'level':           level,
@@ -448,6 +766,9 @@ def get_profile(user_id) -> dict | None:
         'shield_count':    sum(1 for i in inv if i.get('type','') == 'shield'),
         'shielded':        shielded,
         'shield_expires':  user.get('shield_expires'),
+        'base_name':       user.get('base_name'),
+        'base_resources':  resources_dict,
+        'base_food':       food,
     }
 
 
@@ -507,3 +828,47 @@ def award_powerful_locked_item(user_id):
     item_type, display, desc = random.choice(items)
     add_unclaimed_item(user_id, f'locked_{item_type}', 1, xp_reward=0)
     return display, desc
+
+
+# ── Round management (streak resets every 120s) ─────────────────────────────
+
+def get_all_users() -> list:
+    """Fetch all users from database for roundly streak reset."""
+    try:
+        r = supabase.table(DB_TABLE).select('*').execute()
+        return r.data if r.data else []
+    except Exception as e:
+        print(f"[ERROR] get_all_users failed: {e}")
+        return []
+
+
+def reset_all_streaks():
+    """Reset current_streak to 0 for all players (called every 120s for new game round)."""
+    try:
+        users = get_all_users()
+        reset_count = 0
+        
+        for user_data in users:
+            try:
+                user = _row_to_user(user_data)  # Deserialize
+                if not user:
+                    continue
+                
+                base_res = user.get('base_resources', {})
+                old_streak = base_res.get('current_streak', 0)
+                
+                if old_streak > 0:  # Only update if there's a streak to reset
+                    base_res['current_streak'] = 0
+                    user['base_resources'] = base_res
+                    save_user(user.get('user_id'), user)
+                    reset_count += 1
+            except Exception as e:
+                print(f"[ERROR] Failed to reset streak for user {user_data.get('user_id')}: {e}")
+                continue
+        
+        if reset_count > 0:
+            print(f"[ROUND] Streak reset for {reset_count} players - NEW ROUND STARTED ⚡")
+        return reset_count
+    except Exception as e:
+        print(f"[ERROR] reset_all_streaks failed: {e}")
+        return 0
