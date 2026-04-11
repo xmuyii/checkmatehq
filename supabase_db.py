@@ -170,6 +170,10 @@ def save_user(user_id, data: dict):
     base_data = d.pop('base', None)
     resources_data = d.pop('resources', None)
     
+    # Exclude challenges if saving to DB (since the column doesn't exist yet)
+    # Challenges are tracked in memory but not persisted to database
+    d.pop('challenges', None)
+    
     # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources)
     for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs'):
         if isinstance(d.get(k), (list, dict)):
@@ -697,6 +701,28 @@ def grant_free_teleports_to_all():
         return teleport_count
     except Exception as e:
         print(f"[ERROR] grant_free_teleports_to_all failed: {e}")
+        return 0
+
+
+def grant_free_shields_to_all():
+    """Grant 3 free shield items to all players as unclaimed gifts."""
+    try:
+        users = supabase.table(DB_TABLE).select('user_id').execute().data
+        shield_count = 0
+        for user_data in users:
+            try:
+                user_id = user_data.get('user_id')
+                # Add 3 shield items as unclaimed
+                for _ in range(3):
+                    add_unclaimed_item(user_id, 'shield_potion', 1)
+                shield_count += 1
+            except Exception as e:
+                print(f"[WARN] Could not grant shields to {user_data.get('user_id')}: {e}")
+                continue
+        print(f"[SHIELDS] Granted 3 free shields to {shield_count} players")
+        return shield_count
+    except Exception as e:
+        print(f"[ERROR] grant_free_shields_to_all failed: {e}")
         return 0
 
 

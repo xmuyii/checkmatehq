@@ -53,6 +53,17 @@ from addictive_mechanics import (
     format_rare_drop_notification, get_limited_offer
 )
 
+# ── Bandit System (Strategic Enemy Encounters) ──────────────────────────────
+try:
+    from bandit_system import (
+        should_trigger_bandit_attack, generate_bandit_encounter, format_bandit_encounter,
+        calculate_defense_strength, calculate_battle_outcome_vs_bandit,
+        format_battle_description, get_sector_narrative
+    )
+    print("✅ Bandit system loaded")
+except Exception as e:
+    print(f"⚠️  Bandit system failed ({e}), no enemy encounters")
+
 # ── Revenge & Scout System ─────────────────────────────────────────────────
 try:
     from revenge_system import (
@@ -62,6 +73,17 @@ try:
     print("✅ Revenge & Scout system loaded")
 except Exception as e:
     print(f"⚠️  Revenge system failed ({e}), attacks will have no revenge multiplier")
+
+# ── Advanced Scout System (5-min delay, deception, traps) ────────────────────
+try:
+    from scout_system_advanced import (
+        scout_player_advanced, check_scout_return, set_displayed_stats,
+        clear_displayed_stats, set_mousetraps, activate_firewall, deactivate_firewall,
+        check_scout_notifications, format_scout_notification, format_scout_report_advanced
+    )
+    print("✅ Advanced scout system loaded")
+except Exception as e:
+    print(f"⚠️  Advanced scout system failed ({e})")
 
 # ── Attack System ──────────────────────────────────────────────────────────
 try:
@@ -86,6 +108,7 @@ try:
         add_resources_from_word_length, update_streak_and_award_food,
         reset_all_streaks, add_randomized_gift, give_automatic_shield, give_shields_to_all,
         deactivate_shield, disrupt_shield, restore_shield_after_attack, grant_free_teleports_to_all,
+        grant_free_shields_to_all,
     )
     print("✅ Using Supabase database")
 except Exception as e:
@@ -1790,29 +1813,482 @@ async def cmd_attack(message: types.Message):
         await message.answer("⚔️ *GM:* \"You can't attack yourself, fool.\"", parse_mode="Markdown")
         return
     
-    # CHECK SHIELD STATUS
-    attacker_shield = attacker.get('shield_status', 'UNPROTECTED')
-    if attacker_shield == 'ACTIVE':
-        # Ask for confirmation
-        confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="⚔️ Yes, Attack!", callback_data=f"confirm_attack_{u_id}_{target_id}"),
-                InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_attack")
-            ]
-        ])
+    # ═══════════════════════════════════════════════════════════════════════════
+    #  OFFER SCOUTING OPTION BEFORE ATTACK
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    # Show pre-attack options
+    options_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🕵️ Scout First (75💰)", callback_data=f"scout_before_attack_{u_id}_{target_id}"),
+            InlineKeyboardButton(text="⚔️ Attack Now", callback_data=f"direct_attack_{u_id}_{target_id}"),
+        ]
+    ])
+    
+    await message.answer(
+        f"🎯 *ATTACK PREPARATION* 🎯\n\n"
+        f"Target: **{target_display_name}**\n\n"
+        f"*OPTIONS:*\n"
+        f"🕵️ *Scout First* - Send scout rat (5 min) to see their base stats\n"
+        f"   Cost: 75 Silver | Intel: Military, resources, level, shield\n"
+        f"   Risk: 30% chance scout lies, mousetraps, firewall\n\n"
+        f"⚔️ *Attack Now* - Assault blindly without intel",
+        reply_markup=options_kb,
+        parse_mode="Markdown"
+    )
+
+
+@dp.callback_query(F.data.startswith("scout_before_attack_"))
+async def cb_scout_before_attack(callback: types.CallbackQuery):
+    """Launch scout mission before attack."""
+    try:
+        parts = callback.data.split("_")
+        attacker_id = parts[3]
+        target_id = parts[4]
+        user_id = str(callback.from_user.id)
         
+        if user_id != attacker_id:
+            await callback.answer("❌ This isn't your action!", show_alert=True)
+            return
+        
+        attacker = get_user(attacker_id)
+        target = get_user(target_id)
+        
+        if not attacker or not target:
+            await callback.answer("❌ Player not found.", show_alert=True)
+            return
+        
+        target_name = target.get("username", "Unknown")
+        
+        # Launch scout
+        result = scout_player_advanced(attacker_id, target_id, target_name)
+        
+        if not result.get("success"):
+            await callback.message.edit_text(
+                f"❌ *SCOUT FAILED*\n\n{result.get('message', 'Unknown error')}",
+                parse_mode="Markdown"
+            )
+            return
+        
+        # Scout sent successfully
+        scout_id = result.get("scout_id")
+        returns_at_str = result.get("returns_at")
+        
+        await callback.message.edit_text(
+            f"🐀 *SCOUT RAT DEPLOYED* 🐀\n\n"
+            f"Target: **{target_name}**\n"
+            f"Status: En route to base\n"
+            f"Duration: 5 minutes\n\n"
+            f"Your scout rat is scurrying toward the target...\n"
+            f"⏱️ Returns at: {returns_at_str}\n\n"
+            f"💭 *Remember:*\n"
+            f"• 30% chance scout will lie\n"
+            f"• Target may have set mousetraps (70% escape)\n"
+            f"• Target may have firewall (50% kill rate)\n"
+            f"• Use multiple scouts to verify intel!\n\n"
+            f"_Scout mission ID: {scout_id}_",
+            parse_mode="Markdown"
+        )
+        
+        # Store for later retrieval
+        attacker["pending_scout_missions"] = attacker.get("pending_scout_missions", [])
+        attacker["pending_scout_missions"].append({
+            "id": scout_id,
+            "target_id": target_id,
+            "target_name": target_name
+        })
+        save_user(attacker_id, attacker)
+        
+        await callback.answer("🐀 Scout sent! Check back in 5 minutes.")
+        
+    except Exception as e:
+        print(f"[CB_SCOUT_BEFORE_ATTACK ERROR] {e}")
+        await callback.answer(f"❌ Error: {str(e)[:50]}", show_alert=True)
+
+
+@dp.callback_query(F.data.startswith("direct_attack_"))
+async def cb_direct_attack(callback: types.CallbackQuery):
+    """Proceed with attack without scouting."""
+    try:
+        parts = callback.data.split("_")
+        attacker_id = parts[2]
+        target_id = parts[3]
+        user_id = str(callback.from_user.id)
+        
+        if user_id != attacker_id:
+            await callback.answer("❌ This isn't your action!", show_alert=True)
+            return
+        
+        attacker = get_user(attacker_id)
+        target = get_user(target_id)
+        
+        if not attacker or not target:
+            await callback.answer("❌ Player not found.", show_alert=True)
+            return
+        
+        target_name = target.get("username", "Unknown")
+        
+        # CHECK SHIELD STATUS
+        attacker_shield = attacker.get('shield_status', 'UNPROTECTED')
+        if attacker_shield == 'ACTIVE':
+            # Ask for confirmation
+            confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="⚔️ Yes, Attack!", callback_data=f"confirm_attack_{attacker_id}_{target_id}"),
+                    InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_attack")
+                ]
+            ])
+            
+            await callback.message.edit_text(
+                f"⚠️ *SHIELD DEACTIVATION WARNING* ⚠️\n\n"
+                f"You have an **ACTIVE shield** protecting your base.\n\n"
+                f"*Attacking {target_name} will deactivate your shield.*\n\n"
+                f"Are you sure you want to proceed?",
+                reply_markup=confirm_kb,
+                parse_mode="Markdown"
+            )
+            return
+        
+        # No shield or shield not ACTIVE - proceed with attack
+        await _execute_attack(attacker_id, target_id, target_name, callback.message)
+        await callback.answer()
+        
+    except Exception as e:
+        print(f"[CB_DIRECT_ATTACK ERROR] {e}")
+        await callback.answer(f"❌ Error: {str(e)[:50]}", show_alert=True)
+
+
+@dp.message(_cmd("scout_results"))
+async def cmd_scout_results(message: types.Message):
+    """Check scout mission results."""
+    if message.chat.type != "private":
+        await message.answer("🕵️ *GM:* \"Scout reports in *private*.\"", parse_mode="Markdown")
+        return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("❌ Account not found.", parse_mode="Markdown")
+        return
+    
+    pending_scouts = user.get("pending_scout_missions", [])
+    
+    if not pending_scouts:
         await message.answer(
-            f"⚠️ *SHIELD DEACTIVATION WARNING* ⚠️\n\n"
-            f"You have an **ACTIVE shield** protecting your base.\n\n"
-            f"*Attacking {target_display_name} will deactivate your shield.*\n\n"
-            f"Are you sure you want to proceed?",
-            reply_markup=confirm_kb,
+            "🐀 *NO ACTIVE SCOUTS*\n\n"
+            "You have no active scout missions.\n"
+            "Use `!attack @player` then select *Scout First* option.",
             parse_mode="Markdown"
         )
         return
     
-    # No shield or shield not ACTIVE - proceed with attack
-    await _execute_attack(u_id, target_id, target_display_name, message)
+    # Show list of pending scouts
+    txt = "🐀 *SCOUT MISSIONS* 🐀\n\n"
+    
+    for idx, scout in enumerate(pending_scouts, 1):
+        scout_id = scout.get("id")
+        target_name = scout.get("target_name", "Unknown")
+        txt += f"{idx}. Scout sent to **{target_name}**\n"
+        txt += f"   Details: `/scout_check {scout_id}`\n\n"
+    
+    await message.answer(txt, parse_mode="Markdown")
+
+
+@dp.message(_cmd("scout_check"))
+async def cmd_scout_check(message: types.Message):
+    """Check results of a specific scout mission."""
+    if message.chat.type != "private":
+        await message.answer("🕵️ *GM:* \"Scout reports in *private*.\"", parse_mode="Markdown")
+        return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("❌ Account not found.", parse_mode="Markdown")
+        return
+    
+    # Parse scout ID
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.answer(
+            "🐀 *SCOUT CHECK*\n\n"
+            "Usage: `/scout_check [scout_id]`\n\n"
+            "Use `/scout_results` to see all active scouts.",
+            parse_mode="Markdown"
+        )
+        return
+    
+    scout_id = args[1]
+    
+    # Check scout return
+    result = check_scout_return(u_id, scout_id)
+    
+    await message.answer(result.get("message", "Scout check failed"), parse_mode="Markdown")
+    
+    # If completed, show attack option
+    if result.get("status") == "completed":
+        completed_scouts = user.get("pending_scout_missions", [])
+        target_scout = next((s for s in completed_scouts if s["id"] == scout_id), None)
+        
+        if target_scout:
+            target_id = target_scout.get("target_id")
+            target_name = target_scout.get("target_name")
+            
+            attack_kb = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="⚔️ Attack Now!", callback_data=f"direct_attack_{u_id}_{target_id}"),
+                    InlineKeyboardButton(text="🕵️ Send Another Scout", callback_data=f"scout_before_attack_{u_id}_{target_id}"),
+                ]
+            ])
+            
+            await message.answer(
+                f"\n*READY TO ATTACK?*\n"
+                f"Target: **{target_name}**\n\n"
+                f"Now you have intel. Attack with confidence!",
+                reply_markup=attack_kb,
+                parse_mode="Markdown"
+            )
+
+
+@dp.message(_cmd("defenses"))
+async def cmd_defenses(message: types.Message):
+    """Configure base defenses (mousetraps, firewall, fake stats)."""
+    if message.chat.type != "private":
+        await message.answer("🛡️ *GM:* \"Configure defenses in *private*.\"", parse_mode="Markdown")
+        return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("❌ Account not found.", parse_mode="Markdown")
+        return
+    
+    # Show defense menu
+    defense_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🪤 MouseTraps", callback_data="defense_mousetraps"),
+            InlineKeyboardButton(text="🔥 Firewall", callback_data="defense_firewall"),
+        ],
+        [
+            InlineKeyboardButton(text="💭 Fake Stats", callback_data="defense_fake_stats"),
+            InlineKeyboardButton(text="📊 View Status", callback_data="defense_status"),
+        ]
+    ])
+    
+    txt = f"🛡️ *BASE DEFENSE CONFIGURATION* 🛡️\n\n"
+    txt += f"*DEFENSE OPTIONS:*\n\n"
+    txt += f"🪤 *MouseTraps*: Catch incoming scouts (30% success, 70% escape)\n"
+    txt += f"   Cost: Items from inventory\n\n"
+    txt += f"🔥 *Firewall*: Incinerate scouts with fireball (50% hit rate)\n"
+    txt += f"   Cost: 1 Fireball item | Duration: 1 hour\n\n"
+    txt += f"💭 *Fake Stats*: Show false intel to scouts\n"
+    txt += f"   Manually edit what scouts see\n"
+    txt += f"   Cost: Deception item\n"
+    
+    await message.answer(txt, reply_markup=defense_kb, parse_mode="Markdown")
+
+
+@dp.callback_query(F.data == "defense_mousetraps")
+async def cb_defense_mousetraps(callback: types.CallbackQuery):
+    """Set mousetraps."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    
+    if not user:
+        await callback.answer("❌ User not found.", show_alert=True)
+        return
+    
+    # Get available traps from inventory
+    inventory = user.get("inventory", [])
+    traps_available = sum(1 for item in inventory if "trap" in item.get("type", "").lower())
+    
+    await callback.message.edit_text(
+        f"🪤 *MOUSETRAP DEFENSE*\n\n"
+        f"Set traps to catch incoming scouts.\n\n"
+        f"⚙️ How many traps to set?\n"
+        f"Available traps: {traps_available}\n\n"
+        f"Reply with a number: `/traps 3`",
+        parse_mode="Markdown"
+    )
+
+
+@dp.message(_cmd("traps"))
+async def cmd_set_traps(message: types.Message):
+    """Set number of mousetraps."""
+    if message.chat.type != "private":
+        return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("❌ Account not found.", parse_mode="Markdown")
+        return
+    
+    # Parse number
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.answer(
+            "🪤 *SET MOUSETRAPS*\n\n"
+            "Usage: `/traps [number]`\n"
+            "Example: `/traps 5`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    try:
+        trap_count = int(args[1])
+        if trap_count < 0 or trap_count > 100:
+            await message.answer("❌ Trap count must be 0-100.", parse_mode="Markdown")
+            return
+    except ValueError:
+        await message.answer("❌ Invalid number.", parse_mode="Markdown")
+        return
+    
+    # Set traps
+    set_mousetraps(u_id, trap_count)
+    
+    await message.answer(
+        f"🪤 *TRAPS SET*: {trap_count}\n\n"
+        f"✅ {trap_count} mousetraps are now active on your base.\n"
+        f"Incoming scouts have a 30% chance of being caught.\n"
+        f"(Scouts have 70% chance to escape)\n\n"
+        f"Traps reset after catching a scout.",
+        parse_mode="Markdown"
+    )
+
+
+@dp.callback_query(F.data == "defense_firewall")
+async def cb_defense_firewall(callback: types.CallbackQuery):
+    """Activate firewall."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    
+    if not user:
+        await callback.answer("❌ User not found.", show_alert=True)
+        return
+    
+    # Check if they have firewall item
+    inventory = user.get("inventory", [])
+    has_fireball = any(item.get("type") == "fireball" for item in inventory)
+    
+    if not has_fireball:
+        await callback.answer("❌ You need a Fireball item to activate firewall!", show_alert=True)
+        return
+    
+    # Activate firewall
+    activate_firewall(u_id)
+    
+    # Remove fireball from inventory
+    inventory = [item for item in inventory if item.get("type") != "fireball"]
+    user["inventory"] = inventory
+    save_user(u_id, user)
+    
+    await callback.message.edit_text(
+        f"🔥 *FIREWALL ACTIVATED* 🔥\n\n"
+        f"✅ Your base is now protected by a firewall!\n"
+        f"🔥 Fireball: 50% chance to incinerate incoming scouts\n"
+        f"⏱️ Duration: 1 hour\n\n"
+        f"After 1 hour, firewall deactivates automatically.",
+        parse_mode="Markdown"
+    )
+
+
+@dp.callback_query(F.data == "defense_fake_stats")
+async def cb_defense_fake_stats(callback: types.CallbackQuery):
+    """Edit fake stats."""
+    u_id = str(callback.from_user.id)
+    
+    await callback.message.edit_text(
+        f"💭 *FAKE STATS EDITOR* 💭\n\n"
+        f"Create false intel that scouts will see.\n\n"
+        f"Edit your displayed stats using:\n"
+        f"`/fake_stats [level] [troops] [wood] [bronze] [iron]`\n\n"
+        f"Example:\n"
+        f"`/fake_stats 25 500 1000 800 600`\n\n"
+        f"This shows scouts you're level 25 with 500 troops\n"
+        f"and the listed resources.",
+        parse_mode="Markdown"
+    )
+
+
+@dp.message(_cmd("fake_stats"))
+async def cmd_fake_stats(message: types.Message):
+    """Set fake stats for scouts."""
+    if message.chat.type != "private":
+        return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("❌ Account not found.", parse_mode="Markdown")
+        return
+    
+    # Parse arguments
+    args = message.text.strip().split()
+    if len(args) < 6:
+        await message.answer(
+            "💭 *FAKE STATS*\n\n"
+            "Usage: `/fake_stats [level] [troops] [wood] [bronze] [iron]`\n\n"
+            "Example: `/fake_stats 20 300 500 400 200`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    try:
+        level = int(args[1])
+        troops = int(args[2])
+        wood = int(args[3])
+        bronze = int(args[4])
+        iron = int(args[5])
+    except ValueError:
+        await message.answer("❌ All values must be numbers.", parse_mode="Markdown")
+        return
+    
+    # Set fake stats
+    fake_data = {
+        "level": level,
+        "shield": "ACTIVE",  # Always show as protected
+        "military": {"pawns": troops // 2, "knights": troops // 4, "bishops": troops // 4},
+        "resources": {
+            "wood": wood,
+            "bronze": bronze,
+            "iron": iron,
+            "diamond": 0,
+            "relics": 0
+        },
+        "deception_chance": 0.85  # 85% of scouts see fake stats
+    }
+    
+    set_displayed_stats(u_id, fake_data)
+    
+    await message.answer(
+        f"💭 *FAKE STATS SET* 💭\n\n"
+        f"✅ Scouts will see:\n"
+        f"📊 Level: {level}\n"
+        f"⚔️ Troops: {troops}\n"
+        f"💰 Resources: {wood} wood, {bronze} bronze, {iron} iron\n"
+        f"🛡️ Shield: ACTIVE (always shown)\n\n"
+        f"85% of scouts will see false data.\n"
+        f"15% may bypass deception.\n\n"
+        f"Use `/clear_fake_stats` to remove deception.",
+        parse_mode="Markdown"
+    )
+
+
+@dp.message(_cmd("clear_fake_stats"))
+async def cmd_clear_fake_stats(message: types.Message):
+    """Clear fake stats."""
+    if message.chat.type != "private":
+        return
+    
+    u_id = str(message.from_user.id)
+    clear_displayed_stats(u_id)
+    
+    await message.answer(
+        f"💭 *FAKE STATS CLEARED* 💭\n\n"
+        f"✅ Scouts will now see your actual base stats.",
+        parse_mode="Markdown"
+    )
 
 
 async def _execute_attack(attacker_id: str, target_id: str, target_display_name: str, message: types.Message):
@@ -2272,6 +2748,40 @@ async def cmd_teleport(message: types.Message):
     # Send confirmation
     confirmation = f"\n🌀 *TELEPORTED TO SECTOR {sector_id}*\n\n🃏 *GameMaster:* \"Welcome to {sector['name']}. May fortune favor the bold.\"\n"
     await message.answer(confirmation, parse_mode="Markdown")
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    #  CHECK FOR RANDOM BANDIT ENCOUNTER
+    # ═══════════════════════════════════════════════════════════════════════════
+    player_level = user.get('level', 1)
+    should_attack, reason = should_trigger_bandit_attack(player_level, sector_id)
+    
+    if should_attack:
+        # Generate encounter
+        encounter = generate_bandit_encounter(sector_id, player_level)
+        
+        # Store encounter for later battle handling
+        user['current_encounter'] = encounter
+        save_user(u_id, user)
+        
+        # Send narrative + call to action
+        encounter_msg = format_bandit_encounter(encounter)
+        await message.answer(encounter_msg, parse_mode="Markdown")
+        
+        # Send defensive action buttons
+        defend_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🛡️ DEFEND!", callback_data=f"defend_bandit_{u_id}"),
+                InlineKeyboardButton(text="💨 FLEE", callback_data=f"flee_bandit_{u_id}"),
+            ]
+        ])
+        
+        await message.answer(
+            f"⚠️ *WHAT WILL YOU DO?*\n\n"
+            f"🛡️ *DEFEND* - Activate your shields, troops, and items to fight\n"
+            f"💨 *FLEE* - Abandon this sector (lose some resources)",
+            reply_markup=defend_kb,
+            parse_mode="Markdown"
+        )
     
     # Announce to group
     announcement = f"📍 {message.from_user.first_name} teleported to Sector {sector_id} ({sector['name']})! {sector['emoji']}"
@@ -3222,6 +3732,203 @@ async def on_reaction(event: types.MessageReactionUpdated):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  BANDIT ENCOUNTER HANDLERS
+# ═══════════════════════════════════════════════════════════════════════════
+
+@dp.callback_query(F.data.startswith("defend_bandit_"))
+async def cb_defend_bandit(callback: types.CallbackQuery):
+    """Defend against bandit attack - initiate battle."""
+    try:
+        u_id = callback.data.split("_")[2]
+        
+        if str(callback.from_user.id) != u_id:
+            await callback.answer("❌ This isn't your encounter!", show_alert=True)
+            return
+        
+        user = get_user(u_id)
+        if not user:
+            await callback.answer("❌ User not found.", show_alert=True)
+            return
+        
+        encounter = user.get("current_encounter")
+        if not encounter:
+            await callback.answer("❌ No active encounter.", show_alert=True)
+            return
+        
+        # Calculate defense strength
+        player_defense = calculate_defense_strength(user)
+        bandit_attack = encounter.get("attack", 15)
+        
+        # Show battle message
+        await callback.message.edit_text(
+            f"⚔️ *BATTLE INITIATED* ⚔️\n\n"
+            f"Your Defense: **{player_defense}**\n"
+            f"Enemy Attack: **{bandit_attack}**\n\n"
+            f"_Rolling dice..._\n"
+            f"_Calling upon your troops, shields, and every ounce of courage..._",
+            parse_mode="Markdown"
+        )
+        
+        # Simulate battle
+        result = calculate_battle_outcome_vs_bandit(player_defense, bandit_attack)
+        
+        # Format battle report
+        battle_report = format_battle_description(user, encounter, result)
+        
+        # Wait a moment for dramatic effect
+        await asyncio.sleep(1)
+        
+        # Send battle outcome
+        await callback.message.reply(battle_report, parse_mode="Markdown")
+        
+        if result["player_won"]:
+            # Victory - give loot
+            loot = encounter.get("original_loot", {})
+            base_res = user.get("base_resources", {})
+            if not isinstance(base_res, dict):
+                base_res = {"resources": {}, "food": 0}
+            
+            resources = base_res.get("resources", {})
+            if not isinstance(resources, dict):
+                resources = {}
+            
+            for res_type, amount in loot.items():
+                resources[res_type] = resources.get(res_type, 0) + amount
+            
+            base_res["resources"] = resources
+            user["base_resources"] = base_res
+            
+            # Award victory bonus XP
+            add_xp(u_id, 250)
+            add_points(u_id, 500, user.get("username", "Unknown"))
+            
+            victory_msg = f"\n🏆 *VICTORY REWARDS*:\n+250 XP\n+500 Points"
+            for res, amt in loot.items():
+                victory_msg += f"\n+{amt} {res.upper()}"
+            
+            await callback.message.reply(victory_msg, parse_mode="Markdown")
+            
+            # Broadcast victory
+            try:
+                await bot.send_message(
+                    CHECKMATE_HQ_GROUP_ID,
+                    f"🏆 *HEROIC VICTORY* 🏆\n\n"
+                    f"⚔️ {user.get('username', 'Unknown')} defeated the {encounter.get('bandit_name', 'Bandit')}!\n"
+                    f"📍 Sector {encounter.get('sector_id', '?')}: {encounter.get('sector_name', 'Unknown')}\n"
+                    f"💎 Legend is born!\n"
+                )
+            except:
+                pass
+        
+        else:
+            # Defeat - lose resources/troops
+            base_res = user.get("base_resources", {})
+            if not isinstance(base_res, dict):
+                base_res = {}
+            
+            resources = base_res.get("resources", {})
+            if isinstance(resources, dict):
+                for res_type in resources:
+                    resources[res_type] = int(resources[res_type] * 0.7)  # Lose 30%
+            
+            military = user.get("military", {})
+            if isinstance(military, dict):
+                for unit_type in military:
+                    military[unit_type] = int(military[unit_type] * 0.8)  # Lose 20%
+            
+            base_res["resources"] = resources
+            user["base_resources"] = base_res
+            user["military"] = military
+            
+            defeat_msg = f"\n💀 *DEFEAT LOSSES*:\n-30% resources stolen\n-20% troops lost"
+            await callback.message.reply(defeat_msg, parse_mode="Markdown")
+            
+            # Broadcast defeat
+            try:
+                await bot.send_message(
+                    CHECKMATE_HQ_GROUP_ID,
+                    f"💀 *SECTOR DEFEAT* 💀\n\n"
+                    f"⚔️ {user.get('username', 'Unknown')} was defeated by the {encounter.get('bandit_name', 'Bandit')}!\n"
+                    f"📍 Sector {encounter.get('sector_id', '?')}: {encounter.get('sector_name', 'Unknown')}\n"
+                    f"📉 Resources and troops lost in battle.\n"
+                )
+            except:
+                pass
+        
+        # Clear current encounter
+        user.pop("current_encounter", None)
+        save_user(u_id, user)
+        
+        await callback.answer("⚔️ Battle resolved!")
+    except Exception as e:
+        print(f"[CB_DEFEND_BANDIT ERROR] {e}")
+        await callback.answer(f"❌ Error during battle: {str(e)[:50]}", show_alert=True)
+
+
+@dp.callback_query(F.data.startswith("flee_bandit_"))
+async def cb_flee_bandit(callback: types.CallbackQuery):
+    """Flee from bandit encounter - lose some resources."""
+    try:
+        u_id = callback.data.split("_")[2]
+        
+        if str(callback.from_user.id) != u_id:
+            await callback.answer("❌ This isn't your encounter!", show_alert=True)
+            return
+        
+        user = get_user(u_id)
+        if not user:
+            await callback.answer("❌ User not found.", show_alert=True)
+            return
+        
+        encounter = user.get("current_encounter")
+        if not encounter:
+            await callback.answer("❌ No active encounter.", show_alert=True)
+            return
+        
+        # You flee but lose some resources
+        base_res = user.get("base_resources", {})
+        if not isinstance(base_res, dict):
+            base_res = {}
+        
+        resources = base_res.get("resources", {})
+        if isinstance(resources, dict):
+            for res_type in resources:
+                resources[res_type] = int(resources[res_type] * 0.85)  # Lose 15%
+        
+        base_res["resources"] = resources
+        user["base_resources"] = base_res
+        user.pop("current_encounter", None)
+        save_user(u_id, user)
+        
+        narrative = get_sector_narrative(encounter.get("sector_id", 1))
+        
+        flee_msg = f"\n💨 *YOU FLED* 💨\n\n" \
+                   f"You abandon the sector, running for your life...\n" \
+                   f"_{narrative.get('reason_for_attack', 'You escaped... barely.')}_\n\n" \
+                   f"📉 *Losses:* -15% resources in panicked escape\n\n" \
+                   f"🃏 *GameMaster:* \"Cowardice has a price. Next time, stand and fight.\""
+        
+        await callback.message.edit_text(flee_msg, parse_mode="Markdown")
+        
+        # Broadcast flee
+        try:
+            await bot.send_message(
+                CHECKMATE_HQ_GROUP_ID,
+                f"💨 *SHAMEFUL RETREAT* 💨\n\n"
+                f"🏃 {user.get('username', 'Unknown')} fled from the {encounter.get('bandit_name', 'Bandit')}!\n"
+                f"📍 Sector {encounter.get('sector_id', '?')}: {encounter.get('sector_name', 'Unknown')}\n"
+                f"😰 Cowardice carries a cost...\n"
+            )
+        except:
+            pass
+        
+        await callback.answer("💨 Fled successfully!")
+    except Exception as e:
+        print(f"[CB_FLEE_BANDIT ERROR] {e}")
+        await callback.answer(f"❌ Error: {str(e)[:50]}", show_alert=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  ITEM ACTION HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -3674,8 +4381,8 @@ async def sector_status_task(bot: Bot, chat_id: int):
             emoji, resource, price_change = random.choice(resources)
             
             # Get top player (overlord) from leaderboard
-            top_players = get_leaderboard("weekly", limit=1)
-            overlord = top_players[0][0] if top_players else "The Council"
+            top_players = get_weekly_leaderboard(limit=1)
+            overlord = top_players[0].get('username', 'The Council') if top_players else "The Council"
             
             # Generate status message
             status_msg = sector_status(sector, resource, emoji, price_change, overlord)
@@ -3914,6 +4621,10 @@ async def main():
     # Grant 3 free teleports to all players
     grant_free_teleports_to_all()
     print("[OK] Granted 3 free teleports to all players")
+    
+    # Grant 3 free shields to all players
+    grant_free_shields_to_all()
+    print("[OK] Granted 3 free shields to all players")
     
     # Start background streak reset task (every 120s)
     round_task = asyncio.create_task(round_reset_task())
