@@ -6,6 +6,10 @@ on_group_message is registered LAST so every command above fires first.
 Game loop: simple asyncio.sleep ticks, force_stop flag.
 """
 
+# ── Load environment variables FIRST ──────────────────────────────────────
+from dotenv import load_dotenv
+load_dotenv()
+
 import asyncio
 import random
 from datetime import datetime, timedelta
