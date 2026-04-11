@@ -224,7 +224,7 @@ def register_user(user_id, username: str):
         }),
         'military': json.dumps({}),
         'traps': json.dumps({}),
-        'shield_status': 'ACTIVE',
+        'shield_status': 'UNPROTECTED',
         'shield_cooldown': None,
     }).execute()
 
@@ -549,35 +549,34 @@ def activate_shield(user_id) -> bool:
 
 
 def is_shielded(user: dict) -> bool:
-    """Return True if user has an active (non-expired) shield."""
-    shield_status = user.get('shield_status', 'ACTIVE')
+    """Return True if user has an active (non-disrupted) shield.
     
-    # If DISRUPTED, shield is temporarily broken (lasts 1 attack)
-    if shield_status == 'DISRUPTED':
-        return False
+    Shield statuses:
+    - UNPROTECTED: No shield active
+    - ACTIVE: Shield is on
+    - DISRUPTED: Shield was hit, no protection for 1 attack
+    """
+    shield_status = user.get('shield_status', 'UNPROTECTED')
     
-    # If INACTIVE, no shield
-    if shield_status == 'INACTIVE':
-        # Check if cooldown has passed
-        cooldown = user.get('shield_cooldown')
-        if cooldown:
-            try:
-                if datetime.utcnow() < datetime.fromisoformat(cooldown):
-                    return False  # Still in cooldown, no shield
-            except Exception:
-                pass
-        return False
-    
-    # ACTIVE status means shield is on
+    # Only ACTIVE shields provide protection
     if shield_status == 'ACTIVE':
         return True
     
-    # Legacy permanent shield (Phase 1)
-    exp = user.get('shield_expires')
-    if exp == 'permanent':
-        return True
+    # DISRUPTED or UNPROTECTED = no shield
+    if shield_status in ['DISRUPTED', 'UNPROTECTED']:
+        return False
     
-    return True  # Default to shielded
+    # Legacy support for old fields
+    exp = user.get('shield_expires')
+    if exp and exp != 'permanent':
+        # Check if expiry time has passed
+        try:
+            if datetime.utcnow() < datetime.fromisoformat(exp):
+                return True
+        except Exception:
+            pass
+    
+    return False
 
 
 def activate_shield(user_id: str) -> tuple[bool, str]:
@@ -586,43 +585,38 @@ def activate_shield(user_id: str) -> tuple[bool, str]:
     if not user:
         return False, "User not found"
     
-    shield_status = user.get('shield_status', 'ACTIVE')
+    shield_status = user.get('shield_status', 'UNPROTECTED')
     
-    # Check if in cooldown
-    cooldown = user.get('shield_cooldown')
-    if cooldown and shield_status == 'INACTIVE':
-        try:
-            if datetime.utcnow() < datetime.fromisoformat(cooldown):
-                remaining = (datetime.fromisoformat(cooldown) - datetime.utcnow()).total_seconds()
-                hours = int(remaining / 3600)
-                minutes = int((remaining % 3600) / 60)
-                return False, f"Shield in cooldown. {hours}h {minutes}m remaining."
-        except Exception:
-            pass
+    # Can't activate if shield is DISRUPTED (was just hit)
+    if shield_status == 'DISRUPTED':
+        return False, "⚠️ Your shield is DISRUPTED from an attack. Wait for it to auto-restore."
     
-    # Activate
+    # Already ACTIVE
+    if shield_status == 'ACTIVE':
+        return False, "✅ Your shield is already ACTIVE!"
+    
+    # Activate from UNPROTECTED
     user['shield_status'] = 'ACTIVE'
-    user.pop('shield_cooldown', None)  # Clear cooldown
+    user.pop('shield_cooldown', None)  # Clear any cooldowns
     save_user(user_id, user)
     return True, "✅ Shield activated!"
 
 
 def deactivate_shield(user_id: str) -> tuple[bool, str]:
-    """Deactivate shield and set 24-hour cooldown. Returns (success, message)."""
+    """Deactivate shield voluntarily. Returns (success, message)."""
     user = get_user(user_id)
     if not user:
         return False, "User not found"
     
-    shield_status = user.get('shield_status', 'ACTIVE')
+    shield_status = user.get('shield_status', 'UNPROTECTED')
     
     if shield_status != 'ACTIVE':
-        return False, "Shield is not active"
+        return False, "⚠️ Your shield is not currently ACTIVE"
     
-    # Deactivate and set 24-hour cooldown
-    user['shield_status'] = 'INACTIVE'
-    user['shield_cooldown'] = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+    # Deactivate
+    user['shield_status'] = 'UNPROTECTED'
     save_user(user_id, user)
-    return True, "⚠️ Shield deactivated. 24-hour cooldown started!"
+    return True, "⚠️ Shield deactivated! You're now vulnerable."
 
 
 def disrupt_shield(user_id: str) -> tuple[bool, str]:
@@ -640,42 +634,75 @@ def disrupt_shield(user_id: str) -> tuple[bool, str]:
 
 
 def restore_shield_after_attack(user_id: str):
-    """Restore shield to ACTIVE after DISRUPTED state. Called after 1 attack."""
+    """Restore shield from DISRUPTED back to ACTIVE after 1 attack."""
     user = get_user(user_id)
     if user and user.get('shield_status') == 'DISRUPTED':
         user['shield_status'] = 'ACTIVE'
         save_user(user_id, user)
+        print(f"[SHIELD] Shield restored for {user_id}: DISRUPTED → ACTIVE")
 
 
 def give_automatic_shield(user_id):
-    """Grant permanent shield to a player."""
+    """Grant a shield to a player."""
     user = get_user(str(user_id))
     if user:
-        user['shield_expires'] = 'permanent'
+        user['shield_status'] = 'ACTIVE'
+        user.pop('shield_expires', None)  # Remove legacy permanent shield
         save_user(str(user_id), user)
         return True
     return False
 
 
-def give_shields_to_all():
-    """Give permanent shields to all players (call once during startup)."""
+def reset_all_shields():
+    """Reset all players' shields to UNPROTECTED (removes permanent shields)."""
     try:
-        users = get_all_users()
-        shield_count = 0
+        users = supabase.table(DB_TABLE).select('user_id, shield_status').execute().data
+        reset_count = 0
         for user_data in users:
             try:
-                user = _row_to_user(user_data)
-                if user and user.get('shield_expires') != 'permanent':
-                    user['shield_expires'] = 'permanent'
-                    save_user(user.get('user_id'), user)
-                    shield_count += 1
-            except Exception:
+                user_id = user_data.get('user_id')
+                user = get_user(user_id)
+                if user:
+                    user['shield_status'] = 'UNPROTECTED'
+                    user.pop('shield_expires', None)  # Remove legacy permanent shield
+                    user.pop('shield_cooldown', None)  # Clear any cooldowns
+                    save_user(user_id, user)
+                    reset_count += 1
+            except Exception as e:
+                print(f"[WARN] Could not reset shield for {user_data.get('user_id')}: {e}")
                 continue
-        print(f"[SHIELDS] Confirmed permanent shields for {shield_count} players")
-        return shield_count
+        print(f"[SHIELDS] Reset {reset_count} players to UNPROTECTED status")
+        return reset_count
     except Exception as e:
-        print(f"[ERROR] give_shields_to_all failed: {e}")
+        print(f"[ERROR] reset_all_shields failed: {e}")
         return 0
+
+
+def grant_free_teleports_to_all():
+    """Grant 3 free teleport items to all players as unclaimed gifts."""
+    try:
+        users = supabase.table(DB_TABLE).select('user_id').execute().data
+        teleport_count = 0
+        for user_data in users:
+            try:
+                user_id = user_data.get('user_id')
+                # Add 3 teleport items as unclaimed
+                for _ in range(3):
+                    add_unclaimed_item(user_id, 'free_teleport', 1)
+                teleport_count += 1
+            except Exception as e:
+                print(f"[WARN] Could not grant teleports to {user_data.get('user_id')}: {e}")
+                continue
+        print(f"[TELEPORTS] Granted 3 free teleports to {teleport_count} players")
+        return teleport_count
+    except Exception as e:
+        print(f"[ERROR] grant_free_teleports_to_all failed: {e}")
+        return 0
+
+
+def give_shields_to_all():
+    """Deprecated: Use reset_all_shields() instead. This now resets shields."""
+    return reset_all_shields()
 
 
 # ── Unclaimed items ────────────────────────────────────────────────────────

@@ -198,6 +198,12 @@ WEEKLY_CHALLENGES = {
         "desc": "Maintain 7-day login streak",
         "reward": 800,
         "icon": "🔥"
+    },
+    "seven_letter_master": {
+        "name": "📝 Seven-Letter Master",
+        "desc": "Form 10 consecutive 7-letter words",
+        "reward": 750,
+        "icon": "📝"
     }
 }
 
@@ -232,6 +238,9 @@ def get_weekly_challenges(user_id: str) -> list:
         elif key == "streak_master":
             progress = user.get("buffs", {}).get("login_streak", 0)
             total = 7
+        elif key == "seven_letter_master":
+            progress = user.get("buffs", {}).get("consecutive_seven_letter", 0)
+            total = 10
         
         challenges.append({
             "key": key,

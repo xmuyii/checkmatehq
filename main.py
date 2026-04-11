@@ -21,6 +21,31 @@ from formatting import (
     military_deployment, territory_claimed, achievement_unlocked, loading_bar, sector_status
 )
 
+# ── GLOBAL EVENT TRACKING ──────────────────────────────────────────────────
+game_events = {
+    "level_ups": [],      # {"player": name, "level": 10, "time": timestamp}
+    "sector_captures": [], # {"player": name, "sector": 3, "troops": 100, "time": timestamp}
+    "battle_results": [],  # {"winner": name, "loser": name, "reward": 500, "time": timestamp}
+    "challenges": []       # {"player": name, "challenge": "Climber", "reward": 500, "time": timestamp}
+}
+
+def add_event(event_type: str, event_data: dict):
+    """Add event to tracking queue with timestamp."""
+    if event_type in game_events:
+        event_data['time'] = datetime.utcnow()
+        game_events[event_type].append(event_data)
+        # Keep only last 20 events to prevent memory leaks
+        if len(game_events[event_type]) > 20:
+            game_events[event_type] = game_events[event_type][-20:]
+        print(f"[EVENT] {event_type.upper()}: {event_data}")
+
+def get_recent_events(event_type: str, minutes: int = 15) -> list:
+    """Get events from last N minutes."""
+    if event_type not in game_events:
+        return []
+    cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+    return [e for e in game_events[event_type] if e.get('time', datetime.utcnow()) > cutoff]
+
 # ── Addictive Mechanics ────────────────────────────────────────────────────
 from addictive_mechanics import (
     handle_daily_login, get_combo_multiplier, increment_combo, reset_combo,
@@ -60,7 +85,7 @@ try:
         add_inventory_item, activate_shield, is_shielded, get_sector_display,
         add_resources_from_word_length, update_streak_and_award_food,
         reset_all_streaks, add_randomized_gift, give_automatic_shield, give_shields_to_all,
-        deactivate_shield, disrupt_shield, restore_shield_after_attack,
+        deactivate_shield, disrupt_shield, restore_shield_after_attack, grant_free_teleports_to_all,
     )
     print("✅ Using Supabase database")
 except Exception as e:
@@ -1012,6 +1037,174 @@ async def cmd_autoclaim(message: types.Message):
     await _do_claim_all(message, u_id, is_command=True)
 
 
+@dp.message(_cmd("battle_items"))
+async def cmd_battle_items(message: types.Message):
+    """Show all battle items available for purchase with prices and requirements."""
+    if message.chat.type != "private":
+        await message.answer("⚔️ *GameMaster:* \"Check your items in *private*.\"", parse_mode="Markdown"); return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("🃏 *GameMaster:* \"Not registered.\"", parse_mode="Markdown"); return
+    
+    player_level = user.get("level", 1)
+    player_silver = user.get("silver", 0)
+    inventory = get_inventory(u_id) or {}
+    
+    # Define all battle items
+    battle_items = {
+        "common": [
+            {"id": "7day_shield", "name": "🛡️ 7-Day Shield", "price": 500, "level": 1, "desc": "Protect your base for 7 days"},
+            {"id": "rank_disguise", "name": "🎭 Rank Disguise (24h)", "price": 300, "level": 3, "desc": "Hide your true rank for 24 hours"},
+            {"id": "coin_explosion", "name": "🧨 Coin Explosion", "price": 400, "level": 5, "desc": "Double coins on next win"},
+            {"id": "fake_shield", "name": "🧠 Fake Shield", "price": 250, "level": 2, "desc": "Decoy shield to trick attackers"},
+            {"id": "rank_swap", "name": "💀 Rank Swap", "price": 350, "level": 4, "desc": "Swap ranks with target for 1 hour"},
+            {"id": "clown_badge", "name": "🤡 Clown Badge", "price": 200, "level": 1, "desc": "Embarrass opponent (cosmetic)"},
+            {"id": "scout", "name": "📸 Scout", "price": 600, "level": 6, "desc": "Reveal target's resources"},
+            {"id": "anti_scout", "name": "📴 Anti-Scout", "price": 500, "level": 5, "desc": "Block scouts for 12 hours"},
+        ],
+        "rare": [
+            {"id": "blackout", "name": "⚫ Blackout", "price": 2000, "level": 10, "desc": "Mysterious war effect (powerful)"},
+            {"id": "false_chest", "name": "💣 False Chest (Trap)", "price": 1500, "level": 8, "desc": "Gift that explodes in enemy base"},
+            {"id": "purge_call", "name": "🔥 Purge Call", "price": 2500, "level": 12, "desc": "Find & raid weaker players"},
+            {"id": "gift_drop", "name": "🎁 Gift Drop", "price": 1800, "level": 9, "desc": "Alliance gift for team boost"},
+        ],
+        "prestige": [
+            {"id": "celestial_crown", "name": "👑 Celestial Crown", "price": 5000, "level": 20, "desc": "Ultimate status symbol"},
+            {"id": "gem_multiplier", "name": "💎 Gem Multiplier (3x)", "price": 4000, "level": 18, "desc": "Triple item power for one use"},
+            {"id": "eternal_shield", "name": "⭐ Eternal Shield", "price": 6000, "level": 25, "desc": "Permanent protection (removable)"},
+        ]
+    }
+    
+    txt = f"{divider()}\n⚔️ *BATTLE ITEMS SHOP* ⚔️\n{divider()}\n"
+    txt += f"💰 Your Silver: *{player_silver}*\n"
+    txt += f"🎖️ Your Level: *{player_level}*\n\n"
+    
+    # Count items by category
+    for category, items in battle_items.items():
+        category_name = {"common": "🛡️ COMMON", "rare": "🏆 RARE", "prestige": "👑 PRESTIGE"}[category]
+        txt += f"\n*{category_name} ITEMS:*\n"
+        
+        for item in items:
+            count = inventory.get(item["id"], 0)
+            affordable = player_silver >= item["price"]
+            level_ok = player_level >= item["level"]
+            
+            # Build status line
+            if count > 0:
+                status = f"✅ (Have: {count})"
+            elif not level_ok:
+                status = f"🔒 Level {item['level']} needed"
+            elif not affordable:
+                status = f"❌ Need {item['price'] - player_silver} more silver"
+            else:
+                status = f"✅ Buy (${item['price']})"
+            
+            txt += f"{item['name']}\n   {item['desc']} | {status}\n"
+    
+    txt += f"\n{divider()}\n"
+    txt += "💡 *Tip:* Type `!buy [item_id]` to purchase\n"
+    txt += "Example: `!buy 7day_shield`\n"
+    txt += f"{divider()}"
+    
+    await message.answer(txt, parse_mode="Markdown")
+
+
+@dp.message(_cmd("buy"))
+async def cmd_buy(message: types.Message):
+    """Buy a battle item from the shop."""
+    if message.chat.type != "private":
+        await message.answer("🛒 *GameMaster:* \"Shop in *private* only.\"", parse_mode="Markdown"); return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("🃏 *GameMaster:* \"Not registered.\"", parse_mode="Markdown"); return
+    
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.answer(
+            "🛒 *HOW TO BUY*\n"
+            "Usage: `!buy [item_id]`\n\n"
+            "Examples:\n"
+            "`!buy 7day_shield`\n"
+            "`!buy scout`\n"
+            "`!buy eternal_shield`\n\n"
+            "Type `!battle_items` to see all items and prices",
+            parse_mode="Markdown"
+        )
+        return
+    
+    item_id = args[1].lower()
+    
+    # Define all items with pricing
+    all_items = {
+        "7day_shield": {"name": "🛡️ 7-Day Shield", "price": 500, "level": 1},
+        "rank_disguise": {"name": "🎭 Rank Disguise", "price": 300, "level": 3},
+        "coin_explosion": {"name": "🧨 Coin Explosion", "price": 400, "level": 5},
+        "fake_shield": {"name": "🧠 Fake Shield", "price": 250, "level": 2},
+        "rank_swap": {"name": "💀 Rank Swap", "price": 350, "level": 4},
+        "clown_badge": {"name": "🤡 Clown Badge", "price": 200, "level": 1},
+        "scout": {"name": "📸 Scout", "price": 600, "level": 6},
+        "anti_scout": {"name": "📴 Anti-Scout", "price": 500, "level": 5},
+        "blackout": {"name": "⚫ Blackout", "price": 2000, "level": 10},
+        "false_chest": {"name": "💣 False Chest", "price": 1500, "level": 8},
+        "purge_call": {"name": "🔥 Purge Call", "price": 2500, "level": 12},
+        "gift_drop": {"name": "🎁 Gift Drop", "price": 1800, "level": 9},
+        "celestial_crown": {"name": "👑 Celestial Crown", "price": 5000, "level": 20},
+        "gem_multiplier": {"name": "💎 Gem Multiplier", "price": 4000, "level": 18},
+        "eternal_shield": {"name": "⭐ Eternal Shield", "price": 6000, "level": 25},
+    }
+    
+    if item_id not in all_items:
+        await message.answer(
+            f"❌ Item `{item_id}` not found.\n"
+            "Type `!battle_items` to see valid items.",
+            parse_mode="Markdown"
+        )
+        return
+    
+    item = all_items[item_id]
+    player_level = user.get("level", 1)
+    player_silver = user.get("silver", 0)
+    
+    # Check level requirement
+    if player_level < item["level"]:
+        await message.answer(
+            f"🔒 *{item['name']}* requires Level {item['level']}\n"
+            f"Your level: {player_level}\n"
+            f"You need {item['level'] - player_level} more levels.",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Check silver
+    if player_silver < item["price"]:
+        needed = item["price"] - player_silver
+        await message.answer(
+            f"💰 *{item['name']}* costs **${item['price']}**\n"
+            f"Your silver: {player_silver}\n"
+            f"❌ You need **${needed} more silver**",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Purchase successful
+    user["silver"] = player_silver - item["price"]
+    save_user(u_id, user)
+    add_inventory_item(u_id, item_id, 1)
+    
+    await message.answer(
+        f"✅ *PURCHASE SUCCESSFUL*\n\n"
+        f"🛍️ You bought: {item['name']}\n"
+        f"💰 Cost: ${item['price']}\n"
+        f"💾 Remaining silver: {user['silver']}\n\n"
+        f"🃏 *GameMaster:* \"A wise investment... or is it? We'll see.\"",
+        parse_mode="Markdown"
+    )
+
+
 @dp.message(_cmd("changename"))
 async def cmd_changename(message: types.Message):
     if message.chat.type != "private":
@@ -1203,6 +1396,48 @@ async def cmd_research_lab(message: types.Message):
         await message.answer(txt, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
     else:
         await message.answer(txt + "\n\n*All researches unlocked!*", parse_mode="Markdown")
+
+
+@dp.message(_cmd("shield"))
+async def cmd_shield_status(message: types.Message):
+    """Check current shield status."""
+    if message.chat.type != "private":
+        await message.answer("🛡️ *GameMaster:* \"Check your shield in *private*.\"", parse_mode="Markdown"); return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("🃏 *GameMaster:* \"Not registered.\"", parse_mode="Markdown"); return
+    
+    shield_status = user.get('shield_status', 'UNPROTECTED')
+    
+    status_info = {
+        'UNPROTECTED': ("⚠️ UNPROTECTED", "Your base is vulnerable to attacks. Activate a shield!"),
+        'ACTIVE': ("🛡️ ACTIVE", "Your base is protected from attacks."),
+        'DISRUPTED': ("💥 DISRUPTED", "Your shield was hit! It will auto-restore to ACTIVE after the next attack.")
+    }
+    
+    emoji, description = status_info.get(shield_status, ("❓", "Unknown status"))
+    
+    txt = f"{divider()}\n🛡️ *YOUR SHIELD STATUS* 🛡️\n{divider()}\n\n"
+    txt += f"Status: {emoji} *{shield_status}*\n\n"
+    txt += f"ℹ️ {description}\n\n"
+    
+    if shield_status == 'UNPROTECTED':
+        txt += "*Available Actions:*\n"
+        txt += "• `!activateshield` - Activate your shield\n"
+        txt += "• `!battle_items` - Buy shield items\n\n"
+    elif shield_status == 'ACTIVE':
+        txt += "*Available Actions:*\n"
+        txt += "• `!deactivateshield` - Deactivate your shield\n"
+        txt += "• Attack other players fearlessly!\n\n"
+    elif shield_status == 'DISRUPTED':
+        txt += "*What to do:*\n"
+        txt += "Wait for the next attack. Your shield will auto-restore to ACTIVE.\n\n"
+    
+    txt += f"{divider()}"
+    
+    await message.answer(txt, parse_mode="Markdown")
 
 
 @dp.message(_cmd("activateshield"))
@@ -1959,7 +2194,7 @@ async def cmd_map(message: types.Message):
 
 @dp.message(_cmd("teleport"))
 async def cmd_teleport(message: types.Message):
-    """Teleport to a random sector with unique buffs."""
+    """Teleport to a sector with detailed information about buffs, perks, hazards, and drops."""
     if message.chat.type != "private":
         await message.answer("🃏 *GameMaster:* \"Teleport in *private*.\"", parse_mode="Markdown"); return
     
@@ -1968,45 +2203,47 @@ async def cmd_teleport(message: types.Message):
     if not user:
         await message.answer("❌ Account not found.", parse_mode="Markdown"); return
     
-    # Import sector system
-    from sectors_system import get_sector_info, get_public_sectors, is_vault_sector
+    # Parse sector number from command (optional)
+    parts = message.text.strip().split()
+    sector_id = None
+    if len(parts) > 1:
+        try:
+            sector_id = int(parts[1])
+            if sector_id < 1 or sector_id > 9:
+                await message.answer("❌ Sector must be between 1-9", parse_mode="Markdown"); return
+        except (ValueError, IndexError):
+            pass
     
-    # Get random sector (1-64)
-    sector_id = random.randint(1, 64)
+    # If no sector specified, use random
+    if not sector_id:
+        sector_id = random.randint(1, 9)
+    
+    # Import sector system
+    from sector_info import get_sector_info, format_sector_display
+    
+    # Get sector info
     sector = get_sector_info(sector_id)
+    if not sector:
+        await message.answer("❌ Sector not found", parse_mode="Markdown"); return
     
     # Update user's current sector
     user['sector'] = sector_id
     save_user(u_id, user)
     
-    # Build teleport message
-    txt = f"{divider()}\n🌀 *TELEPORTED* 🌀\n{divider()}\n\n"
-    txt += f"{sector['emoji']} **{sector['name']}**\n"
-    txt += f"📍 Sector {sector_id}\n\n"
-    txt += f"*Resources Available:* {', '.join(sector['resources'])}\n"
-    txt += f"*Buffs Active:* \n"
+    # Send detailed sector information
+    detailed_info = format_sector_display(sector_id, divider)
+    await message.answer(detailed_info, parse_mode="Markdown")
     
-    # Show buffs
-    for buff_name, multiplier in sector.get('buffs', {}).items():
-        if multiplier > 1:
-            txt += f"   ✅ x{multiplier:.1f} {buff_name}\n"
-        elif multiplier < 1:
-            txt += f"   ⚠️  x{multiplier:.1f} {buff_name}\n"
+    # Send confirmation
+    confirmation = f"\n🌀 *TELEPORTED TO SECTOR {sector_id}*\n\n🃏 *GameMaster:* \"Welcome to {sector['name']}. May fortune favor the bold.\"\n"
+    await message.answer(confirmation, parse_mode="Markdown")
     
-    if is_vault_sector(sector_id) and sector.get('discovery'):
-        txt += f"\n🔓 *VAULT SECTOR* - Discover {sector['discovery']}!\n"
-    
-    txt += f"\n{divider()}\n🃏 *GameMaster:* \"You arrive in {sector['name']}. Prepare yourself.\""
-    
-    await message.answer(txt, parse_mode="Markdown")
-    
-    # Announce to group if in public sector
-    if sector_id in get_public_sectors():
-        announcement = f"📍 {message.from_user.first_name} teleported to Sector {sector_id} ({sector['name']})! {sector['emoji']}"
-        try:
-            await bot.send_message(CHECKMATE_HQ_GROUP_ID, announcement)
-        except:
-            pass
+    # Announce to group
+    announcement = f"📍 {message.from_user.first_name} teleported to Sector {sector_id} ({sector['name']})! {sector['emoji']}"
+    try:
+        await bot.send_message(CHECKMATE_HQ_GROUP_ID, announcement)
+    except:
+        pass
 
 
 async def _show_mining_progress(message: types.Message, u_id: str):
@@ -3067,6 +3304,15 @@ async def on_group_message(message: types.Message):
         db_name = user.get("username", message.from_user.first_name)
         eng.used_words.append(guess)
         word_len = len(guess)
+        
+        # Track consecutive 7-letter words for challenge
+        buffs = user.get('buffs', {})
+        if word_len == 7:
+            consecutive_seven = buffs.get('consecutive_seven_letter', 0) + 1
+        else:
+            consecutive_seven = 0  # Reset if word is not 7 letters
+        buffs['consecutive_seven_letter'] = consecutive_seven
+        user['buffs'] = buffs
 
         # ═══════════════════════════════════════════════════════════════════
         #  ADDICTIVE MECHANICS: Trigger on word win
@@ -3097,10 +3343,18 @@ async def on_group_message(message: types.Message):
         challenges = get_weekly_challenges(u_id)
         weekly_bonus = 0
         challenge_message = ""
+        completed_challenges = []  # Track which challenges to mark as done
         for challenge in challenges:
             if not challenge["completed"] and challenge["progress"] == challenge["total"]:
                 weekly_bonus += challenge["reward"]
                 challenge_message += f"\n✅ CHALLENGE COMPLETE: {challenge['name']} +{challenge['reward']} pts!"
+                completed_challenges.append(challenge["key"])  # Mark this key as completed
+                # Log challenge completion for announcements
+                add_event("challenges", {
+                    "player": db_name,
+                    "challenge": challenge["name"],
+                    "reward": challenge["reward"]
+                })
         
         # Apply combo multiplier to points
         pts = int(pts * combo_mult)
@@ -3219,6 +3473,14 @@ async def on_group_message(message: types.Message):
             # Update resources in base_resources
             base_res['resources'] = resources_dict
             
+            # Mark completed challenges
+            if completed_challenges:
+                if 'challenges' not in user_fresh:
+                    user_fresh['challenges'] = {}
+                for challenge_key in completed_challenges:
+                    user_fresh['challenges'][challenge_key] = True
+                print(f"[CHALLENGES] Marked as completed: {completed_challenges}")
+            
             # Save updated base_resources to database
             user_fresh['base_resources'] = base_res
             save_user(u_id, user_fresh)
@@ -3252,6 +3514,12 @@ async def on_group_message(message: types.Message):
             old_lvl, new_lvl = check_level_up(u_id)
             if old_lvl and new_lvl:
                 print(f"[LEVEL UP] {db_name}: {old_lvl} → {new_lvl}")
+                # Log level-up event for announcements
+                add_event("level_ups", {
+                    "player": db_name,
+                    "old_level": old_lvl,
+                    "new_level": new_lvl
+                })
         except Exception as e:
             print(f"[LEVEL ERROR] {e}")
         
@@ -3325,9 +3593,13 @@ async def sector_status_task(bot: Bot, chat_id: int):
 
 
 async def gamemaster_announcement_task(bot: Bot, chat_id: int):
-    """Background task: Drop random GameMaster announcements every 7-10 minutes."""
-    announcements = [
-        f"{divider()}\n🛡️ *PERMANENT SHIELDS ACTIVATED*\n{divider()}\n\nI've gifted you all *eternal protection*. Not because you deserve it—but because watching you fumble around defenseless was getting *boring*. Your bases are now sacred ground. Try not to embarrass yourselves *too* much. 👀\n{divider()}",
+    """Background task: Drop random GameMaster announcements every 7-10 minutes + dynamic event announcements."""
+    
+    # Static announcements (dramatic GameMaster messages)
+    static_announcements = [
+        f"{divider()}\n🌀 *3 FREE TELEPORTS GRANTED*\n{divider()}\n\nCheck your `!claims` - I've given you **3 free teleports**. Use them wisely. Each sector offers different rewards, risks, and *opportunities*. \n\nType `!teleport [1-9]` to explore. Or be a coward and stay in Sector 1. Your choice. 🌍\n{divider()}",
+        
+        f"{divider()}\n🌍 *DISCOVER THE SECTORS*\n{divider()}\n\n**SECTOR 1** (🏜️ Badlands): Easy pickings. For noobs.\n**SECTOR 6** (🔥 Molten Gorge): Legendary drops. Almost certain death.\n**SECTOR 9** (🌑 Void Canyon): The best resources. Only legends survive.\n\nType `!map` to see what's available. Type `!teleport [1-9]` to jump in. 🚀\n{divider()}",
         
         f"{divider()}\n📈 *THE LEADERBOARD NEVER LIES*\n{divider()}\n\nSome of you are absolutely CRUSHING it. Others... *exist*. The weak are separated from the strong here on the *WEEKLY LEADERBOARD*. Or stay unknown forever on the *ALLTIME LEADERBOARD*. Your choice, coward. 🃏\n{divider()}",
         
@@ -3362,11 +3634,56 @@ async def gamemaster_announcement_task(bot: Bot, chat_id: int):
         try:
             wait_time = random.randint(420, 600)  # 7-10 minutes
             await asyncio.sleep(wait_time)
-            announcement = random.choice(announcements)
-            try:
-                await bot.send_message(chat_id, announcement, parse_mode="Markdown")
-            except Exception as send_err:
-                print(f"[ANNOUNCE ERROR] Failed to send: {send_err}")
+            
+            # 60% chance for dynamic event, 40% for static
+            if random.random() < 0.6:
+                # Check for recent events
+                event_announcement = None
+                
+                # 1. LEVEL-UP ANNOUNCEMENTS
+                level_ups = get_recent_events("level_ups", minutes=15)
+                if level_ups:
+                    lu = random.choice(level_ups)
+                    level_messages = [
+                        f"🎖️ *{lu['player']}* just reached **LEVEL {lu['new_level']}**! {['', '😤', '👑', '⚡'][random.randint(0, 3)]} The weak tremble.",
+                        f"📈 {lu['player']} HAS ASCENDED TO **LEVEL {lu['new_level']}**! The realm trembles. 🔥",
+                        f"👁️ I'm watching {lu['player']} climb the ranks... **LEVEL {lu['new_level']}** acquired. Impressive... *for now*. 🎩"
+                    ]
+                    event_announcement = random.choice(level_messages)
+                
+                # 2. CHALLENGE COMPLETION ANNOUNCEMENTS
+                elif get_recent_events("challenges", minutes=15):
+                    challenges = get_recent_events("challenges", minutes=15)
+                    ch = random.choice(challenges)
+                    challenge_messages = [
+                        f"🏆 {ch['player']} CONQUERED THE *{ch['challenge']}* CHALLENGE! +{ch['reward']} pts! The strong grow stronger.",
+                        f"✅ *{ch['player']}* just demolished the *{ch['challenge']}* challenge for **+{ch['reward']} points**!  Who's next? 💪",
+                        f"🎯 *{ch['player']}* is no slack—*{ch['challenge']}* down for **+{ch['reward']} pts**! Keep this pace and maybe I'll remember your name."
+                    ]
+                    event_announcement = random.choice(challenge_messages)
+                
+                # Send event announcement if we have one
+                if event_announcement:
+                    try:
+                        await bot.send_message(chat_id, event_announcement, parse_mode="Markdown")
+                        print(f"[EVENT ANNOUNCE] {event_announcement[:60]}...")
+                    except Exception as send_err:
+                        print(f"[ANNOUNCE ERROR] Failed to send event: {send_err}")
+                else:
+                    # No events, fall back to static
+                    announcement = random.choice(static_announcements)
+                    try:
+                        await bot.send_message(chat_id, announcement, parse_mode="Markdown")
+                    except Exception as send_err:
+                        print(f"[ANNOUNCE ERROR] Failed to send: {send_err}")
+            else:
+                # 40% static announcements
+                announcement = random.choice(static_announcements)
+                try:
+                    await bot.send_message(chat_id, announcement, parse_mode="Markdown")
+                except Exception as send_err:
+                    print(f"[ANNOUNCE ERROR] Failed to send: {send_err}")
+                    
         except asyncio.CancelledError:
             break
         except Exception as e:
@@ -3491,9 +3808,13 @@ async def main():
 
     print("[INFO] Connecting to Telegram polling...")
     
-    # Initialize shields for all players
+    # Reset all shields (remove permanent shields, set to UNPROTECTED)
     give_shields_to_all()
-    print("[OK] All players now have permanent shields")
+    print("[OK] All shields reset to UNPROTECTED status (permanent shields removed)")
+    
+    # Grant 3 free teleports to all players
+    grant_free_teleports_to_all()
+    print("[OK] Granted 3 free teleports to all players")
     
     # Start background streak reset task (every 120s)
     round_task = asyncio.create_task(round_reset_task())
