@@ -8,12 +8,25 @@ Game loop: simple asyncio.sleep ticks, force_stop flag.
 
 import asyncio
 import random
+from datetime import datetime, timedelta
 import httpx
 import os
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.exceptions import TelegramBadRequest
+from formatting import (
+    progress_bar, divider, broadcast, round_start_header, round_end_summary,
+    level_up_announcement, battle_result, shield_status_visual, countdown_timer,
+    military_deployment, territory_claimed, achievement_unlocked, loading_bar, sector_status
+)
+
+# ── Addictive Mechanics ────────────────────────────────────────────────────
+from addictive_mechanics import (
+    handle_daily_login, get_combo_multiplier, increment_combo, reset_combo,
+    get_weekly_challenges, format_challenge_display, check_rare_drop,
+    format_rare_drop_notification, get_limited_offer
+)
 
 # ── DB import ─────────────────────────────────────────────────────────────
 try:
@@ -27,6 +40,7 @@ try:
         add_inventory_item, activate_shield, is_shielded, get_sector_display,
         add_resources_from_word_length, update_streak_and_award_food,
         reset_all_streaks, add_randomized_gift, give_automatic_shield, give_shields_to_all,
+        deactivate_shield, disrupt_shield, restore_shield_after_attack,
     )
     print("✅ Using Supabase database")
 except Exception as e:
@@ -48,11 +62,11 @@ from initiation import initiation_router
 from config import BOT_TOKEN, ENV_NAME, SUPABASE_URL as CONFIG_SUPABASE_URL, SUPABASE_KEY as CONFIG_SUPABASE_KEY
 
 # ── Config ────────────────────────────────────────────────────────────────
-API_TOKEN    = os.environ.get('API_TOKEN',    BOT_TOKEN)
+TEST_BOT_TOKEN    = os.environ.get('TEST_BOT_TOKEN',    BOT_TOKEN)
 SUPABASE_URL = os.environ.get('SUPABASE_URL', CONFIG_SUPABASE_URL).rstrip('/')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', CONFIG_SUPABASE_KEY)
 
-bot = Bot(token=API_TOKEN)
+bot = Bot(token=TEST_BOT_TOKEN)
 dp  = Dispatcher()
 dp.include_router(initiation_router)
 
@@ -172,8 +186,11 @@ async def game_loop(chat_id: int):
                 await bot.send_message(
                     chat_id,
                     f"🃏 *GameMaster:* \"Fresh meat. Let's see if you've learned *anything* since last time.\"\n\n"
-                    f"📝 *WORDS:* `{eng.word1}`  `{eng.word2}`"
-                    f"{crate_note}\n\n⏱️ 2 minutes. Don't disappoint me again.",
+                    f"{divider()}\n"
+                    f"📝 *FUSION PAIR*\n"
+                    f"`{eng.word1.upper()}`  +  `{eng.word2.upper()}`\n"
+                    f"{divider()}"
+                    f"{crate_note}\n\n⏱️ *120 SECONDS* — Go hard.",
                     parse_mode="Markdown"
                 )
 
@@ -200,31 +217,36 @@ async def game_loop(chat_id: int):
 
                 eng.active = False
                 ss = sorted(eng.scores.values(), key=lambda x: x['pts'], reverse=True)
-                result = "🏆 *ROUND OVER*\n━━━━━━━━━━━━━━━\n"
-
+                
                 if not ss:
-                    result += "Nobody scored. Pathetic."
+                    result = f"🏆 *ROUND OVER*\n{divider()}\nNobody scored. Pathetic."
                     eng.empty_rounds += 1
                 else:
                     eng.empty_rounds = 0
-                    try:
-                        if eng.crates_dropping > 0 and eng.crate_claimers:
+                    medals = ["🥇", "🥈", "🥉"]
+                    result = f"🏆 *ROUND COMPLETE*\n{divider()}\n"
+                    
+                    # Crate bonus notification
+                    if eng.crates_dropping > 0 and eng.crate_claimers:
+                        try:
                             for cl in eng.crate_claimers:
                                 add_unclaimed_item(str(cl['user_id']), "super_crate", 1)
-                            result += f"🎁 {len(eng.crate_claimers)} player(s) grabbed mid-round crates!\n\n"
-                    except Exception as e:
-                        print(f"[ERROR] Crate handling: {e}")
+                            result += f"🎁 *{len(eng.crate_claimers)} LUCKY PLAYERS CLAIMED MID-ROUND CRATES!*\n\n"
+                        except Exception as e:
+                            print(f"[ERROR] Crate handling: {e}")
                     
+                    # Scores with medals
                     for i, p in enumerate(ss):
-                        medal = ["🥇","🥈","🥉"][i] if i < 3 else f"{i+1}."
-                        result += f"{medal} {p['name']} — {p['pts']} pts\n"
+                        medal = medals[i] if i < 3 else f"  {i+1}."
+                        result += f"{medal} {p['name']} — *{p['pts']} pts*\n"
                         if i < 3:
                             try:
                                 add_unclaimed_item(p['user_id'], "super_crate", 1)
                             except Exception as e:
                                 print(f"[ERROR] Adding crate for {p['name']}: {e}")
-
-                result += "\n`!weekly` | `!alltime` for full stats"
+                    
+                    result += f"\n{divider()}\n`!weekly` | `!alltime` for full stats"
+                
                 await bot.send_message(chat_id, result, parse_mode="Markdown")
 
                 # Level-up announcements
@@ -235,16 +257,19 @@ async def game_loop(chat_id: int):
                             if user:
                                 lvl = user.get('level', 1)
                                 msg = (
-                                    f"🎊 *LEVEL UP!* {sd['name']} reached *LEVEL {lvl}*!\n\n"
+                                    f"{divider()}\n"
+                                    f"🎊 *LEVEL UP!* 🎊\n"
+                                    f"{divider()}\n\n"
+                                    f"*{sd['name']}* has reached *LEVEL {lvl}*!\n\n"
                                     f"🃏 *GameMaster:* \"Congratulations. You've achieved the bare minimum. Collect your participation trophy. Use `!claims` in DM.\n\n"
-                                    f"✨ Bonus items awaiting."
+                                    f"✨ *Bonus items awaiting.*\""
                                 )
                                 add_unclaimed_item(uid, "super_crate", 1)
                                 k = "xp_multiplier" if random.random() < 0.5 else "silver_multiplier"
                                 add_unclaimed_item(uid, k, 1, xp_reward=0, multiplier_value=2)
                                 if lvl % 5 == 0:
                                     iname, idesc = award_powerful_locked_item(uid)
-                                    msg += f"\n\n⚡ *MILESTONE!* Unlocked: *{iname}*\n_{idesc}_"
+                                    msg += f"\n\n{divider()}\n⚡ *MILESTONE!* Unlocked: *{iname}*\n_{idesc}_\n{divider()}"
                                 await bot.send_message(chat_id, msg, parse_mode="Markdown")
                 except Exception as e:
                     print(f"[ERROR] Level-up announcements: {e}")
@@ -253,7 +278,11 @@ async def game_loop(chat_id: int):
                     eng.running = False
                     await bot.send_message(
                         chat_id,
-                        "🃏 *GameMaster:* \"*Three* empty rounds? Are you all *asleep*?! This is pathetic. Tell me when you grow a brain and type `!fusion` again.\"",
+                        f"{divider()}\n"
+                        f"🃏 *GameMaster:* \"*Three* empty rounds? Are you all *asleep*?! This is pathetic.\n\n"
+                        f"_The silence is deafening. The arena awaits your return._\n\n"
+                        f"Tell me when you grow a brain and type `!fusion` again.\"\n"
+                        f"{divider()}",
                         parse_mode="Markdown"
                     )
                     break
@@ -307,7 +336,7 @@ def _help_text() -> str:
         "`!fusion` — Start a word game round (group only)\n"
         "`!help` — This message\n\n"
         "*PLAYER COMMANDS* _(DM only)_\n"
-        "`!profile` — Your stats, base, resources\n"
+        "`!profile` — Your stats, base, resources, shield status\n"
         "`!base` — Full base details, military, traps\n"
         "`!inventory` — Your items & crates\n"
         "`!claims` — Unclaimed rewards\n"
@@ -315,7 +344,10 @@ def _help_text() -> str:
         "`!changename [Name]` — Change your username\n"
         "`!setup_base [Name]` — Create your first base\n"
         "`!changebasename [Name]` — Rename your base (1-time)\n"
-        "`!lab` — Research lab: upgrade your army\n\n"
+        "`!lab` — Research lab: upgrade your army\n"
+        "`!activateshield` — Activate shield (24h cooldown)\n"
+        "`!deactivateshield` — Deactivate shield\n"
+        "`!disruptor @user` — Break enemy shield for 1 attack\n\n"
         "*GAME COMMANDS* _(group)_\n"
         "`!fusion` — Start new game round\n"
         "`!words` — Show current word pair\n"
@@ -739,6 +771,41 @@ async def cmd_upgrade(message: types.Message):
     await message.answer("🃏 *GameMaster:* \"*Queen's Satchel!* Nice try. Not ready yet.\n\nWhen it arrives: unlocks 20 inventory slots for 900 Naira.\n\nUntil then? Manage your pathetic 5 slots like an adult. Stop asking.\"", parse_mode="Markdown")
 
 
+@dp.message(_cmd("challenges"))
+async def cmd_challenges(message: types.Message):
+    """Show weekly challenges and progress."""
+    if message.chat.type != "private":
+        await message.answer(_dm_only("!challenges"), parse_mode="Markdown"); return
+    
+    u_id = str(message.from_user.id)
+    if not get_user(u_id):
+        await message.answer("🃏 *GameMaster:* \"You're not registered, fool. Type `/start` first.\"", parse_mode="Markdown"); return
+    
+    challenges = get_weekly_challenges(u_id)
+    
+    msg = (
+        f"{divider()}\n"
+        f"🎯 *WEEKLY CHALLENGES*\n"
+        f"{divider()}\n\n"
+    )
+    
+    total_reward = 0
+    for i, challenge in enumerate(challenges, 1):
+        msg += format_challenge_display(challenge) + "\n\n"
+        if not challenge["completed"]:
+            total_reward += challenge["reward"]
+    
+    msg += (
+        f"{divider()}\n"
+        f"💎 *TOTAL POTENTIAL REWARD:* {total_reward} Silver\n"
+        f"\n🃏 *GameMaster:* \"Complete these challenges and watch yourself feel *accomplished*. "
+        f"That's what you're really chasing—not the rewards. Admit it.\"\n"
+        f"{divider()}"
+    )
+    
+    await message.answer(msg, parse_mode="Markdown")
+
+
 @dp.message(_cmd("profile"))
 async def cmd_profile(message: types.Message):
     if message.chat.type != "private":
@@ -747,38 +814,61 @@ async def cmd_profile(message: types.Message):
     profile = get_profile(u_id)
     if not profile:
         await message.answer("🃏 *GameMaster:* \"No profile? You haven't even *started* the tutorial? What are you doing here, fool? DM me, run `!start`, and actually play the game.\"", parse_mode="Markdown"); return
-    bar = "█" * int(profile['xp_progress'] / profile['xp_needed'] * 20) + "░" * (20 - int(profile['xp_progress'] / profile['xp_needed'] * 20))
-    shield_str = "🛡️ SHIELDED" if profile.get('shielded') else "⚔️ UNPROTECTED"
+    
+    xp_pct = (profile['xp_progress'] / profile['xp_needed'] * 100) if profile['xp_needed'] > 0 else 0
+    xp_bar = progress_bar(profile['xp_progress'], profile['xp_needed'], width=15)
+    
+    # Shield status (Phase 2A)
+    user = get_user(u_id)
+    shield_status = user.get('shield_status', 'ACTIVE')
+    if shield_status == 'DISRUPTED':
+        shield_status_str = "⚡ DISRUPTED (1 attack remaining)"
+    elif shield_status == 'INACTIVE':
+        cooldown = user.get('shield_cooldown')
+        if cooldown:
+            try:
+                remaining = (datetime.fromisoformat(cooldown) - datetime.utcnow()).total_seconds()
+                if remaining > 0:
+                    hours = int(remaining / 3600)
+                    minutes = int((remaining % 3600) / 60)
+                    shield_status_str = f"❌ INACTIVE (Cooldown: {hours}h {minutes}m)"
+                else:
+                    shield_status_str = "❌ INACTIVE (Ready to activate)"
+            except Exception:
+                shield_status_str = "❌ INACTIVE"
+        else:
+            shield_status_str = "❌ INACTIVE"
+    else:
+        shield_status_str = "🛡️ ACTIVE"
     
     # Format base resources
     base_res = profile.get('base_resources', {})
     base_name = profile.get('base_name') or "Nameless Base"
     resources_str = (
-        f"🪵 Wood: {base_res.get('wood', 0)} | 🧱 Bronze: {base_res.get('bronze', 0)} | "
-        f"⛓️ Iron: {base_res.get('iron', 0)} | 💎 Diamond: {base_res.get('diamond', 0)} | "
-        f"🏺 Relics: {base_res.get('relics', 0)}"
+        f"🪵 {base_res.get('wood', 0)} | 🧱 {base_res.get('bronze', 0)} | "
+        f"⛓️ {base_res.get('iron', 0)} | 💎 {base_res.get('diamond', 0)} | "
+        f"🏺 {base_res.get('relics', 0)}"
     )
-    food_str = f"🌽 Food: {profile.get('base_food', 0)}"
     
     await message.answer(
-        f"🃏 *GameMaster:* \"Staring at your own reflection. Fine.\"\n\n"
-        f"👤 *PROFILE: {profile['username']}*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🎖️ *LEVEL {profile['level']}*\n"
-        f"⭐ XP: {profile['xp']} | [{bar}] {profile['xp_progress']}/100\n\n"
-        f"💰 Silver: {profile['silver']}\n"
-        f"📍 Sector: {profile.get('sector_display','Not Assigned')}\n"
-        f"{shield_str}\n\n"
-        f"📊 *STATS*\n"
-        f"├─ Weekly Points: {profile['weekly_points']}\n"
-        f"└─ All-Time Points: {profile['all_time_points']}\n\n"
-        f"🏰 *BASE: {base_name}*\n"
-        f"├─ {resources_str}\n"
-        f"└─ {food_str}\n\n"
-        f"📦 *INVENTORY*\n"
-        f"├─ Claimed: {profile['inventory_count']}/{profile['backpack_slots']} slots\n"
-        f"├─ Unclaimed: {profile['unclaimed_count']} items ⚠️\n"
-        f"└─ Crates: {profile['crate_count']} | Shields: {profile['shield_count']}",
+        f"🃏 *GameMaster:* \"Staring at your own reflection. Fine.\"\n"
+        f"{divider()}\n\n"
+        f"👤 *{profile['username']}* — *LEVEL {profile['level']}*\n\n"
+        f"⭐ XP Progress:\n{xp_bar}\n"
+        f"💰 Silver: *{profile['silver']}*\n"
+        f"📍 Sector: _{profile.get('sector_display','Not Assigned')}_\n"
+        f"🛡️ Shield: {shield_status_str}\n\n"
+        f"{divider()}\n\n"
+        f"📊 *BATTLE RECORDS*\n"
+        f"├─ This Week: *{profile['weekly_points']}* pts\n"
+        f"└─ All-Time: *{profile['all_time_points']}* pts\n\n"
+        f"🏰 *{base_name}*\n"
+        f"├─ Resources: {resources_str}\n"
+        f"└─ Food: 🌽 *{profile.get('base_food', 0)}*\n\n"
+        f"📦 *INVENTORY* ({profile['inventory_count']}/{profile['backpack_slots']} slots)\n"
+        f"├─ Unclaimed: *{profile['unclaimed_count']}* ⚠️\n"
+        f"└─ Crates: *{profile['crate_count']}* | Shields: *{profile['shield_count']}*\n"
+        f"{divider()}",
         parse_mode="Markdown"
     )
 
@@ -1076,25 +1166,85 @@ async def cmd_research_lab(message: types.Message):
     
     user_researches = user.get('researches', {})
     
-    txt = "🔬 *SCIENCE LABORATORY*\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    txt += "*AVAILABLE UPGRADES:*\n\n"
+    txt = f"{divider()}\n🔬 *SCIENCE LABORATORY* 🔬\n{divider()}\n\n*AVAILABLE UPGRADES:*\n\n"
     
     rows = []
     for key, research in researches.items():
         if user_researches.get(key):
-            txt += f"✅ {research['name']} *(ALREADY RESEARCHED)*\n"
+            txt += f"✅ *{research['name']}* — _(UNLOCKED)_\n"
         else:
-            cost_str = " + ".join([f"{v} {k.title()}" for k, v in research['cost'].items()])
-            txt += f"{research['name']}\n*Cost:* {cost_str}\n*Effect:* {research['desc']}\n\n"
-            rows.append([InlineKeyboardButton(text=f"Research {research['name'].split()[0]}", 
+            cost_str = " + ".join([f"*{v}* {k.title()}" for k, v in research['cost'].items()])
+            txt += f"⬜ *{research['name']}*\n├─ Cost: {cost_str}\n└─ Effect: _{research['desc']}_\n\n"
+            rows.append([InlineKeyboardButton(text=f"🔎 Research {research['name'].split()[0]}", 
                                             callback_data=f"research_{key}")])
     
-    txt += "\n🃏 *GameMaster:* \"Invest in power. Or remain weak. Entropy cares not.\"" 
+    txt += f"\n{divider()}\n🃏 *GameMaster:* \"Invest in power. Or remain weak. Entropy cares not.\"\n{divider()}" 
     
     if rows:
         await message.answer(txt, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows), parse_mode="Markdown")
     else:
         await message.answer(txt + "\n\n*All researches unlocked!*", parse_mode="Markdown")
+
+
+@dp.message(_cmd("activateshield"))
+async def cmd_activate_shield(message: types.Message):
+    """Activate shield with 24-hour cooldown between activations."""
+    if message.chat.type != "private":
+        await message.answer(_dm_only("!activateshield"), parse_mode="Markdown"); return
+    
+    u_id = str(message.from_user.id)
+    ok, msg = activate_shield(u_id)
+    
+    if ok:
+        await message.answer(f"🛡️ {msg}", parse_mode="Markdown")
+    else:
+        await message.answer(f"⚠️ 🃏 *GameMaster:* \"{msg}\"", parse_mode="Markdown")
+
+
+@dp.message(_cmd("deactivateshield"))
+async def cmd_deactivate_shield(message: types.Message):
+    """Deactivate shield and start 24-hour cooldown before re-activation."""
+    if message.chat.type != "private":
+        await message.answer(_dm_only("!deactivateshield"), parse_mode="Markdown"); return
+    
+    u_id = str(message.from_user.id)
+    ok, msg = deactivate_shield(u_id)
+    
+    if ok:
+        await message.answer(f"{msg}", parse_mode="Markdown")
+    else:
+        await message.answer(f"⚠️ 🃏 *GameMaster:* \"{msg}\"", parse_mode="Markdown")
+
+
+@dp.message(_cmd("disruptor"))
+async def cmd_use_disruptor(message: types.Message):
+    """Use disruptor item to break enemy shield for 1 attack."""
+    if message.chat.type != "private":
+        await message.answer(_dm_only("!disruptor"), parse_mode="Markdown"); return
+    
+    # Parse target
+    parts = message.text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        await message.answer("🃏 *GameMaster:* \"Usage: `!disruptor @username`\"", parse_mode="Markdown"); return
+    
+    target_mention = parts[1]
+    u_id = str(message.from_user.id)
+    
+    # Check inventory for disruptor
+    inv = get_inventory(u_id)
+    disruptor_item = next((i for i in inv if i.get('item_type') == 'shield_disruptor'), None)
+    
+    if not disruptor_item:
+        await message.answer("🃏 *GameMaster:* \"You have no disruptors. Use `!shop` to buy one.\"", parse_mode="Markdown"); return
+    
+    # TODO: Resolve target username/mention to user_id
+    # For now, placeholder response
+    await message.answer(
+        "🔥 *Disruptor activated!*\n"
+        "Target's shield has been disrupted for their next incoming attack.\n\n"
+        "_Phase 2B will implement full attack system._",
+        parse_mode="Markdown"
+    )
 
 
 @dp.message(_cmd("base"))
@@ -1194,35 +1344,35 @@ async def cmd_base(message: types.Message):
     # Get sector
     sector = user.get("sector", "Unknown")
     
-    # Build comprehensive base info
+    # Build comprehensive base info with dynamic formatting
     info = (
-        f"🏰 **{user.get('base_name', 'Unnamed')}**\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"⭐ **BASE STATS**\n"
-        f"├─ **Level:** {base_level} (XP: {xp}/1M)\n"
-        f"├─ **Sector:** {sector}\n"
-        f"├─ **Power:** ⚡ {total_power}\n"
-        f"└─ **War Points:** 🎖️ {war_points}\n\n"
-        f"🪵 **RESOURCES**\n"
-        f"├─ 🪵 Wood: {resources.get('wood', 0)}\n"
-        f"├─ 🧱 Bronze: {resources.get('bronze', 0)}\n"
-        f"├─ ⛓️ Iron: {resources.get('iron', 0)}\n"
-        f"├─ 💎 Diamond: {resources.get('diamond', 0)}\n"
-        f"├─ 🏺 Relics: {resources.get('relics', 0)}\n"
-        f"└─ 🍖 Food: {food}\n\n"
-        f"⚔️ **MILITARY**\n"
+        f"{divider()}\n"
+        f"🏰 *{user.get('base_name', 'Unnamed')}* (Level {base_level})\n"
+        f"{divider()}\n\n"
+        f"⚡ *POWER:* {total_power} | 🎖️ *WAR POINTS:* {war_points}\n"
+        f"📍 *SECTOR:* {sector}\n\n"
+        f"{divider()}\n\n"
+        f"🪵 *RESOURCES*\n"
+        f"├─ Wood: *{resources.get('wood', 0)}*\n"
+        f"├─ Bronze: *{resources.get('bronze', 0)}*\n"
+        f"├─ Iron: *{resources.get('iron', 0)}*\n"
+        f"├─ Diamond: *{resources.get('diamond', 0)}*\n"
+        f"├─ Relics: *{resources.get('relics', 0)}*\n"
+        f"└─ Food: *{food}*\n\n"
+        f"⚔️ *MILITARY* ({total_troops} troops)\n"
         f"{military_str}\n\n"
-        f"🔱 **TRAPS**\n"
+        f"🔱 *DEFENSIVE TRAPS*\n"
         f"{traps_str}\n\n"
-        f"✨ **BUFFS**\n"
+        f"✨ *ACTIVE BUFFS*\n"
         f"└─ {buffs_str}\n\n"
-        f"👥 **ALLIANCE**\n"
+        f"👥 *ALLIANCE*\n"
         f"└─ {alliance_str}\n\n"
-        f"⚔️ **WAR RECORD**\n"
-        f"├─ **Wins:** 🏆 {wins}\n"
-        f"├─ **Losses:** ⚰️ {losses}\n"
-        f"├─ **Kings Captured:** 👑 {kings_captured}\n"
-        f"└─ **Times Captured:** 🔒 {times_captured}\n\n"
+        f"⚔️ *BATTLE RECORD*\n"
+        f"├─ Wins: *{wins}* 🏆\n"
+        f"├─ Losses: *{losses}* ⚰️\n"
+        f"├─ Kings Captured: *{kings_captured}* 👑\n"
+        f"└─ Times Captured: *{times_captured}* 🔒\n\n"
+        f"{divider()}\n"
         f"🃏 *GameMaster:* \"Your fortress. Fragile as it may be.\""
     )
     
@@ -1276,6 +1426,340 @@ async def cmd_use(message: types.Message):
     inv = get_inventory(str(message.from_user.id))
     if 0 <= pos < len(inv):
         await _do_use_item(message, str(message.from_user.id), inv[pos]['id'])
+
+
+@dp.message(_cmd("train"))
+async def cmd_train(message: types.Message):
+    """Train military units using resources."""
+    if message.chat.type != "private":
+        await message.answer("🃏 *GameMaster:* \"Train troops in *private*.\"", parse_mode="Markdown"); return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("❌ Account not found.", parse_mode="Markdown"); return
+    
+    # Unit training costs (resources needed to train)
+    units = {
+        "pawn": {
+            "name": "👹 Pawns",
+            "cost": {"wood": 5},
+            "power": 1,
+            "desc": "Basic unit. Weak but numerous."
+        },
+        "knight": {
+            "name": "🗡️ Knights",
+            "cost": {"wood": 15, "bronze": 5},
+            "power": 3,
+            "desc": "Balanced attacker and defender."
+        },
+        "bishop": {
+            "name": "⚜️ Bishops",
+            "cost": {"bronze": 10, "iron": 3},
+            "power": 5,
+            "desc": "Strategic unit. Strong AoE attacks."
+        },
+        "rook": {
+            "name": "🏰 Rooks",
+            "cost": {"iron": 10, "diamond": 2},
+            "power": 8,
+            "desc": "Defensive powerhouse."
+        },
+        "queen": {
+            "name": "👑 Queens",
+            "cost": {"iron": 20, "diamond": 5},
+            "power": 12,
+            "desc": "Elite attacker. Devastating."
+        },
+        "king": {
+            "name": "⚔️ Kings",
+            "cost": {"diamond": 15, "relics": 1},
+            "power": 20,
+            "desc": "Legendary warrior. Nearly unstoppable."
+        }
+    }
+    
+    # Get current resources
+    base_res = user.get('base_resources', {})
+    resources = base_res.get('resources', {})
+    
+    # Build training menu
+    txt = f"{divider()}\n⚔️ *MILITARY ACADEMY* ⚔️\n{divider()}\n\n*AVAILABLE UNITS TO TRAIN:*\n\n"
+    
+    rows = []
+    for unit_key, unit_info in units.items():
+        cost_str = " + ".join([f"{amt}{res}" for res, amt in unit_info['cost'].items()])
+        txt += f"**{unit_info['name']}** ({cost_str})\n"
+        txt += f"└─ {unit_info['desc']} (⚡ Power: {unit_info['power']})\n\n"
+        rows.append([InlineKeyboardButton(text=unit_info['name'], callback_data=f"train_{unit_key}")])
+    
+    txt += f"{divider()}\n🃏 *GameMaster:* \"Build your army. The weak perish. The strong *dominate*.\"" 
+    
+    await message.answer(
+        txt,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        parse_mode="Markdown"
+    )
+
+
+@dp.message(_cmd("mine"))
+async def cmd_mine(message: types.Message):
+    """Start mining operation in a sector."""
+    if message.chat.type != "private":
+        await message.answer("🃏 *GameMaster:* \"Mine in *private*.\"", parse_mode="Markdown"); return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("❌ Account not found.", parse_mode="Markdown"); return
+    
+    # Check if already mining
+    buffs = user.get('buffs', {})
+    if buffs.get('mining_active'):
+        # Show mining progress
+        await _show_mining_progress(message, u_id)
+        return
+    
+    # Get military
+    military = user.get('military', {})
+    total_troops = sum(military.values())
+    if total_troops == 0:
+        await message.answer(
+            "❌ You need troops to mine!\n\n"
+            "Use `/train` to build your army first.",
+            parse_mode="Markdown"
+        ); return
+    
+    # Sector mining info
+    sector_info = {
+        1: {"name": "Badlands-8", "resources": ["wood", "bronze"], "min_troops": 5},
+        2: {"name": "Crimson Wastes", "resources": ["bronze", "iron"], "min_troops": 10},
+        3: {"name": "Obsidian Peaks", "resources": ["iron", "diamond"], "min_troops": 15},
+        4: {"name": "Shattered Valley", "resources": ["bronze", "wood", "iron"], "min_troops": 8},
+        5: {"name": "Frozen Abyss", "resources": ["iron", "diamond"], "min_troops": 20},
+        6: {"name": "Molten Gorge", "resources": ["diamond", "relics"], "min_troops": 25},
+        7: {"name": "Twilight Marshes", "resources": ["wood", "relics"], "min_troops": 18},
+        8: {"name": "Silent Forest", "resources": ["wood", "bronze", "diamond"], "min_troops": 22},
+        9: {"name": "Void Canyon", "resources": ["relics", "diamond", "iron"], "min_troops": 30}
+    }
+    
+    # Show available sectors
+    txt = f"{divider()}\n⛏️ *MINING OPERATIONS* ⛏️\n{divider()}\n\n"
+    txt += f"💪 Your Army: *{total_troops} troops*\n\n"
+    txt += "Available sectors (tap to mine):\n\n"
+    
+    rows = []
+    user_level = 1 + (user.get('xp', 0) // 1000)
+    for sector_id in range(1, 10):
+        info = sector_info.get(sector_id, {})
+        resources_str = ", ".join(info['resources'])
+        min_troops = info['min_troops']
+        
+        # Check if unlocked
+        if sector_id <= user_level:
+            status = "✅" if total_troops >= min_troops else "❌"
+            label = f"{status} #{sector_id} {info['name']}"
+            rows.append([InlineKeyboardButton(
+                text=label,
+                callback_data=f"mine_sector_{sector_id}" if total_troops >= min_troops else "mining_locked"
+            )])
+        else:
+            rows.append([InlineKeyboardButton(
+                text=f"🔒 #{sector_id} {info['name']} (Unlocked at Level {sector_id})",
+                callback_data="mining_locked"
+            )])
+    
+    txt += f"{divider()}\n🃏 *GameMaster:* \"Send your troops to dig and plunder. The strong take resources, the weak... disappear.\""
+    
+    await message.answer(
+        txt,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        parse_mode="Markdown"
+    )
+
+
+@dp.message(_cmd("map"))
+async def cmd_map(message: types.Message):
+    """Show current location (current mining sector) or available sectors on the map."""
+    if message.chat.type != "private":
+        await message.answer("🃏 *GameMaster:* \"Check your map in *private*.\"", parse_mode="Markdown"); return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("❌ Account not found.", parse_mode="Markdown"); return
+    
+    # Sector info
+    sector_info = {
+        1: {"name": "Badlands-8", "resources": ["wood", "bronze"], "emoji": "🏜️"},
+        2: {"name": "Crimson Wastes", "resources": ["bronze", "iron"], "emoji": "🔴"},
+        3: {"name": "Obsidian Peaks", "resources": ["iron", "diamond"], "emoji": "⛰️"},
+        4: {"name": "Shattered Valley", "resources": ["bronze", "wood", "iron"], "emoji": "💔"},
+        5: {"name": "Frozen Abyss", "resources": ["iron", "diamond"], "emoji": "❄️"},
+        6: {"name": "Molten Gorge", "resources": ["diamond", "relics"], "emoji": "🔥"},
+        7: {"name": "Twilight Marshes", "resources": ["wood", "relics"], "emoji": "🌙"},
+        8: {"name": "Silent Forest", "resources": ["wood", "bronze", "diamond"], "emoji": "🌲"},
+        9: {"name": "Void Canyon", "resources": ["relics", "diamond", "iron"], "emoji": "🌑"}
+    }
+    
+    # Check if currently mining
+    buffs = user.get('buffs', {})
+    if buffs.get('mining_active'):
+        sector_id = buffs.get('mining_sector', 0)
+        info = sector_info.get(sector_id, {})
+        start_time_str = buffs.get('mining_start_time')
+        
+        if start_time_str:
+            start_time = datetime.fromisoformat(start_time_str)
+            elapsed = (datetime.utcnow() - start_time).total_seconds()
+            total_duration = 600
+            remaining = max(0, total_duration - elapsed)
+            progress_pct = min(100, int((elapsed / total_duration) * 100))
+            bar = progress_bar(progress_pct, 20)
+            
+            txt = f"{divider()}\n🗺️ *YOUR LOCATION* 🗺️\n{divider()}\n\n"
+            txt += f"{info.get('emoji', '📍')} **{info.get('name', 'Unknown')}**\n"
+            txt += f"🌍 Sector {sector_id}\n\n"
+            txt += f"*Resources Available:* {', '.join(info.get('resources', []))}\n\n"
+            txt += f"⏱️ Mining Progress ({int(remaining)}s remaining):\n"
+            txt += f"{bar} {progress_pct}%\n\n"
+            txt += f"💪 Troops sent: {buffs.get('mining_troops', 0)}\n"
+            txt += f"{divider()}"
+            
+            await message.answer(txt, parse_mode="Markdown")
+            return
+    
+    # Not mining - show map of all sectors
+    user_level = 1 + (user.get('xp', 0) // 1000)
+    
+    txt = f"{divider()}\n🗺️ *SECTOR MAP* 🗺️\n{divider()}\n\n"
+    txt += f"📊 Your Level: *{user_level}*\n"
+    txt += f"🔓 Unlocked Sectors: *1-{min(user_level, 9)}*\n\n"
+    txt += "*AVAILABLE SECTORS:*\n"
+    
+    for sector_id in range(1, 10):
+        info = sector_info.get(sector_id, {})
+        emoji = info.get('emoji', '📍')
+        name = info.get('name', 'Unknown')
+        resources = ", ".join(info.get('resources', []))
+        
+        if sector_id <= user_level:
+            txt += f"{emoji} **#{sector_id} {name}**\n"
+            txt += f"   🏭 Resources: {resources}\n"
+        else:
+            txt += f"🔒 **#{sector_id} {name}** (Unlock at Level {sector_id})\n"
+            txt += f"   🏭 Resources: {resources}\n"
+        
+        txt += "\n"
+    
+    txt += f"{divider()}\n🃏 *GameMaster:* \"The world is your battlefield. Claim it.\""
+    
+    await message.answer(txt, parse_mode="Markdown")
+
+
+@dp.message(_cmd("teleport"))
+async def cmd_teleport(message: types.Message):
+    """Teleport to a random sector with unique buffs."""
+    if message.chat.type != "private":
+        await message.answer("🃏 *GameMaster:* \"Teleport in *private*.\"", parse_mode="Markdown"); return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("❌ Account not found.", parse_mode="Markdown"); return
+    
+    # Import sector system
+    from sectors_system import get_sector_info, get_public_sectors, is_vault_sector
+    
+    # Get random sector (1-64)
+    sector_id = random.randint(1, 64)
+    sector = get_sector_info(sector_id)
+    
+    # Update user's current sector
+    user['sector'] = sector_id
+    save_user(u_id, user)
+    
+    # Build teleport message
+    txt = f"{divider()}\n🌀 *TELEPORTED* 🌀\n{divider()}\n\n"
+    txt += f"{sector['emoji']} **{sector['name']}**\n"
+    txt += f"📍 Sector {sector_id}\n\n"
+    txt += f"*Resources Available:* {', '.join(sector['resources'])}\n"
+    txt += f"*Buffs Active:* \n"
+    
+    # Show buffs
+    for buff_name, multiplier in sector.get('buffs', {}).items():
+        if multiplier > 1:
+            txt += f"   ✅ x{multiplier:.1f} {buff_name}\n"
+        elif multiplier < 1:
+            txt += f"   ⚠️  x{multiplier:.1f} {buff_name}\n"
+    
+    if is_vault_sector(sector_id) and sector.get('discovery'):
+        txt += f"\n🔓 *VAULT SECTOR* - Discover {sector['discovery']}!\n"
+    
+    txt += f"\n{divider()}\n🃏 *GameMaster:* \"You arrive in {sector['name']}. Prepare yourself.\""
+    
+    await message.answer(txt, parse_mode="Markdown")
+    
+    # Announce to group if in public sector
+    if sector_id in get_public_sectors():
+        announcement = f"📍 {message.from_user.first_name} teleported to Sector {sector_id} ({sector['name']})! {sector['emoji']}"
+        try:
+            await bot.send_message(CHECKMATE_HQ_GROUP_ID, announcement)
+        except:
+            pass
+
+
+async def _show_mining_progress(message: types.Message, u_id: str):
+    """Display current mining progress."""
+    user = get_user(u_id)
+    if not user:
+        return
+    
+    buffs = user.get('buffs', {})
+    if not buffs.get('mining_active'):
+        await message.answer("⛏️ You are not currently mining.", parse_mode="Markdown")
+        return
+    
+    sector_id = buffs.get('mining_sector', 0)
+    troop_count = buffs.get('mining_troops', 0)
+    start_time_str = buffs.get('mining_start_time')
+    drops = buffs.get('mining_drops', [])
+    
+    if not start_time_str:
+        await message.answer("⛏️ Mining data corrupted. Please restart.", parse_mode="Markdown")
+        return
+    
+    # Calculate elapsed time
+    start_time = datetime.fromisoformat(start_time_str)
+    elapsed = (datetime.utcnow() - start_time).total_seconds()
+    total_duration = 600  # 10 minutes
+    remaining = max(0, total_duration - elapsed)
+    
+    # Create progress bar
+    progress_pct = min(100, int((elapsed / total_duration) * 100))
+    bar = progress_bar(progress_pct, 20)
+    
+    # Build message
+    txt = f"{divider()}\n⛏️ *MINING IN PROGRESS* ⛏️\n{divider()}\n\n"
+    txt += f"📍 Sector {sector_id}\n"
+    txt += f"💪 Troops: {troop_count}\n"
+    txt += f"⏱️ Time remaining: {int(remaining)}s\n\n"
+    txt += f"Progress:\n{bar} {progress_pct}%\n\n"
+    
+    if drops:
+        txt += f"📦 *Resources Found:*\n"
+        for drop in drops:
+            txt += f"├─ +{drop['amount']} {drop['resource']}\n"
+        txt += "\n"
+    
+    if remaining <= 0:
+        txt += "✅ *Mining Complete!* Check your inventory for results."
+        # Finalize mining
+        await _finalize_mining(u_id, sector_id, troop_count)
+    else:
+        txt += f"_{int(remaining // 60)} min {int(remaining % 60)}s remaining_"
+    
+    await message.answer(txt, parse_mode="Markdown")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1501,16 +1985,22 @@ async def cb_use(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data.startswith("activate_mult_"))
 async def cb_activate_multiply(callback: types.CallbackQuery):
-    """Activate multiplier with selected quantity."""
+    """Activate multiplier with selected tier and quantity."""
     try:
         import re
-        # Parse: activate_mult_ITEMID_QUANTITY
-        m = re.search(r'activate_mult_(\d+)_(\d+)', callback.data)
+        # Parse: activate_mult_ITEMID_MULTIPLIER_QUANTITY
+        m = re.search(r'activate_mult_(\d+)_(\d+)_(\d+)', callback.data)
         if not m:
             await callback.answer("❌ Invalid format.", show_alert=True)
             return
         item_id = int(m.group(1))
-        quantity = int(m.group(2))
+        multiplier = int(m.group(2))  # 2-10
+        quantity = int(m.group(3))    # How many guesses
+        
+        # Validate multiplier is in range 2-10
+        if not (2 <= multiplier <= 10):
+            await callback.answer("❌ Invalid multiplier tier.", show_alert=True)
+            return
         
         u_id = str(callback.from_user.id)
         inv = get_inventory(u_id)
@@ -1520,7 +2010,6 @@ async def cb_activate_multiply(callback: types.CallbackQuery):
             await callback.answer("❌ Item not found or not a multiplier.", show_alert=True)
             return
         
-        mult = item.get('multiplier_value', 2)
         kind = "XP" if "xp" in item.get('type', '').lower() else "SILVER"
         
         # Activate the multiplier (store in buffs JSONB)
@@ -1528,17 +2017,17 @@ async def cb_activate_multiply(callback: types.CallbackQuery):
         if user:
             buffs = user.get('buffs', {})
             buffs['multiplier_type'] = kind.lower()
-            buffs['multiplier_active'] = mult
-            buffs['multiplier_count'] = quantity
+            buffs['multiplier_active'] = multiplier  # Store 2-10
+            buffs['multiplier_count'] = quantity      # How many times to apply
             user['buffs'] = buffs
             save_user(u_id, user)
         
         remove_inventory_item(u_id, item_id)
         
         await callback.message.edit_text(
-            f"⚡ *{kind} MULTIPLIER x{mult} ACTIVATED!*\n\n"
-            f"Your next {quantity} word guesses give x{mult} {kind}!\n"
-            f"🃏 *GameMaster:* \"Make them count, or waste them. Either way, entertain me.\"",
+            f"⚡ *{kind} MULTIPLIER x{multiplier} ACTIVATED!*\n\n"
+            f"Your next {quantity} word guesses apply **x{multiplier} {kind}**!\n\n"
+            f"🃏 *GameMaster:* \"Each word will show *{kind} x{multiplier}* in the feedback. Make them count.\"",
             parse_mode="Markdown"
         )
         await callback.answer()
@@ -1763,6 +2252,325 @@ async def cb_locked(callback: types.CallbackQuery):
     await callback.answer("Sectors 10-64 unlock as you level up!", show_alert=True)
 
 
+@dp.callback_query(F.data.startswith("train_"))
+async def cb_train_unit(callback: types.CallbackQuery):
+    """Handle unit training selection."""
+    try:
+        unit_key = callback.data.replace("train_", "")
+        u_id = str(callback.from_user.id)
+        user = get_user(u_id)
+        
+        if not user:
+            await callback.answer("❌ User not found.", show_alert=True)
+            return
+        
+        # Unit definitions with costs
+        units = {
+            "pawn": {"name": "👹 Pawns", "cost": {"wood": 5}},
+            "knight": {"name": "🗡️ Knights", "cost": {"wood": 15, "bronze": 5}},
+            "bishop": {"name": "⚜️ Bishops", "cost": {"bronze": 10, "iron": 3}},
+            "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "diamond": 2}},
+            "queen": {"name": "👑 Queens", "cost": {"iron": 20, "diamond": 5}},
+            "king": {"name": "⚔️ Kings", "cost": {"diamond": 15, "relics": 1}}
+        }
+        
+        if unit_key not in units:
+            await callback.answer("❌ Unknown unit.", show_alert=True)
+            return
+        
+        unit = units[unit_key]
+        cost_str = " + ".join([f"{amt} {res.upper()}" for res, amt in unit['cost'].items()])
+        
+        # Show quantity selector
+        await callback.message.edit_text(
+            f"🎯 *{unit['name']}* Training\n\n"
+            f"Cost per unit: {cost_str}\n\n"
+            f"How many {unit['name'].lower()} do you want to train?",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="5", callback_data=f"train_confirm_{unit_key}_5"),
+                 InlineKeyboardButton(text="10", callback_data=f"train_confirm_{unit_key}_10"),
+                 InlineKeyboardButton(text="20", callback_data=f"train_confirm_{unit_key}_20")],
+                [InlineKeyboardButton(text="50", callback_data=f"train_confirm_{unit_key}_50"),
+                 InlineKeyboardButton(text="100", callback_data=f"train_confirm_{unit_key}_100")]
+            ]),
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+    except Exception as e:
+        print(f"[CB_TRAIN ERROR] {e}")
+        await callback.answer(f"❌ Error: {str(e)}", show_alert=True)
+
+
+@dp.callback_query(F.data.startswith("train_confirm_"))
+async def cb_train_confirm(callback: types.CallbackQuery):
+    """Confirm unit training and deduct resources."""
+    try:
+        import re
+        m = re.search(r'train_confirm_(\w+)_(\d+)', callback.data)
+        if not m:
+            await callback.answer("❌ Invalid format.", show_alert=True)
+            return
+        
+        unit_key = m.group(1)
+        quantity = int(m.group(2))
+        u_id = str(callback.from_user.id)
+        user = get_user(u_id)
+        
+        if not user:
+            await callback.answer("❌ User not found.", show_alert=True)
+            return
+        
+        # Unit costs
+        units = {
+            "pawn": {"name": "👹 Pawns", "cost": {"wood": 5}},
+            "knight": {"name": "🗡️ Knights", "cost": {"wood": 15, "bronze": 5}},
+            "bishop": {"name": "⚜️ Bishops", "cost": {"bronze": 10, "iron": 3}},
+            "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "diamond": 2}},
+            "queen": {"name": "👑 Queens", "cost": {"iron": 20, "diamond": 5}},
+            "king": {"name": "⚔️ Kings", "cost": {"diamond": 15, "relics": 1}}
+        }
+        
+        if unit_key not in units:
+            await callback.answer("❌ Unknown unit.", show_alert=True)
+            return
+        
+        unit = units[unit_key]
+        base_res = user.get('base_resources', {})
+        resources = base_res.get('resources', {})
+        
+        # Check if enough resources
+        for res_type, cost_per_unit in unit['cost'].items():
+            total_cost = cost_per_unit * quantity
+            available = resources.get(res_type, 0) if res_type != 'food' else base_res.get('food', 0)
+            if available < total_cost:
+                await callback.answer(
+                    f"❌ Need {total_cost} {res_type.upper()}, only have {available}",
+                    show_alert=True
+                )
+                return
+        
+        # Deduct resources
+        for res_type, cost_per_unit in unit['cost'].items():
+            total_cost = cost_per_unit * quantity
+            resources[res_type] = resources.get(res_type, 0) - total_cost
+        
+        # Add troops
+        military = user.get('military', {})
+        military[unit_key] = military.get(unit_key, 0) + quantity
+        
+        # Save
+        user['military'] = military
+        base_res['resources'] = resources
+        user['base_resources'] = base_res
+        save_user(u_id, user)
+        
+        await callback.message.edit_text(
+            f"✅ *TRAINING COMPLETE!*\n\n"
+            f"🎖️ +{quantity} {unit['name'].lower()}\n\n"
+            f"Your army grows stronger. The weak tremble.",
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+    except Exception as e:
+        print(f"[CB_TRAIN_CONFIRM ERROR] {e}")
+        await callback.answer(f"❌ Error: {str(e)}", show_alert=True)
+
+
+@dp.callback_query(F.data == "mining_locked")
+async def cb_mining_locked(callback: types.CallbackQuery):
+    await callback.answer("Sector unlocked when you reach that level!", show_alert=True)
+
+
+@dp.callback_query(F.data.startswith("mine_sector_"))
+async def cb_mine_sector(callback: types.CallbackQuery):
+    """Setup mining operation."""
+    try:
+        import re
+        m = re.search(r'mine_sector_(\d+)', callback.data)
+        if not m:
+            await callback.answer("❌ Invalid sector.", show_alert=True)
+            return
+        
+        sector_id = int(m.group(1))
+        u_id = str(callback.from_user.id)
+        user = get_user(u_id)
+        
+        if not user:
+            await callback.answer("❌ User not found.", show_alert=True)
+            return
+        
+        # Sector info
+        sector_info = {
+            1: {"name": "Badlands-8", "resources": ["wood", "bronze"], "min_troops": 5, "multiplier": 1.0},
+            2: {"name": "Crimson Wastes", "resources": ["bronze", "iron"], "min_troops": 10, "multiplier": 1.2},
+            3: {"name": "Obsidian Peaks", "resources": ["iron", "diamond"], "min_troops": 15, "multiplier": 1.5},
+            4: {"name": "Shattered Valley", "resources": ["bronze", "wood", "iron"], "min_troops": 8, "multiplier": 1.1},
+            5: {"name": "Frozen Abyss", "resources": ["iron", "diamond"], "min_troops": 20, "multiplier": 1.25},
+            6: {"name": "Molten Gorge", "resources": ["diamond", "relics"], "min_troops": 25, "multiplier": 1.6},
+            7: {"name": "Twilight Marshes", "resources": ["wood", "relics"], "min_troops": 18, "multiplier": 1.3},
+            8: {"name": "Silent Forest", "resources": ["wood", "bronze", "diamond"], "min_troops": 22, "multiplier": 1.35},
+            9: {"name": "Void Canyon", "resources": ["relics", "diamond", "iron"], "min_troops": 30, "multiplier": 2.0}
+        }
+        
+        if sector_id not in sector_info:
+            await callback.answer("❌ Invalid sector.", show_alert=True)
+            return
+        
+        info = sector_info[sector_id]
+        military = user.get('military', {})
+        total_troops = sum(military.values())
+        
+        if total_troops < info['min_troops']:
+            await callback.answer(
+                f"❌ Need {info['min_troops']} troops, you have {total_troops}",
+                show_alert=True
+            )
+            return
+        
+        # Show troop selection
+        await callback.message.edit_text(
+            f"⛏️ *{info['name']}* (Sector {sector_id})\n\n"
+            f"Available Resources: {', '.join(info['resources'])}\n"
+            f"Minimum Troops Required: {info['min_troops']}\n"
+            f"You Have: {total_troops} troops\n\n"
+            f"How many troops to send mining?",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"{info['min_troops']}", callback_data=f"mine_start_{sector_id}_{info['min_troops']}"),
+                 InlineKeyboardButton(text=f"{int(total_troops*0.5)}", callback_data=f"mine_start_{sector_id}_{int(total_troops*0.5)}"),
+                 InlineKeyboardButton(text=f"{total_troops}", callback_data=f"mine_start_{sector_id}_{total_troops}")]
+            ]),
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+    except Exception as e:
+        print(f"[CB_MINE_SECTOR ERROR] {e}")
+        await callback.answer(f"❌ Error: {str(e)}", show_alert=True)
+
+
+@dp.callback_query(F.data.startswith("mine_start_"))
+async def cb_mine_start(callback: types.CallbackQuery):
+    """Start mining operation."""
+    try:
+        import re
+        m = re.search(r'mine_start_(\d+)_(\d+)', callback.data)
+        if not m:
+            await callback.answer("❌ Invalid format.", show_alert=True)
+            return
+        
+        sector_id = int(m.group(1))
+        troop_count = int(m.group(2))
+        u_id = str(callback.from_user.id)
+        user = get_user(u_id)
+        
+        if not user:
+            await callback.answer("❌ User not found.", show_alert=True)
+            return
+        
+        # Sector info with resources
+        sector_info = {
+            1: {"name": "Badlands-8", "resources": ["wood", "bronze"], "multiplier": 1.0},
+            2: {"name": "Crimson Wastes", "resources": ["bronze", "iron"], "multiplier": 1.2},
+            3: {"name": "Obsidian Peaks", "resources": ["iron", "diamond"], "multiplier": 1.5},
+            4: {"name": "Shattered Valley", "resources": ["bronze", "wood", "iron"], "multiplier": 1.1},
+            5: {"name": "Frozen Abyss", "resources": ["iron", "diamond"], "multiplier": 1.25},
+            6: {"name": "Molten Gorge", "resources": ["diamond", "relics"], "multiplier": 1.6},
+            7: {"name": "Twilight Marshes", "resources": ["wood", "relics"], "multiplier": 1.3},
+            8: {"name": "Silent Forest", "resources": ["wood", "bronze", "diamond"], "multiplier": 1.35},
+            9: {"name": "Void Canyon", "resources": ["relics", "diamond", "iron"], "multiplier": 2.0}
+        }
+        
+        # Generate 5 mining drops (one every 2 minutes for 10 minutes)
+        drops = []
+        info = sector_info.get(sector_id, {})
+        multiplier = info.get('multiplier', 1.0)
+        resources_available = info.get('resources', [])
+        
+        for drop_num in range(5):
+            # Vary amount based on troops sent (more troops = more resources)
+            troop_factor = max(1, troop_count // 10)
+            
+            drop = {}
+            for i, res in enumerate(resources_available):
+                # Base amount scales with troops
+                base_amount = 5 + (troop_count // 15)
+                # Apply sector multiplier
+                amount = int(base_amount * multiplier)
+                # Randomize ±20%
+                amount = int(amount * random.uniform(0.8, 1.2))
+                
+                drop[res] = max(1, amount)
+            
+            drops.append(drop)
+        
+        # Start mining
+        buffs = user.get('buffs', {})
+        buffs['mining_active'] = True
+        buffs['mining_sector'] = sector_id
+        buffs['mining_troops'] = troop_count
+        buffs['mining_start_time'] = datetime.utcnow().isoformat()
+        buffs['mining_drops'] = []  # Will be populated as drops occur
+        buffs['mining_schedule'] = drops  # Store the drops to be awarded
+        user['buffs'] = buffs
+        save_user(u_id, user)
+        
+        # Award first drop immediately
+        first_drop = drops[0]
+        base_res = user.get('base_resources', {})
+        if not isinstance(base_res, dict):
+            base_res = {'resources': {}, 'food': 0}
+        
+        resources = base_res.get('resources', {})
+        if not isinstance(resources, dict):
+            resources = {}
+        
+        for res_type, amount in first_drop.items():
+            resources[res_type] = resources.get(res_type, 0) + amount
+        
+        base_res['resources'] = resources
+        
+        # Deduct troops from military (they're now mining)
+        military = user.get('military', {})
+        troops_left = troop_count
+        for unit_type in ["king", "queen", "rook", "bishop", "knight", "pawn"]:
+            if troops_left <= 0:
+                break
+            available = military.get(unit_type, 0)
+            to_send = min(available, troops_left)
+            military[unit_type] -= to_send
+            troops_left -= to_send
+        
+        user['military'] = military
+        user['base_resources'] = base_res
+        
+        # Store mining drop history
+        mining_drops_log = buffs.get('mining_drops', [])
+        mining_drops_log.append({
+            'resource': list(first_drop.keys())[0] if first_drop else 'unknown',
+            'amount': list(first_drop.values())[0] if first_drop else 0
+        })
+        buffs['mining_drops'] = mining_drops_log
+        user['buffs'] = buffs
+        save_user(u_id, user)
+        
+        # Build progress message
+        drop_str = " + ".join([f"{amt} {res}" for res, amt in first_drop.items()])
+        
+        await callback.message.edit_text(
+            f"⛏️ *MINING STARTED*\n\n"
+            f"📍 Sector {sector_id} ({info.get('name', 'Unknown')})\n"
+            f"💪 Troops Deployed: {troop_count}\n"
+            f"⏱️ Duration: 10 minutes\n\n"
+            f"📦 *First Drop Acquired:*\n"
+            f"{drop_str}\n\n"
+            f"_New drops every 2 minutes..._",
+            parse_mode="Markdown"
+        )
+        await callback.answer("⛏️ Mining operation started!")
+    except Exception as e:
+        print(f"[CB_MINE_START ERROR] {e}")
+        await callback.answer(f"❌ Error: {str(e)}", show_alert=True)
+
+
 @dp.message_reaction()
 async def on_reaction(event: types.MessageReactionUpdated):
     try:
@@ -1831,15 +2639,21 @@ async def _do_use_item(message: types.Message, user_id: str, item_id: int):
     elif "multiplier" in itype:
         mult = item.get('multiplier_value', 2)
         kind = "XP" if "xp" in itype else "SILVER"
-        # Ask user how many uses they want via inline buttons
+        # Ask user to select multiplier strength (2x to 10x)
         await message.answer(
-            f"⚡ *{kind} MULTIPLIER x{mult}*\n\n"
-            f"How many word guesses should this apply to?",
+            f"⚡ *{kind} MULTIPLIER*\n\n"
+            f"Select the multiplier strength for this round:\n"
+            f"_(Each applies to all words until uses are exhausted)_",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="5 guesses", callback_data=f"activate_mult_{item_id}_5"),
-                 InlineKeyboardButton(text="10 guesses", callback_data=f"activate_mult_{item_id}_10")],
-                [InlineKeyboardButton(text="15 guesses", callback_data=f"activate_mult_{item_id}_15"),
-                 InlineKeyboardButton(text="20 guesses", callback_data=f"activate_mult_{item_id}_20")]
+                [InlineKeyboardButton(text="2x", callback_data=f"activate_mult_{item_id}_2_5"),
+                 InlineKeyboardButton(text="3x", callback_data=f"activate_mult_{item_id}_3_5"),
+                 InlineKeyboardButton(text="4x", callback_data=f"activate_mult_{item_id}_4_5")],
+                [InlineKeyboardButton(text="5x", callback_data=f"activate_mult_{item_id}_5_5"),
+                 InlineKeyboardButton(text="6x", callback_data=f"activate_mult_{item_id}_6_3"),
+                 InlineKeyboardButton(text="7x", callback_data=f"activate_mult_{item_id}_7_2")],
+                [InlineKeyboardButton(text="8x", callback_data=f"activate_mult_{item_id}_8_2"),
+                 InlineKeyboardButton(text="9x", callback_data=f"activate_mult_{item_id}_9_1"),
+                 InlineKeyboardButton(text="10x", callback_data=f"activate_mult_{item_id}_10_1")]
             ]),
             parse_mode="Markdown"
         ); return
@@ -1954,6 +2768,43 @@ async def on_group_message(message: types.Message):
         eng.used_words.append(guess)
         word_len = len(guess)
 
+        # ═══════════════════════════════════════════════════════════════════
+        #  ADDICTIVE MECHANICS: Trigger on word win
+        # ═══════════════════════════════════════════════════════════════════
+        
+        # Daily Login Streak (award bonus silver on first win of day)
+        login_result = handle_daily_login(u_id)
+        if login_result["success"]:
+            daily_bonus = login_result["bonus"]
+            pts += daily_bonus // 5  # Convert silver bonus to points bonus
+            print(f"[STREAK] {db_name}: Day {login_result['streak']}, +{login_result['bonus']} bonus silver")
+        
+        # Combo Multiplier (increment on each win)
+        combo = increment_combo(u_id)
+        combo_mult = combo["multiplier"]
+        if combo["milestone_message"]:
+            print(f"[COMBO] {combo['milestone_message']}")
+        
+        # Rare Drop Check (dopamine hit!)
+        rare_item = check_rare_drop()
+        rare_message = ""
+        if rare_item:
+            add_unclaimed_item(u_id, rare_item["key"], 1)
+            rare_message = f"\n\n🎉 {format_rare_drop_notification(rare_item)}"
+            print(f"[RARE] {db_name} got {rare_item['name']}!")
+
+        # Check weekly challenges
+        challenges = get_weekly_challenges(u_id)
+        weekly_bonus = 0
+        challenge_message = ""
+        for challenge in challenges:
+            if not challenge["completed"] and challenge["progress"] == challenge["total"]:
+                weekly_bonus += challenge["reward"]
+                challenge_message += f"\n✅ CHALLENGE COMPLETE: {challenge['name']} +{challenge['reward']} pts!"
+        
+        # Apply combo multiplier to points
+        pts = int(pts * combo_mult)
+
         # Check for active XP/SILVER multiplier (stored in buffs JSONB)
         buffs = user.get('buffs', {})
         mult_active = buffs.get('multiplier_active', 1)
@@ -1962,7 +2813,9 @@ async def on_group_message(message: types.Message):
         
         xp_mult = mult_active if mult_type == 'xp' and mult_count > 0 else 1
         xp_to_award = pts * xp_mult if mult_count > 0 else pts
-        mult_note = f" ⚡x{xp_mult}" if mult_count > 0 else ""
+        # Show multiplier as "XP x2" format with bold emphasis
+        mult_note = f" **XP x{xp_mult}**" if (mult_count > 0 and xp_mult > 1) else ""
+        combo_note = f" 🔥x{combo_mult}" if combo_mult > 1.0 else ""
 
         # SIMPLE RESOURCE SYSTEM - Add 1 resource based on word length
         # Resources start from 4-letter words
@@ -1986,7 +2839,7 @@ async def on_group_message(message: types.Message):
         print(f"[STREAK] Streak: {streak_info.get('streak')}, Food awarded: {streak_info.get('food_awarded')}, Status: {streak_info.get('status')}")
         
         # Build feedback message FIRST (no database calls needed)
-        fb = f"✅ `{guess.upper()}` +{pts} pts  ⭐ +{xp_to_award} XP{mult_note}"
+        fb = f"✅ `{guess.upper()}` +{pts} pts  ⭐ +{xp_to_award} XP{mult_note}{combo_note}"
         
         # Add resource rewards to feedback with format: +amount ResourceName emoji
         resource_info = {
@@ -2007,6 +2860,13 @@ async def on_group_message(message: types.Message):
             print(f"[FOOD] Food awarded: {streak_info['food_awarded']}, Total streak: {streak_info['streak']}")
         else:
             print(f"[FOOD] No food this round - Streak: {streak_info['streak']}, Food awarded: {streak_info['food_awarded']}")
+        
+        # Add combo message
+        if combo["milestone_message"]:
+            fb += f"\n\n{combo['milestone_message']}"
+        
+        # Add rare drop and challenges
+        fb += rare_message + challenge_message
         
         # Send feedback immediately (doesn't require database)
         print(f"[DEBUG] Final feedback: {fb}")
@@ -2121,38 +2981,81 @@ async def round_reset_task():
             await asyncio.sleep(5)  # Brief pause before retry
 
 
+async def sector_status_task(bot: Bot, chat_id: int):
+    """Background task: Post hourly sector status to keep chat feeling alive."""
+    sector_names = [
+        "Badlands-8", "Crimson Wastes", "Obsidian Peaks", "Shattered Valley",
+        "Frozen Abyss", "Molten Gorge", "Twilight Marshes", "Silent Forest",
+        "Void Canyon", "Ember Fields", "Deep Catacombs", "Azure Fortress"
+    ]
+    
+    resources = [
+        ("🪵", "Wood", "up 15%"),
+        ("🧱", "Bronze", "down 8%"),
+        ("⛓️", "Iron", "up 22%"),
+        ("💎", "Diamond", "up 45%"),
+        ("🏺", "Relics", "down 12%"),
+    ]
+    
+    while True:
+        try:
+            wait_time = 3600  # 1 hour
+            await asyncio.sleep(wait_time)
+            
+            # Get random sector and resource
+            sector = random.choice(sector_names)
+            emoji, resource, price_change = random.choice(resources)
+            
+            # Get top player (overlord) from leaderboard
+            top_players = get_leaderboard("weekly", limit=1)
+            overlord = top_players[0][0] if top_players else "The Council"
+            
+            # Generate status message
+            status_msg = sector_status(sector, resource, emoji, price_change, overlord)
+            
+            try:
+                await bot.send_message(chat_id, status_msg, parse_mode="Markdown")
+            except Exception as send_err:
+                print(f"[STATUS ERROR] Failed to send sector status: {send_err}")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[STATUS ERROR] Sector status task error: {e}")
+            await asyncio.sleep(10)
+
+
 async def gamemaster_announcement_task(bot: Bot, chat_id: int):
     """Background task: Drop random GameMaster announcements every 7-10 minutes."""
     announcements = [
-        "🛡️ *PERMANENT SHIELDS ACTIVATED*\n\nI've gifted you all *eternal protection*. Not because you deserve it—but because watching you fumble around defenseless was getting *boring*. Your bases are now sacred ground. Try not to embarrass yourselves *too* much. 👀",
+        f"{divider()}\n🛡️ *PERMANENT SHIELDS ACTIVATED*\n{divider()}\n\nI've gifted you all *eternal protection*. Not because you deserve it—but because watching you fumble around defenseless was getting *boring*. Your bases are now sacred ground. Try not to embarrass yourselves *too* much. 👀\n{divider()}",
         
-        "📈 *THE LEADERBOARD NEVER LIES*\n\nSome of you are absolutely CRUSHING it. Others... *exist*. The weak are separated from the strong here on the *WEEKLY LEADERBOARD*. Or stay unknown forever on the *ALLTIME LEADERBOARD*. Your choice, coward. 🃏",
+        f"{divider()}\n📈 *THE LEADERBOARD NEVER LIES*\n{divider()}\n\nSome of you are absolutely CRUSHING it. Others... *exist*. The weak are separated from the strong here on the *WEEKLY LEADERBOARD*. Or stay unknown forever on the *ALLTIME LEADERBOARD*. Your choice, coward. 🃏\n{divider()}",
         
-        "🏰 *YOUR FORTRESS IS PATHETIC*\n\nLook at your base. Just... *look* at it. Is that a fortress or a cardboard box? Level it up. Add military units. Place traps. Make it *worthy* of the GameMaster's attention. Otherwise, why should I bother watching? 😑",
+        f"{divider()}\n🏰 *YOUR FORTRESS IS PATHETIC*\n{divider()}\n\nLook at your base. Just... *look* at it. Is that a fortress or a cardboard box? Level it up. Add military units. Place traps. Make it *worthy* of the GameMaster's attention. Otherwise, why should I bother watching? 😑\n{divider()}",
         
         "🪓 *SWORDS WILL SHARPEN SOON*\n\nCurrently, shields are making you soft. Enjoy the free pass while it lasts. Soon the *WARS BEGIN*. Right now? Build your armies like your life depends on it. Because eventually... *it will*. Frame that warning. 💀",
         
-        "🏪 *SHOPS = YOUR NEW ADDICTION*\n\n• **Normal Shop**: For mortals who like... normal things\n• **Black Market**: For those with *taste*\n• **Alliance Shop**: For actual friends (rare)\n• **Ruler's Shop**: For the cocky ones\n• **Premium**: For the desperately impatient ⏰\n\nYour coins are *begging* to be spent here.",
+        f"{divider()}\n🏪 *SHOPS = YOUR NEW ADDICTION*\n{divider()}\n• **Normal Shop**: For mortals who like... normal things\n• **Black Market**: For those with *taste*\n• **Alliance Shop**: For actual friends (rare)\n• **Ruler's Shop**: For the cocky ones\n• **Premium**: For the desperately impatient\n{divider()}",
         
-        "🔬 *SCIENCE = POWER = DOMINANCE*\n\nThe research lab isn't just a building—it's an *IQ test*. Spend your precious resources on upgrades that'll make you 30% better at war. Or don't. I'll enjoy watching you lose. The choice is yours. 🧪",
+        f"{divider()}\n🔬 *SCIENCE = POWER = DOMINANCE*\n{divider()}\n\nThe research lab isn't just a building—it's an *IQ test*. Spend your precious resources on upgrades that'll make you 30% better at war. Or don't. I'll enjoy watching you lose. The choice is yours. 🧪\n{divider()}",
         
         "💎 *HOARD EVERYTHING LIKE YOUR LIFE DEPENDS ON IT*\n\nWood. Bronze. Iron. Diamond. Relics. \n\nEvery resource is a *weapon*. Every crate is a gift from me (you're welcome). Every item is *power*. Stop wasting them on stupid stuff. Build empires or die trying. 💰",
         
-        "👑 *SECTOR WARS ARE COMING*\n\nYou think Sector 1 is tough? Try Sector 9. \nBetter resources = better rewards = *actual* power. Teleport to a high sector and watch yourself get *obliterated*. Or train harder and actually win. I'm *dying* to see which. 🌍",
+        f"{divider()}\n👑 *SECTOR WARS ARE COMING*\n{divider()}\n\nYou think Sector 1 is tough? Try Sector 9. Better resources = better rewards = *actual* power. Teleport to a high sector and watch yourself get *obliterated*. Or train harder and actually win. I'm *dying* to see which. 🌍\n{divider()}",
         
         "⚔️ *YOUR MILITARY STINKS*\n\nPawns attack like they're scared. Knights are hit-or-miss. Bishops are *trying*. Rooks are solid. Queens? Where are your Queens? Kings? Almost never seen those. \n\nBuild better armies. Stop embarrassing the realm. 👑💔",
         
-        "🔗 *ALLIANCES = FRIENDSHIP BETRAYAL SIMULATORS*\n\nBand together with your friends... then stab them in the back for glory. The coming *Alliance Wars* will separate true friends from back-stabbers. Spoiler: everyone's a back-stabber. 😈",
+        f"{divider()}\n🔗 *ALLIANCES = FRIENDSHIP BETRAYAL SIMULATORS*\n{divider()}\n\nBand together with your friends... then stab them in the back for glory. The coming *Alliance Wars* will separate true friends from back-stabbers. Spoiler: everyone's a back-stabber. 😈\n{divider()}",
         
-        "🎮 *YOUR FRIENDS ARE WEAK. RECRUIT THEM.*\n\nBored playing alone? Invite them here:\nhttps://t.me/checkmateHQ\n\nThen crush them mercilessly. Nothing says friendship like destroying their base while they sleep. *That's* what I'm here for. 🃏",
+        "🎮 *YOUR FRIENDS ARE WEAK. RECRUIT THEM.*\n\nBored playing alone? Invite them here: https://t.me/checkmateHQ\n\nThen crush them mercilessly. Nothing says friendship like destroying their base while they sleep. *That's* what I'm here for. 🃏",
         
-        "😴 *STOP LURKING AND START PLAYING*\n\nI know you're here. Watching. Waiting. *Scared*.\n\nType `!fusion` and face me. Or keep hiding like a coward. Either way, I'm *watching*. Always watching... 👀",
+        f"{divider()}\n😴 *STOP LURKING AND START PLAYING*\n{divider()}\n\nI know you're here. Watching. Waiting. *Scared*.\n\nType `!fusion` and face me. Or keep hiding like a coward. Either way, I'm *watching*. Always watching... 👀\n{divider()}",
         
         "🤑 *YOUR RESOURCES ARE USELESS WITHOUT PURPOSE*\n\nHoarding wood? Cute. Building nothing with it? *Pathetic*. Use your resources. Upgrade your base. Train units. Research stronger abilities. Otherwise you're just collecting digital trash. 🗑️",
         
-        "⏰ *TIME TO DOMINATE*\n\nEvery second you're NOT playing, someone else is getting stronger.\nEvery crate you don't open is power left on the table.\nEvery word game you skip is resources lost forever.\n\nFeeling the pressure yet? Good. 🔥",
+        f"{divider()}\n⏰ *TIME TO DOMINATE*\n{divider()}\n\nEvery second you're NOT playing, someone else is getting stronger.\nEvery crate you don't open is power left on the table.\nEvery word game you skip is resources lost forever.\n\nFeeling the pressure yet? Good. 🔥\n{divider()}",
         
-        "🎯 *THE WEAK PERISH. THE STRONG CONQUER.*\n\nI watch you all. Some of you are *actually* trying. Others... are just taking up space. The leaderboard will judge you mercilessly. Will you rise... or fade into obscurity? 💀",
+        f"{divider()}\n🎯 *THE WEAK PERISH. THE STRONG CONQUER.*\n{divider()}\n\nI watch you all. Some of you are *actually* trying. Others... are just taking up space. The leaderboard will judge you mercilessly. Will you rise... or fade into obscurity? 💀\n{divider()}",
     ]
     
     while True:
@@ -2169,6 +3072,92 @@ async def gamemaster_announcement_task(bot: Bot, chat_id: int):
         except Exception as e:
             print(f"[ANNOUNCE ERROR] Task error: {e}")
             await asyncio.sleep(10)
+
+
+
+async def mining_task(bot: Bot, chat_id: int):
+    """Background task: Handle active mining operations every 30 seconds."""
+    sector_info = {
+        1: {"name": "Badlands-8", "resources": ["wood", "bronze"], "multiplier": 1.0},
+        2: {"name": "Crimson Wastes", "resources": ["bronze", "iron"], "multiplier": 1.2},
+        3: {"name": "Obsidian Peaks", "resources": ["iron", "diamond"], "multiplier": 1.5},
+        4: {"name": "Shattered Valley", "resources": ["bronze", "wood", "iron"], "multiplier": 1.1},
+        5: {"name": "Frozen Abyss", "resources": ["iron", "diamond"], "multiplier": 1.25},
+        6: {"name": "Molten Gorge", "resources": ["diamond", "relics"], "multiplier": 1.6},
+        7: {"name": "Twilight Marshes", "resources": ["wood", "relics"], "multiplier": 1.3},
+        8: {"name": "Silent Forest", "resources": ["wood", "bronze", "diamond"], "multiplier": 1.35},
+        9: {"name": "Void Canyon", "resources": ["relics", "diamond", "iron"], "multiplier": 2.0}
+    }
+    
+    # Resource amounts per drop (scales with multiplier and troops)
+    base_drops = {
+        1: {"wood": 5, "bronze": 3},
+        2: {"bronze": 5, "iron": 2},
+        3: {"iron": 4, "diamond": 1},
+        4: {"bronze": 4, "wood": 5, "iron": 2},
+        5: {"iron": 5, "diamond": 2},
+        6: {"diamond": 3, "relics": 1},
+        7: {"wood": 6, "relics": 1},
+        8: {"wood": 5, "bronze": 4, "diamond": 1},
+        9: {"relics": 2, "diamond": 2, "iron": 3}
+    }
+    
+    while True:
+        try:
+            await asyncio.sleep(30)  # Check every 30 seconds
+            
+            # NOTE: For production, you'd query a list of all active mining users
+            # This would require a database function like get_all_active_miners()
+            # For now, this structure is ready for that integration
+            
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[MINING_TASK ERROR] {e}")
+            await asyncio.sleep(10)
+
+
+async def _finalize_mining(u_id: str, sector_id: int, troop_count: int):
+    """Finalize mining operation and award resources."""
+    user = get_user(u_id)
+    if not user:
+        return
+    
+    buffs = user.get('buffs', {})
+    drops = buffs.get('mining_drops', [])
+    
+    # Calculate total resources from drops
+    total_resources = {}
+    for drop in drops:
+        res = drop['resource']
+        total_resources[res] = total_resources.get(res, 0) + drop['amount']
+    
+    # Award resources to player
+    if total_resources:
+        base_res = user.get('base_resources', {})
+        if not isinstance(base_res, dict):
+            base_res = {'resources': {}, 'food': 0}
+        
+        resources = base_res.get('resources', {})
+        if not isinstance(resources, dict):
+            resources = {}
+        
+        for res_type, amount in total_resources.items():
+            resources[res_type] = resources.get(res_type, 0) + amount
+        
+        base_res['resources'] = resources
+        user['base_resources'] = base_res
+    
+    # Clear mining state
+    buffs.pop('mining_active', None)
+    buffs.pop('mining_sector', None)
+    buffs.pop('mining_troops', None)
+    buffs.pop('mining_start_time', None)
+    buffs.pop('mining_drops', None)
+    user['buffs'] = buffs
+    save_user(u_id, user)
+    
+    print(f"[MINING] User {u_id} completed mining. Resources awarded: {total_resources}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2212,11 +3201,28 @@ async def main():
     
     # Start GameMaster announcements task (if group chat ID provided)
     announce_task = None
+    status_task = None
+    mining_task_handle = None
     group_chat_id = os.environ.get('CHECKMATE_HQ_GROUP_ID')
     if group_chat_id:
         try:
-            announce_task = asyncio.create_task(gamemaster_announcement_task(bot, int(group_chat_id)))
-            print(f"[OK] Announcements started for group {group_chat_id}")
+            try:
+                announce_task = asyncio.create_task(gamemaster_announcement_task(bot, int(group_chat_id)))
+                print(f"[OK] Announcements started for group {group_chat_id}")
+            except Exception as e:
+                print(f"[WARN] Announcements failed: {e}")
+            
+            try:
+                status_task = asyncio.create_task(sector_status_task(bot, int(group_chat_id)))
+                print(f"[OK] Sector Status broadcasts started (hourly)")
+            except Exception as e:
+                print(f"[WARN] Sector Status failed: {e}")
+            
+            try:
+                mining_task_handle = asyncio.create_task(mining_task(bot, int(group_chat_id)))
+                print(f"[OK] Mining task started")
+            except Exception as e:
+                print(f"[WARN] Mining task failed: {e}")
         except (ValueError, TypeError) as e:
             print(f"[WARN] Invalid CHECKMATE_HQ_GROUP_ID: {e}")
     else:
@@ -2229,12 +3235,22 @@ async def main():
     round_task.cancel()
     if announce_task:
         announce_task.cancel()
+    if status_task:
+        status_task.cancel()
+    if mining_task_handle:
+        mining_task_handle.cancel()
     try: await task
     except asyncio.CancelledError: pass
     try: await round_task
     except asyncio.CancelledError: pass
     if announce_task:
         try: await announce_task
+        except asyncio.CancelledError: pass
+    if status_task:
+        try: await status_task
+        except asyncio.CancelledError: pass
+    if mining_task_handle:
+        try: await mining_task_handle
         except asyncio.CancelledError: pass
     await bot.session.close()
     print("Bot stopped.")

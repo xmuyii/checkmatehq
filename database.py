@@ -413,3 +413,45 @@ def award_powerful_locked_item(user_id):
     item_type, display_name, desc = random.choice(items)
     add_unclaimed_item(user_id, f"locked_{item_type}", 1)
     return display_name, desc
+
+# ── Resources & food streak ───────────────────────────────────────────────
+
+# Resource awarded per word length:
+# 3 letters = +1 wood
+# 4 letters = +1 bronze  
+# 5 letters = +1 iron
+# 6 letters = +1 silver (currency)
+# 7+ letters = +1 relic
+
+RESOURCE_BY_LENGTH = {3: "wood", 4: "bronze", 5: "iron", 6: "silver_res", 7: "relics"}
+
+def add_resources_from_word_length(user_id, word_len: int, username: str = "") -> dict:
+    user = get_user(user_id)
+    if not user:
+        return {}
+    res_key = RESOURCE_BY_LENGTH.get(min(word_len, 7), "relics")
+    resources = user.get("resources", {"wood": 0, "bronze": 0, "iron": 0, "silver_res": 0, "relics": 0, "food": 0})
+    resources[res_key] = resources.get(res_key, 0) + 1
+    user["resources"] = resources
+    save_user(user_id, user)
+    return {res_key: 1}
+
+def update_streak_and_award_food(user_id, correct: bool, username: str = "") -> dict:
+    user = get_user(user_id)
+    if not user:
+        return {"food_awarded": 0, "streak": 0}
+    streak = user.get("word_streak", 0)
+    if correct:
+        streak += 1
+    else:
+        streak = 0
+    food_awarded = 0
+    # Food starts after 3 correct words in a row; more words = more food
+    if correct and streak >= 3:
+        food_awarded = streak - 2   # streak 3 = +1, streak 4 = +2, etc.
+        resources = user.get("resources", {})
+        resources["food"] = resources.get("food", 0) + food_awarded
+        user["resources"] = resources
+    user["word_streak"] = streak
+    save_user(user_id, user)
+    return {"food_awarded": food_awarded, "streak": streak}

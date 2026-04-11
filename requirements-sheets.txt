@@ -1,0 +1,7 @@
+# Google Sheets API - Simplified with gspread
+gspread==6.1.0
+google-auth-oauthlib==1.1.0
+
+# Required by main project
+supabase==2.4.0
+python-dotenv==1.0.0
