@@ -57,6 +57,17 @@ from addictive_mechanics import (
     format_rare_drop_notification, get_limited_offer
 )
 
+# ── Immersive Systems (Psychological Depth & Narrative) ───────────────────
+try:
+    from immersive_systems import (
+        ASSASSIN_PROFILE, get_assassin_encounter, BURNED_BASE_IMAGERY,
+        OBELISK_GATEWAY, ATTACK_DECISION_SCREEN, SECTOR_CONSCIOUSNESS,
+        format_battle_intensity, format_victory_ascension, format_defeat_devastation
+    )
+    print("✅ Immersive systems loaded (Deep psychological narratives)")
+except Exception as e:
+    print(f"⚠️  Immersive systems failed ({e}), using standard narratives")
+
 # ── Bandit System (Strategic Enemy Encounters) ──────────────────────────────
 try:
     from bandit_system import (
@@ -4402,6 +4413,52 @@ async def sector_status_task(bot: Bot, chat_id: int):
             await asyncio.sleep(10)
 
 
+async def sheets_sync_background_task(bot: Bot, chat_id: int):
+    """Background task: Sync game to Google Sheets every 30 minutes and notify group."""
+    while True:
+        try:
+            await asyncio.sleep(1800)  # 30 minutes = 1800 seconds
+            
+            try:
+                # Import sync_to_sheets at runtime
+                from sync_to_sheets import update_google_sheet, get_leaderboard_data
+                
+                # Get leaderboard data
+                leaderboard = get_leaderboard_data()
+                
+                if leaderboard:
+                    # Sync to Google Sheets
+                    update_google_sheet(leaderboard)
+                    
+                    # Format and send update to group
+                    top_5 = leaderboard[:5]
+                    msg = "📊 *LEADERBOARD AUTO-SYNC*\n\n"
+                    msg += "🏆 Top 5 Players:\n"
+                    for idx, player in enumerate(top_5, 1):
+                        username = player.get("username", "Unknown")
+                        points = player.get("points", 0)
+                        msg += f"{idx}. {username} - {points:,} pts\n"
+                    
+                    msg += f"\n⏰ Updated: {datetime.utcnow().strftime('%H:%M UTC')}"
+                    msg += f"\n📈 Total players: {len(leaderboard)}"
+                    
+                    await bot.send_message(chat_id, msg, parse_mode="Markdown")
+                    print(f"[SHEETS] Synced {len(leaderboard)} players to Google Sheets")
+                else:
+                    print("[SHEETS] No leaderboard data to sync")
+                    
+            except ImportError:
+                print("[SHEETS WARN] sync_to_sheets module not found - skipping sync")
+            except Exception as sync_err:
+                print(f"[SHEETS ERROR] Sync failed: {sync_err}")
+                
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[SHEETS ERROR] Background task error: {e}")
+            await asyncio.sleep(60)  # Wait 1 min before retrying
+
+
 async def gamemaster_announcement_task(bot: Bot, chat_id: int):
     """Background task: Drop random GameMaster announcements every 7-10 minutes + dynamic event announcements."""
     
@@ -4638,6 +4695,7 @@ async def main():
     announce_task = None
     status_task = None
     mining_task_handle = None
+    sheets_sync_task = None
     group_chat_id = os.environ.get('CHECKMATE_HQ_GROUP_ID')
     if group_chat_id:
         try:
@@ -4658,6 +4716,12 @@ async def main():
                 print(f"[OK] Mining task started")
             except Exception as e:
                 print(f"[WARN] Mining task failed: {e}")
+            
+            try:
+                sheets_sync_task = asyncio.create_task(sheets_sync_background_task(bot, int(group_chat_id)))
+                print(f"[OK] Google Sheets sync task started (every 30 min)")
+            except Exception as e:
+                print(f"[WARN] Google Sheets sync failed: {e}")
         except (ValueError, TypeError) as e:
             print(f"[WARN] Invalid CHECKMATE_HQ_GROUP_ID: {e}")
     else:
@@ -4674,6 +4738,8 @@ async def main():
         status_task.cancel()
     if mining_task_handle:
         mining_task_handle.cancel()
+    if sheets_sync_task:
+        sheets_sync_task.cancel()
     try: await task
     except asyncio.CancelledError: pass
     try: await round_task
