@@ -71,8 +71,9 @@ def add_to_training_queue(user_id: str, unit_type: str, amount: int) -> tuple[bo
     for res, needed in total_cost.items():
         resources[res] = resources.get(res, 0) - needed
     
-    # Add to training queue
-    queue = user.get("training_queue", [])
+    # Add to training queue (stored in metadata to avoid schema issues)
+    metadata = user.get("metadata", {})
+    queue = metadata.get("training_queue", [])
     
     # Calculate completion time
     training_time = TRAINING_TIMES.get(unit_type, 30)
@@ -86,7 +87,8 @@ def add_to_training_queue(user_id: str, unit_type: str, amount: int) -> tuple[bo
     }
     queue.append(queue_item)
     
-    user["training_queue"] = queue
+    metadata["training_queue"] = queue
+    user["metadata"] = metadata
     base_res["resources"] = resources
     user["base_resources"] = base_res
     save_user(user_id, user)
@@ -100,7 +102,8 @@ def get_training_status(user_id: str) -> dict:
     if not user:
         return {"queue": []}
     
-    queue = user.get("training_queue", [])
+    metadata = user.get("metadata", {})
+    queue = metadata.get("training_queue", [])
     now = datetime.utcnow()
     
     # Process completed trainings
@@ -124,7 +127,8 @@ def get_training_status(user_id: str) -> dict:
             unit_type = item["unit_type"]
             military[unit_type] = military.get(unit_type, 0) + item["amount"]
         user["military"] = military
-        user["training_queue"] = remaining_queue
+        metadata["training_queue"] = remaining_queue
+        user["metadata"] = metadata
         save_user(user_id, user)
     
     return {
@@ -180,7 +184,8 @@ def complete_all_trainings(user_id: str) -> dict:
     if not user:
         return {"success": False}
     
-    queue = user.get("training_queue", [])
+    metadata = user.get("metadata", {})
+    queue = metadata.get("training_queue", [])
     military = user.get("military", {})
     
     for item in queue:
@@ -189,7 +194,8 @@ def complete_all_trainings(user_id: str) -> dict:
         military[unit_type] = military.get(unit_type, 0) + amount
     
     user["military"] = military
-    user["training_queue"] = []
+    metadata["training_queue"] = []
+    user["metadata"] = metadata
     save_user(user_id, user)
     
     return {

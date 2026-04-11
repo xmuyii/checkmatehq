@@ -398,14 +398,16 @@ def format_battle_description(user: dict, encounter: dict, result: dict) -> str:
     if victory:
         txt += f"🏆 *VICTORY!*\n\n"
         txt += f"You've defeated the {encounter['bandit_name']}!\n"
-        txt += f"_{sector_narrative.get('victory_reward', 'You've proven yourself.')}_\n\n"
+        victory_msg = sector_narrative.get('victory_reward', "You've proven yourself.")
+        txt += f"_{victory_msg}_\n\n"
         txt += f"💎 *Spoils of War:*\n"
         for res, amount in encounter["original_loot"].items():
             txt += f"  +{amount} {res.upper()}\n"
     else:
         txt += f"💀 *DEFEAT!*\n\n"
         txt += f"The {encounter['bandit_name']} was too strong...\n"
-        txt += f"_{sector_narrative.get('defeat_consequence', 'Your base is damaged.')}_\n\n"
+        defeat_msg = sector_narrative.get('defeat_consequence', "Your base is damaged.")
+        txt += f"_{defeat_msg}_\n\n"
         txt += f"📉 *Losses:*\n"
         txt += f"  -30% resources stolen\n"
         txt += f"  -20% troops lost\n"
