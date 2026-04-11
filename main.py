@@ -78,7 +78,7 @@ except Exception as e:
     def activate_shield(user_id): return False
     def is_shielded(user): return False
 
-from initiation import initiation_router
+from initiation import initiation_router, CHECKMATE_HQ_GROUP_ID
 from config import BOT_TOKEN, ENV_NAME, SUPABASE_URL as CONFIG_SUPABASE_URL, SUPABASE_KEY as CONFIG_SUPABASE_KEY
 
 # ── Config ────────────────────────────────────────────────────────────────
@@ -1664,76 +1664,142 @@ async def cmd_use(message: types.Message):
 
 @dp.message(_cmd("train"))
 async def cmd_train(message: types.Message):
-    """Train military units using resources."""
+    """Train military units with queue and timers."""
     if message.chat.type != "private":
-        await message.answer("🃏 *GameMaster:* \"Train troops in *private*.\"", parse_mode="Markdown"); return
+        await message.answer("⚔️ *GM:* \"Train troops in private.\"", parse_mode="Markdown")
+        return
     
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("❌ Account not found.", parse_mode="Markdown"); return
+        await message.answer("🃏 *GM:* \"You're not registered.\"", parse_mode="Markdown")
+        return
     
-    # Unit training costs (resources needed to train)
-    units = {
-        "pawn": {
-            "name": "👹 Pawns",
-            "cost": {"wood": 5},
-            "power": 1,
-            "desc": "Basic unit. Weak but numerous."
-        },
-        "knight": {
-            "name": "🗡️ Knights",
-            "cost": {"wood": 15, "bronze": 5},
-            "power": 3,
-            "desc": "Balanced attacker and defender."
-        },
-        "bishop": {
-            "name": "⚜️ Bishops",
-            "cost": {"bronze": 10, "iron": 3},
-            "power": 5,
-            "desc": "Strategic unit. Strong AoE attacks."
-        },
-        "rook": {
-            "name": "🏰 Rooks",
-            "cost": {"iron": 10, "diamond": 2},
-            "power": 8,
-            "desc": "Defensive powerhouse."
-        },
-        "queen": {
-            "name": "👑 Queens",
-            "cost": {"iron": 20, "diamond": 5},
-            "power": 12,
-            "desc": "Elite attacker. Devastating."
-        },
-        "king": {
-            "name": "⚔️ Kings",
-            "cost": {"diamond": 15, "relics": 1},
-            "power": 20,
-            "desc": "Legendary warrior. Nearly unstoppable."
-        }
-    }
+    # Parse: !train [unit] [amount] or !train (show queue)
+    args = message.text.strip().split()
     
-    # Get current resources
-    base_res = user.get('base_resources', {})
-    resources = base_res.get('resources', {})
+    if len(args) == 1:  # Just !train - show status
+        from training_system import format_training_status
+        status = format_training_status(u_id)
+        await message.answer(status, parse_mode="Markdown")
+        return
     
-    # Build training menu
-    txt = f"{divider()}\n⚔️ *MILITARY ACADEMY* ⚔️\n{divider()}\n\n*AVAILABLE UNITS TO TRAIN:*\n\n"
+    if len(args) < 3:
+        from training_system import UNIT_NAMES, UNIT_COSTS, TRAINING_TIMES
+        txt = "⚔️ *MILITARY ACADEMY*\n\n"
+        txt += "Usage: `!train [unit] [amount]`\n\n"
+        txt += "*Available Units:*\n"
+        for unit_key, unit_name in UNIT_NAMES.items():
+            cost = UNIT_COSTS[unit_key]
+            cost_str = " + ".join([f"{amt}{res}" for res, amt in cost.items()])
+            time = TRAINING_TIMES[unit_key]
+            txt += f"\n{unit_name}\n├─ Cost: {cost_str}\n└─ Time: {time}s per unit\n"
+        await message.answer(txt, parse_mode="Markdown")
+        return
     
-    rows = []
-    for unit_key, unit_info in units.items():
-        cost_str = " + ".join([f"{amt}{res}" for res, amt in unit_info['cost'].items()])
-        txt += f"**{unit_info['name']}** ({cost_str})\n"
-        txt += f"└─ {unit_info['desc']} (⚡ Power: {unit_info['power']})\n\n"
-        rows.append([InlineKeyboardButton(text=unit_info['name'], callback_data=f"train_{unit_key}")])
+    unit_type = args[1].lower()
+    try:
+        amount = int(args[2])
+    except:
+        await message.answer("❌ Invalid amount", parse_mode="Markdown")
+        return
     
-    txt += f"{divider()}\n🃏 *GameMaster:* \"Build your army. The weak perish. The strong *dominate*.\"" 
+    # Queue training
+    from training_system import add_to_training_queue
+    success, msg = add_to_training_queue(u_id, unit_type, amount)
     
-    await message.answer(
-        txt,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
-        parse_mode="Markdown"
-    )
+    if success:
+        await message.answer(f"✅ {msg}\n\nType `!train` to check progress", parse_mode="Markdown")
+    else:
+        await message.answer(f"❌ {msg}", parse_mode="Markdown")
+
+
+@dp.message(_cmd("share"))
+async def cmd_share(message: types.Message):
+    """Share resources with alliance members."""
+    if message.chat.type != "private":
+        await message.answer("💝 *GM:* \"Share resources in private chat.\"", parse_mode="Markdown")
+        return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("🃏 *GM:* \"You're not registered.\"", parse_mode="Markdown")
+        return
+    
+    # Parse: !share [amount] [resource] @member
+    args = message.text.strip().split()
+    
+    if len(args) < 4:
+        await message.answer(
+            "💝 *SHARE RESOURCES*\n\n"
+            "Usage: `!share [amount] [resource] @member`\n\n"
+            "Example: `!share 50 wood @teammate`\n\n"
+            "_(Both must be in same alliance)_",
+            parse_mode="Markdown"
+        )
+        return
+    
+    try:
+        amount = int(args[1])
+        resource = args[2].lower()
+        member_name = args[3].lstrip("@")
+    except:
+        await message.answer("❌ Invalid format", parse_mode="Markdown")
+        return
+    
+    from alliance_system import share_resources
+    success, msg = share_resources(u_id, member_name, resource, amount)
+    
+    if success:
+        await message.answer(f"✅ {msg}", parse_mode="Markdown")
+    else:
+        await message.answer(f"❌ {msg}", parse_mode="Markdown")
+
+
+@dp.message(_cmd("alliance"))
+async def cmd_alliance(message: types.Message):
+    """Manage alliance membership."""
+    if message.chat.type != "private":
+        await message.answer("👥 *GM:* \"Alliance management in private only.\"", parse_mode="Markdown")
+        return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("🃏 *GM:* \"You're not registered.\"", parse_mode="Markdown")
+        return
+    
+    args = message.text.strip().split()
+    
+    if len(args) < 2:
+        from alliance_system import format_alliance_status
+        status = format_alliance_status(u_id)
+        await message.answer(status, parse_mode="Markdown")
+        return
+    
+    action = args[1].lower()
+    
+    if action == "create":
+        if len(args) < 3:
+            await message.answer("Usage: `!alliance create <name>`", parse_mode="Markdown")
+            return
+        alliance_name = " ".join(args[2:])
+        from alliance_system import create_alliance
+        success, msg = create_alliance(u_id, alliance_name)
+        await message.answer(msg, parse_mode="Markdown")
+    
+    elif action == "join":
+        if len(args) < 3:
+            await message.answer("Usage: `!alliance join <id>`", parse_mode="Markdown")
+            return
+        alliance_id = args[2]
+        from alliance_system import join_alliance
+        success, msg = join_alliance(u_id, alliance_id)
+        await message.answer(msg, parse_mode="Markdown")
+    
+    else:
+        await message.answer("❌ Unknown action. Use: create or join", parse_mode="Markdown")
 
 
 @dp.message(_cmd("mine"))
