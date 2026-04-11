@@ -22,9 +22,9 @@ ENVIRONMENT = os.getenv('ENVIRONMENT', 'prod').lower()
 # PRODUCTION CONFIG
 # ============================================================================
 if ENVIRONMENT == 'prod':
-    BOT_TOKEN = os.getenv('BOT_TOKEN', 'your_bot_token_here')
-    SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://your-project.supabase.co')
-    SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'your_supabase_anon_key_here')
+    BOT_TOKEN = os.getenv('BOT_TOKEN', 'your_bot_token_here').strip()
+    SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://your-project.supabase.co').strip()
+    SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'your_supabase_anon_key_here').strip()
     DB_TABLE = 'players'  # Production table
     ENV_NAME = 'PRODUCTION'
     
@@ -32,9 +32,9 @@ if ENVIRONMENT == 'prod':
 # TEST CONFIG
 # ============================================================================
 elif ENVIRONMENT == 'test':
-    BOT_TOKEN = os.getenv('TEST_BOT_TOKEN', 'your_test_bot_token_here')
-    SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://your-project.supabase.co')
-    SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'your_supabase_anon_key_here')
+    BOT_TOKEN = os.getenv('TEST_BOT_TOKEN', 'your_test_bot_token_here').strip()
+    SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://your-project.supabase.co').strip()
+    SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'your_supabase_anon_key_here').strip()
     DB_TABLE = 'players_test'  # Test table (separate from production)
     ENV_NAME = 'TEST'
 

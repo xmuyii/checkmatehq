@@ -224,6 +224,8 @@ def register_user(user_id, username: str):
         }),
         'military': json.dumps({}),
         'traps': json.dumps({}),
+        'shield_status': 'ACTIVE',
+        'shield_cooldown': None,
     }).execute()
 
 
@@ -547,16 +549,102 @@ def activate_shield(user_id) -> bool:
 
 
 def is_shielded(user: dict) -> bool:
-    """Return True if user has an active (non-expired) shield. All players now have permanent shields."""
+    """Return True if user has an active (non-expired) shield."""
+    shield_status = user.get('shield_status', 'ACTIVE')
+    
+    # If DISRUPTED, shield is temporarily broken (lasts 1 attack)
+    if shield_status == 'DISRUPTED':
+        return False
+    
+    # If INACTIVE, no shield
+    if shield_status == 'INACTIVE':
+        # Check if cooldown has passed
+        cooldown = user.get('shield_cooldown')
+        if cooldown:
+            try:
+                if datetime.utcnow() < datetime.fromisoformat(cooldown):
+                    return False  # Still in cooldown, no shield
+            except Exception:
+                pass
+        return False
+    
+    # ACTIVE status means shield is on
+    if shield_status == 'ACTIVE':
+        return True
+    
+    # Legacy permanent shield (Phase 1)
     exp = user.get('shield_expires')
     if exp == 'permanent':
         return True
-    if not exp:
-        return True  # Default to shielded (everyone is protected)
-    try:
-        return datetime.utcnow() < datetime.fromisoformat(exp)
-    except Exception:
-        return True  # Assume shielded on parse error
+    
+    return True  # Default to shielded
+
+
+def activate_shield(user_id: str) -> tuple[bool, str]:
+    """Activate shield for a player. Returns (success, message)."""
+    user = get_user(user_id)
+    if not user:
+        return False, "User not found"
+    
+    shield_status = user.get('shield_status', 'ACTIVE')
+    
+    # Check if in cooldown
+    cooldown = user.get('shield_cooldown')
+    if cooldown and shield_status == 'INACTIVE':
+        try:
+            if datetime.utcnow() < datetime.fromisoformat(cooldown):
+                remaining = (datetime.fromisoformat(cooldown) - datetime.utcnow()).total_seconds()
+                hours = int(remaining / 3600)
+                minutes = int((remaining % 3600) / 60)
+                return False, f"Shield in cooldown. {hours}h {minutes}m remaining."
+        except Exception:
+            pass
+    
+    # Activate
+    user['shield_status'] = 'ACTIVE'
+    user.pop('shield_cooldown', None)  # Clear cooldown
+    save_user(user_id, user)
+    return True, "✅ Shield activated!"
+
+
+def deactivate_shield(user_id: str) -> tuple[bool, str]:
+    """Deactivate shield and set 24-hour cooldown. Returns (success, message)."""
+    user = get_user(user_id)
+    if not user:
+        return False, "User not found"
+    
+    shield_status = user.get('shield_status', 'ACTIVE')
+    
+    if shield_status != 'ACTIVE':
+        return False, "Shield is not active"
+    
+    # Deactivate and set 24-hour cooldown
+    user['shield_status'] = 'INACTIVE'
+    user['shield_cooldown'] = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+    save_user(user_id, user)
+    return True, "⚠️ Shield deactivated. 24-hour cooldown started!"
+
+
+def disrupt_shield(user_id: str) -> tuple[bool, str]:
+    """Temporarily disrupt enemy shield (1 attack only). Returns (success, message)."""
+    user = get_user(user_id)
+    if not user:
+        return False, "User not found"
+    
+    if not is_shielded(user):
+        return False, "Target has no active shield to disrupt"
+    
+    user['shield_status'] = 'DISRUPTED'
+    save_user(user_id, user)
+    return True, "Shield disrupted for 1 attack!"
+
+
+def restore_shield_after_attack(user_id: str):
+    """Restore shield to ACTIVE after DISRUPTED state. Called after 1 attack."""
+    user = get_user(user_id)
+    if user and user.get('shield_status') == 'DISRUPTED':
+        user['shield_status'] = 'ACTIVE'
+        save_user(user_id, user)
 
 
 def give_automatic_shield(user_id):
