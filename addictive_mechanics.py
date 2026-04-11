@@ -227,7 +227,7 @@ def get_weekly_challenges(user_id: str) -> list:
         elif key == "leaderboard":
             # Check leaderboard rank
             top_10 = get_weekly_leaderboard(limit=10)
-            progress = 1 if any(p[1] == user_id for p in top_10) else 0
+            progress = 1 if any(p['id'] == user_id for p in top_10) else 0
             total = 1
         elif key == "streak_master":
             progress = user.get("buffs", {}).get("login_streak", 0)
