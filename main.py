@@ -1731,7 +1731,8 @@ async def cmd_revenge(message: types.Message):
 
 @dp.message(_cmd("attack"))
 async def cmd_attack(message: types.Message):
-    """Attack another player's base. Steal 50% of their resources if you win."""
+    """Attack another player's base. Steal 50% of their resources if you win.
+    If attacker has ACTIVE shield, ask for confirmation before deactivating it."""
     if message.chat.type != "private":
         await message.answer("⚔️ *GM:* \"Conduct raids in private, coward.\"", parse_mode="Markdown")
         return
@@ -1789,14 +1790,48 @@ async def cmd_attack(message: types.Message):
         await message.answer("⚔️ *GM:* \"You can't attack yourself, fool.\"", parse_mode="Markdown")
         return
     
+    # CHECK SHIELD STATUS
+    attacker_shield = attacker.get('shield_status', 'UNPROTECTED')
+    if attacker_shield == 'ACTIVE':
+        # Ask for confirmation
+        confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="⚔️ Yes, Attack!", callback_data=f"confirm_attack_{u_id}_{target_id}"),
+                InlineKeyboardButton(text="❌ Cancel", callback_data="cancel_attack")
+            ]
+        ])
+        
+        await message.answer(
+            f"⚠️ *SHIELD DEACTIVATION WARNING* ⚠️\n\n"
+            f"You have an **ACTIVE shield** protecting your base.\n\n"
+            f"*Attacking {target_display_name} will deactivate your shield.*\n\n"
+            f"Are you sure you want to proceed?",
+            reply_markup=confirm_kb,
+            parse_mode="Markdown"
+        )
+        return
+    
+    # No shield or shield not ACTIVE - proceed with attack
+    await _execute_attack(u_id, target_id, target_display_name, message)
+
+
+async def _execute_attack(attacker_id: str, target_id: str, target_display_name: str, message: types.Message):
+    """Execute the attack after all checks and confirmations."""
+    attacker = get_user(attacker_id)
+    
+    # Deactivate attacker's shield if it's ACTIVE
+    if attacker.get('shield_status') == 'ACTIVE':
+        attacker['shield_status'] = 'UNPROTECTED'
+        save_user(attacker_id, attacker)
+    
     # Get revenge multiplier if applicable
     from revenge_system import get_revenge_multiplier, clear_revenge
-    revenge_mult = get_revenge_multiplier(u_id, target_id)
+    revenge_mult = get_revenge_multiplier(attacker_id, target_id)
     is_revenge = revenge_mult > 1.0
     
     # Execute battle
     from attack_system import calculate_battle_outcome, format_battle_report, format_raid_notification
-    success, result = calculate_battle_outcome(u_id, target_id, revenge_mult)
+    success, result = calculate_battle_outcome(attacker_id, target_id, revenge_mult)
     
     # Send battle report to attacker
     battle_report = format_battle_report(
@@ -1835,7 +1870,7 @@ async def cmd_attack(message: types.Message):
         
         # Clear revenge if this was a revenge attack
         if is_revenge:
-            clear_revenge(u_id)
+            clear_revenge(attacker_id)
             await message.answer("\n✅ *Blood debt settled! Revenge cleared.*", parse_mode="Markdown")
     
     # Broadcast loss to group
@@ -3105,6 +3140,70 @@ async def cb_mine_start(callback: types.CallbackQuery):
         await callback.answer("⛏️ Mining operation started!")
     except Exception as e:
         print(f"[CB_MINE_START ERROR] {e}")
+        await callback.answer(f"❌ Error: {str(e)}", show_alert=True)
+
+
+@dp.callback_query(F.data.startswith("confirm_attack_"))
+async def cb_confirm_attack(callback: types.CallbackQuery):
+    """Handle confirmed attack with shield deactivation."""
+    try:
+        import re
+        m = re.search(r'confirm_attack_(\d+)_(\d+)', callback.data)
+        if not m:
+            await callback.answer("❌ Invalid format.", show_alert=True)
+            return
+        
+        attacker_id = m.group(1)
+        target_id = m.group(2)
+        u_id = str(callback.from_user.id)
+        
+        # Verify the attacker is the one clicking
+        if u_id != attacker_id:
+            await callback.answer("❌ You are not the attacker!", show_alert=True)
+            return
+        
+        attacker = get_user(attacker_id)
+        if not attacker:
+            await callback.answer("❌ Attacker not found.", show_alert=True)
+            return
+        
+        target = get_user(target_id)
+        if not target:
+            await callback.answer("❌ Target not found.", show_alert=True)
+            return
+        
+        target_display_name = target.get("username", "Unknown")
+        
+        # Edit message to show processing
+        await callback.message.edit_text(
+            f"⚔️ *ATTACK INITIATED*\n\n"
+            f"🛡️ Deactivating shield...\n"
+            f"💨 Processing battle...",
+            parse_mode="Markdown"
+        )
+        
+        # Execute the attack
+        await _execute_attack(attacker_id, target_id, target_display_name, callback.message)
+        
+        await callback.answer("⚔️ Attack executed!")
+    except Exception as e:
+        print(f"[CB_CONFIRM_ATTACK ERROR] {e}")
+        await callback.answer(f"❌ Error: {str(e)}", show_alert=True)
+
+
+@dp.callback_query(F.data == "cancel_attack")
+async def cb_cancel_attack(callback: types.CallbackQuery):
+    """Cancel the attack and keep shield active."""
+    try:
+        await callback.message.edit_text(
+            f"❌ *ATTACK CANCELLED*\n\n"
+            f"🛡️ Your shield remains **ACTIVE**.\n"
+            f"_Battle averted._",
+            parse_mode="Markdown"
+        )
+        await callback.answer("✅ Attack cancelled. Shield remains active.")
+    except Exception as e:
+        print(f"[CB_CANCEL_ATTACK ERROR] {e}")
         await callback.answer(f"❌ Error: {str(e)}", show_alert=True)
 
 
