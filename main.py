@@ -62,11 +62,10 @@ from initiation import initiation_router
 from config import BOT_TOKEN, ENV_NAME, SUPABASE_URL as CONFIG_SUPABASE_URL, SUPABASE_KEY as CONFIG_SUPABASE_KEY
 
 # ── Config ────────────────────────────────────────────────────────────────
-TEST_BOT_TOKEN    = os.environ.get('TEST_BOT_TOKEN',    BOT_TOKEN)
 SUPABASE_URL = os.environ.get('SUPABASE_URL', CONFIG_SUPABASE_URL).rstrip('/')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', CONFIG_SUPABASE_KEY)
 
-bot = Bot(token=TEST_BOT_TOKEN)
+bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher()
 dp.include_router(initiation_router)
 
