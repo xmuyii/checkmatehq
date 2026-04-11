@@ -28,6 +28,26 @@ from addictive_mechanics import (
     format_rare_drop_notification, get_limited_offer
 )
 
+# ── Revenge & Scout System ─────────────────────────────────────────────────
+try:
+    from revenge_system import (
+        set_revenge_target, get_revenge_info, clear_revenge, get_revenge_multiplier,
+        scout_player, format_scout_report
+    )
+    print("✅ Revenge & Scout system loaded")
+except Exception as e:
+    print(f"⚠️  Revenge system failed ({e}), attacks will have no revenge multiplier")
+
+# ── Attack System ──────────────────────────────────────────────────────────
+try:
+    from attack_system import (
+        calculate_battle_outcome, format_battle_report, format_raid_notification,
+        calculate_army_strength, calculate_carrying_capacity
+    )
+    print("✅ Attack system loaded")
+except Exception as e:
+    print(f"⚠️  Attack system failed ({e})")
+
 # ── DB import ─────────────────────────────────────────────────────────────
 try:
     from supabase_db import (
@@ -1346,18 +1366,18 @@ async def cmd_base(message: types.Message):
     # Build comprehensive base info with dynamic formatting
     info = (
         f"{divider()}\n"
-        f"🏰 *{user.get('base_name', 'Unnamed')}* (Level {base_level})\n"
+        f"🏰 {user.get('base_name', 'Unnamed')} (Level {base_level})\n"
         f"{divider()}\n\n"
-        f"⚡ *POWER:* {total_power} | 🎖️ *WAR POINTS:* {war_points}\n"
-        f"📍 *SECTOR:* {sector}\n\n"
+        f"⚡️ POWER: {total_power} | 🎖️ WAR POINTS: {war_points}\n"
+        f"📍 SECTOR: {sector}\n\n"
         f"{divider()}\n\n"
         f"🪵 *RESOURCES*\n"
-        f"├─ Wood: *{resources.get('wood', 0)}*\n"
-        f"├─ Bronze: *{resources.get('bronze', 0)}*\n"
-        f"├─ Iron: *{resources.get('iron', 0)}*\n"
-        f"├─ Diamond: *{resources.get('diamond', 0)}*\n"
-        f"├─ Relics: *{resources.get('relics', 0)}*\n"
-        f"└─ Food: *{food}*\n\n"
+        f"├─ 🌲 Wood: *{resources.get('wood', 0)}*\n"
+        f"├─ 🧱 Bronze: *{resources.get('bronze', 0)}*\n"
+        f"├─ ⛓️ Iron: *{resources.get('iron', 0)}*\n"
+        f"├─ 💎 Diamond: *{resources.get('diamond', 0)}*\n"
+        f"├─ 🏺 Relics: *{resources.get('relics', 0)}*\n"
+        f"└─ 🍖 Food: *{food}*\n\n"
         f"⚔️ *MILITARY* ({total_troops} troops)\n"
         f"{military_str}\n\n"
         f"🔱 *DEFENSIVE TRAPS*\n"
@@ -1376,6 +1396,221 @@ async def cmd_base(message: types.Message):
     )
     
     await message.answer(info, parse_mode="Markdown")
+
+
+@dp.message(_cmd("scout"))
+async def cmd_scout(message: types.Message):
+    """Scout a target player to reveal their army and traps."""
+    if message.chat.type != "private":
+        await message.answer("🛰️ *GM:* \"Scouts use private channels. Run this in DM, fool.\"", parse_mode="Markdown")
+        return
+    
+    u_id = str(message.from_user.id)
+    scout_user = get_user(u_id)
+    if not scout_user:
+        await message.answer("🃏 *GM:* \"You're not registered. Try `!start` first.\"", parse_mode="Markdown")
+        return
+    
+    # Parse command: !scout @username or !scout user_id
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.answer(
+            "🛰️ *SCOUT COMMAND*\n\n"
+            "Cost: 100 Silver\n"
+            "Success Rate: 70% (30% fail)\n\n"
+            "Usage: `!scout @username` or `!scout <name>`\n\n"
+            "_Reveals enemy army and traps if successful._",
+            parse_mode="Markdown"
+        )
+        return
+    
+    target_name = args[1].lstrip("@")
+    
+    # Find target player
+    from supabase_db import supabase, DB_TABLE
+    try:
+        r = supabase.table(DB_TABLE).select("user_id, username, military, traps").ilike("username", f"%{target_name}%").limit(1).execute()
+        if not r.data:
+            await message.answer(f"🔍 *GM:* \"No player named '{target_name}' found.\"", parse_mode="Markdown")
+            return
+        target_id = r.data[0]["user_id"]
+        target_display_name = r.data[0].get("username", target_name)
+    except:
+        await message.answer(f"🔍 *GM:* \"Scout query failed. Try again.\"", parse_mode="Markdown")
+        return
+    
+    # Execute scout
+    from revenge_system import scout_player, format_scout_report
+    success, result = scout_player(u_id, target_id, target_display_name)
+    
+    report = format_scout_report(result)
+    await message.answer(report, parse_mode="Markdown")
+
+
+@dp.message(_cmd("revenge"))
+async def cmd_revenge(message: types.Message):
+    """Execute revenge attack on the player who raided you. 1.5x damage for 24h window."""
+    if message.chat.type != "private":
+        await message.answer("💀 *GM:* \"Settle your grudges in private, coward.\"", parse_mode="Markdown")
+        return
+    
+    u_id = str(message.from_user.id)
+    player = get_user(u_id)
+    if not player:
+        await message.answer("🃏 *GM:* \"You're not registered. Try `!start` first.\"", parse_mode="Markdown")
+        return
+    
+    # Check if player has active revenge debt
+    from revenge_system import get_revenge_info, clear_revenge
+    revenge = get_revenge_info(u_id)
+    
+    if not revenge["active"]:
+        await message.answer(
+            "💀 *GM:* \"You have no Blood Debts to settle.\"\n\n"
+            "_Get raided first. Then you can take revenge._",
+            parse_mode="Markdown"
+        )
+        return
+    
+    target_id = revenge["target_id"]
+    target_name = revenge["target_name"]
+    target_player = get_user(target_id)
+    
+    if not target_player:
+        await message.answer("💀 *GM:* \"Your target has been deleted from existence. Revenge unavailable.\"", parse_mode="Markdown")
+        return
+    
+    # Execute revenge attack with 1.5x buff
+    # For now, placeholder - full attack system will integrate this
+    await message.answer(
+        f"🔥 **BLOOD DEBT ACTIVATED**\n\n"
+        f"Target: *{target_name}*\n"
+        f"Multiplier: *1.5x* damage\n"
+        f"Window: *24 hours*\n\n"
+        f"_Full attack system coming Phase 2C._\n\n"
+        f"To attack: Use `!attack @{target_name}` (1.5x multiplier applied automatically)",
+        parse_mode="Markdown"
+    )
+    # NOTE: clear_revenge() will be called when attack succeeds
+
+
+@dp.message(_cmd("attack"))
+async def cmd_attack(message: types.Message):
+    """Attack another player's base. Steal 50% of their resources if you win."""
+    if message.chat.type != "private":
+        await message.answer("⚔️ *GM:* \"Conduct raids in private, coward.\"", parse_mode="Markdown")
+        return
+    
+    u_id = str(message.from_user.id)
+    attacker = get_user(u_id)
+    if not attacker:
+        await message.answer("🃏 *GM:* \"You're not registered. Try `!start` first.\"", parse_mode="Markdown")
+        return
+    
+    # Check if attacker has troops
+    attacker_army = attacker.get("military", {})
+    total_troops = sum(attacker_army.values()) if attacker_army else 0
+    
+    if total_troops == 0:
+        await message.answer(
+            "⚔️ *GM:* \"You have no troops to command.\"\n\n"
+            "_Use !train to raise an army first._",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Parse target: !attack @username or !attack username
+    args = message.text.strip().split()
+    if len(args) < 2:
+        await message.answer(
+            "⚔️ *ATTACK COMMAND*\n\n"
+            "Usage: `!attack @username`\n\n"
+            "_Success depends on both armies. Attacker takes losses too._\n"
+            "_Victory = steal 50% of resources._\n"
+            "_Defeat on a raid earns a revenge window for your opponent._",
+            parse_mode="Markdown"
+        )
+        return
+    
+    target_name = args[1].lstrip("@")
+    
+    # Find target player
+    from supabase_db import supabase, DB_TABLE
+    try:
+        r = supabase.table(DB_TABLE).select("user_id, username, military, base_resources").ilike(
+            "username", f"%{target_name}%"
+        ).limit(1).execute()
+        if not r.data:
+            await message.answer(f"🔍 *GM:* \"No player named '{target_name}' found.\"", parse_mode="Markdown")
+            return
+        target_id = r.data[0]["user_id"]
+        target_display_name = r.data[0].get("username", target_name)
+    except Exception as e:
+        await message.answer(f"🔍 *GM:* \"Attack query failed: {e}\"", parse_mode="Markdown")
+        return
+    
+    # Can't attack self
+    if target_id == u_id:
+        await message.answer("⚔️ *GM:* \"You can't attack yourself, fool.\"", parse_mode="Markdown")
+        return
+    
+    # Get revenge multiplier if applicable
+    from revenge_system import get_revenge_multiplier, clear_revenge
+    revenge_mult = get_revenge_multiplier(u_id, target_id)
+    is_revenge = revenge_mult > 1.0
+    
+    # Execute battle
+    from attack_system import calculate_battle_outcome, format_battle_report, format_raid_notification
+    success, result = calculate_battle_outcome(u_id, target_id, revenge_mult)
+    
+    # Send battle report to attacker
+    battle_report = format_battle_report(
+        attacker.get("username", "Unknown"),
+        target_display_name,
+        result,
+        is_revenge=is_revenge
+    )
+    await message.answer(battle_report, parse_mode="Markdown")
+    
+    # Send raid notification to defender (if they're in group)
+    raid_notif = format_raid_notification(
+        attacker.get("username", "Unknown"),
+        target_display_name,
+        result
+    )
+    
+    try:
+        # Send DM to defender about the raid
+        await bot.send_message(
+            int(target_id),
+            raid_notif,
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        print(f"[ATTACK] Failed to send DM to defender {target_id}: {e}")
+    
+    # Broadcast to group if big victory
+    if success:
+        await broadcast(
+            CHECKMATE_HQ_GROUP_ID,
+            f"⚔️ **RAID REPORT**\n\n"
+            f"🏆 {attacker.get('username', 'Unknown')} defeated {target_display_name}!\n"
+            f"💎 Plunder: {result.get('total_loot_value', 0)} resources stolen"
+        )
+        
+        # Clear revenge if this was a revenge attack
+        if is_revenge:
+            clear_revenge(u_id)
+            await message.answer("\n✅ *Blood debt settled! Revenge cleared.*", parse_mode="Markdown")
+    
+    # Broadcast loss to group
+    else:
+        await broadcast(
+            CHECKMATE_HQ_GROUP_ID,
+            f"🛡️ **DEFENSE VICTORY**\n\n"
+            f"🏆 {target_display_name} repelled {attacker.get('username', 'Unknown')}'s attack!\n"
+            f"💀 Attacker lost {sum(result.get('attacker_losses', {}).values())} troops"
+        )
 
 
 @dp.message(_cmd("tutorial", "start"))

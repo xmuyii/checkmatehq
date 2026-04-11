@@ -21,14 +21,14 @@ import random
 # ═══════════════════════════════════════════════════════════════════════════
 
 def get_login_streak(user_id: str) -> dict:
-    """Get player's login streak info."""
+    """Get player's login streak info from buffs JSONB."""
     user = get_user(user_id)
     if not user:
         return {"streak": 0, "last_login": None, "broken": False}
     
-    streak = user.get("login_streak", 0)
-    # Read last_login from buffs JSONB instead
+    # Read streak and last_login from buffs JSONB
     buffs = user.get("buffs", {})
+    streak = buffs.get("login_streak", 0)
     last_login = buffs.get("last_login")
     
     # Check if streak is broken (missed more than 24 hours)
@@ -80,10 +80,9 @@ def handle_daily_login(user_id: str) -> dict:
         else:
             message = f"🔥 *Day {new_streak}* Streak! Earned *{bonus} Silver*."
     
-    # Update user
-    user["login_streak"] = new_streak
-    # Store last_login in buffs JSONB instead of as separate column
+    # Update user streak in buffs JSONB
     buffs = user.get("buffs", {})
+    buffs["login_streak"] = new_streak
     buffs["last_login"] = datetime.utcnow().isoformat()
     user["buffs"] = buffs
     user["silver"] = user.get("silver", 0) + bonus
@@ -231,7 +230,7 @@ def get_weekly_challenges(user_id: str) -> list:
             progress = 1 if any(p[1] == user_id for p in top_10) else 0
             total = 1
         elif key == "streak_master":
-            progress = user.get("login_streak", 0)
+            progress = user.get("buffs", {}).get("login_streak", 0)
             total = 7
         
         challenges.append({
