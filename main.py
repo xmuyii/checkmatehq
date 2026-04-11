@@ -436,6 +436,9 @@ def _help_text() -> str:
         "`!forcerestart` — End the round\n"
         "`!weekly` — Weekly leaderboard\n"
         "`!alltime` — All-time leaderboard\n\n"
+        "*🌌 IMMERSIVE EXPERIENCE* _(DM only)_\n"
+        "`!obelisk` — Enter the Obelisk: gateway to consciousness\n"
+        "`!sectors` — Explore all 9 sectors and their consciousness\n\n"
         "*INVITE FRIENDS*\n"
         "Enjoy the game? Invite others! https://t.me/checkmateHQ"
     )
@@ -559,6 +562,92 @@ async def cmd_alltime(message: types.Message):
 @dp.message(_cmd("help"))
 async def cmd_help(message: types.Message):
     await message.answer(_help_text(), parse_mode="Markdown")
+
+
+@dp.message(_cmd("obelisk"))
+async def cmd_obelisk(message: types.Message):
+    """Experience the Obelisk — gateway to another dimension."""
+    if message.chat.type != "private":
+        await message.answer("🌌 *The Obelisk calls to you in private...* Send this command in DM.", parse_mode="Markdown")
+        return
+    
+    try:
+        await message.answer(OBELISK_GATEWAY)
+        
+        await asyncio.sleep(1)
+        
+        msg = """
+🌌 **WELCOME, TRAVELER** 🌌
+
+You stand before something that should not exist. In your world:
+- You have no power
+- Your voice is unheard  
+- Others make decisions FOR you
+
+But here? In The 64?
+
+You are a **FORCE OF NATURE**.
+
+Your strategy defeats enemy armies.
+Your cunning reshapes reality.
+Your will determines fates.
+
+The Obelisk grants you passage to 9 different sectors, each with its own consciousness, its own rules, its own **TESTS**.
+
+Will you enter?
+"""
+        await message.answer(msg, parse_mode="Markdown")
+        
+    except Exception as e:
+        await message.answer(f"❌ Obelisk error: {e}", parse_mode="Markdown")
+
+
+@dp.message(_cmd("sectors"))
+async def cmd_sectors(message: types.Message):
+    """Explore all 9 sectors and their consciousness."""
+    if message.chat.type != "private":
+        await message.answer("🗺️ *Sectors guide must be studied alone...* DM me `!sectors`", parse_mode="Markdown")
+        return
+    
+    try:
+        msg = """
+🗺️ **THE 9 SECTORS OF CONSCIOUSNESS** 🗺️
+
+From the raw deserts to the cosmic void, each sector has its own SOUL:
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+"""
+        await message.answer(msg, parse_mode="Markdown")
+        
+        # Show each sector's details
+        for sector_num in range(1, 10):
+            sector = SECTOR_CONSCIOUSNESS[sector_num]
+            sector_msg = f"""
+**{sector['name']}**
+
+🧠 *Consciousness:* {sector['consciousness']}
+
+💫 *What you feel:* {sector['feeling']}
+
+{sector['color']}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
+            await message.answer(sector_msg, parse_mode="Markdown")
+            await asyncio.sleep(0.3)  # Brief pause between sectors
+        
+        final_msg = """
+Each sector tests DIFFERENT aspects of your consciousness.
+
+Will you master all 9 realms?
+
+The Obelisk awaits your decision. 🌌
+"""
+        await message.answer(final_msg, parse_mode="Markdown")
+        
+    except Exception as e:
+        await message.answer(f"❌ Sectors error: {e}", parse_mode="Markdown")
 
 
 @dp.message(_cmd("tutorial"))
