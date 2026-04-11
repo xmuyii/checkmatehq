@@ -14,6 +14,15 @@ players.json
 SupaDB.csv
 SupaDB1.txt
 sow.csv
+.env
+.env.example
+google-credentials.json
+*.log
+__pycache__/
+.verdent/
+*.csv
+*.txt
+*.pyc
 
 # Distribution / packaging
 .Python
