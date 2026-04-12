@@ -1630,11 +1630,18 @@ async def cmd_weapons_inventory(message: types.Message):
     
     txt = "⚔️ *YOUR WEAPONS ARSENAL*\n━━━━━━━━━━━━━━━━━━━━\n\n"
     
-    for weapon_id, charges_left in weapons.items():
+    for weapon_id, weapon_data in weapons.items():
         if weapon_id not in WEAPONS:
             continue
         weapon = WEAPONS[weapon_id]
         wname = weapon.get('name', weapon_id.upper())
+        
+        # Handle both simple number format and complex object format
+        if isinstance(weapon_data, dict):
+            charges_left = weapon_data.get('charges_remaining', 0)
+        else:
+            charges_left = weapon_data
+        
         txt += f"{wname}\n├─ Charges: **{charges_left}**\n└─ {weapon.get('rarity', 'common').upper()}\n\n"
     
     txt += "━━━━━━━━━━━━━━━━━━━━\nBuy more: `!weapons`"
