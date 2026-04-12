@@ -1,0 +1,11 @@
+{
+  "name": "the-sixty4-web",
+  "version": "1.0.0",
+  "description": "Phaser Frontend for The Sixty4",
+  "scripts": {
+    "start": "serve ."
+  },
+  "dependencies": {
+    "serve": "^14.0.0"
+  }
+}

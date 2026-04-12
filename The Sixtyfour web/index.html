@@ -1,0 +1,77 @@
+const config = {
+    type: Phaser.AUTO,
+    width: window.innerWidth,
+    height: window.innerHeight,
+    backgroundColor: '#050a0f', // Deep military blue
+    physics: { default: 'arcade', arcade: { debug: false } },
+    scene: { preload, create, update }
+};
+
+const game = new Phaser.Game(config);
+
+function preload() {
+    // Load your high-end renders here
+    this.load.image('base', 'https://cdn.phaser.io/sandbox/square-earth.png');
+    this.load.image('mine', 'https://labs.phaser.io/assets/sprites/orb-blue.png');
+}
+
+function create() {
+    // 1. Create a "Deep" Grid
+    let graphics = this.add.graphics();
+    graphics.lineStyle(1, 0x1a2a3a, 1);
+    for (let i = 0; i <= 2000; i += 100) {
+        graphics.lineBetween(i, 0, i, 2000);
+        graphics.lineBetween(0, i, 2000, i);
+    }
+
+    // 2. Camera Controls (Essential for Laptop)
+    this.cameras.main.setBounds(0, 0, 2000, 2000);
+    this.cursors = this.input.keyboard.createCursorKeys();
+
+    // 3. The "Player" Group (Fetched from your Supabase later)
+    this.bases = this.physics.add.group();
+    
+    // Create "Checkmate HQ" (You)
+    this.myBase = createBase(this, 400, 400, "Checkmate HQ", 0x00ff00);
+    
+    // Create a "Rival" (This represents Michael or Dami)
+    this.rivalBase = createBase(this, 1200, 800, "Rival-X", 0xff0000);
+
+    // 4. Resource Nodes (The "Addiction" Nodes)
+    this.mines = this.physics.add.group();
+    spawnMines(this, 10);
+
+    // 5. Global HUD
+    this.hud = this.add.text(20, 20, "🛰️ SATELLITE UPLINK: ACTIVE | SECTOR 8", {
+        font: 'bold 18px Courier', fill: '#00ff00'
+    }).setScrollFactor(0);
+}
+
+function update() {
+    // Smooth Camera Follow
+    if (this.cursors.left.isDown) this.cameras.main.scrollX -= 5;
+    if (this.cursors.right.isDown) this.cameras.main.scrollX += 5;
+    if (this.cursors.up.isDown) this.cameras.main.scrollY -= 5;
+    if (this.cursors.down.isDown) this.cameras.main.scrollY += 5;
+}
+
+// Helper: Create a tactical base
+function createBase(scene, x, y, name, color) {
+    let container = scene.add.container(x, y);
+    let icon = scene.add.rectangle(0, 0, 80, 80, color, 0.3).setStrokeStyle(2, color);
+    let label = scene.add.text(0, 50, name, { font: '12px Arial', fill: '#fff' }).setOrigin(0.5);
+    container.add([icon, label]);
+    
+    icon.setInteractive().on('pointerdown', () => {
+        alert(`ACCESSING ${name} DATA...\nUnits: ANALYZING...\nShield: ACTIVE`);
+    });
+    return container;
+}
+
+function spawnMines(scene, count) {
+    for(let i=0; i<count; i++) {
+        let x = Phaser.Math.Between(100, 1900);
+        let y = Phaser.Math.Between(100, 1900);
+        scene.add.sprite(x, y, 'mine').setScale(0.5).setTint(0xffff00);
+    }
+}
