@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Sixty4 | Tactical Map</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background-color: #050a0f; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script>
+        // PASTE YOUR PHASER CODE BELOW THIS LINE
+        const config = {
+            type: Phaser.AUTO,
+            width: window.innerWidth,
+            height: window.innerHeight,
+            backgroundColor: '#050a0f',
+            physics: { default: 'arcade', arcade: { debug: false } },
+            scene: { preload, create, update }
+        };
+
+        const game = new Phaser.Game(config);
+
+        function preload() {
+            this.load.image('base', 'https://cdn.phaser.io/sandbox/square-earth.png');
+            this.load.image('mine', 'https://labs.phaser.io/assets/sprites/orb-blue.png');
+        }
+
+        function create() {
+            let graphics = this.add.graphics();
+            graphics.lineStyle(1, 0x1a2a3a, 1);
+            for (let i = 0; i <= 2000; i += 100) {
+                graphics.lineBetween(i, 0, i, 2000);
+                graphics.lineBetween(0, i, 2000, i);
+            }
+            this.cameras.main.setBounds(0, 0, 2000, 2000);
+            this.cursors = this.input.keyboard.createCursorKeys();
+            this.myBase = createBase(this, 400, 400, "Checkmate HQ", 0x00ff00);
+            this.rivalBase = createBase(this, 1200, 800, "Rival-X", 0xff0000);
+            this.hud = this.add.text(20, 20, "🛰️ SATELLITE UPLINK: ACTIVE | SECTOR 8", {
+                font: 'bold 18px Courier', fill: '#00ff00'
+            }).setScrollFactor(0);
+        }
+
+        function update() {
+            if (this.cursors.left.isDown) this.cameras.main.scrollX -= 7;
+            if (this.cursors.right.isDown) this.cameras.main.scrollX += 7;
+            if (this.cursors.up.isDown) this.cameras.main.scrollY -= 7;
+            if (this.cursors.down.isDown) this.cameras.main.scrollY += 7;
+        }
+
+        function createBase(scene, x, y, name, color) {
+            let container = scene.add.container(x, y);
+            let icon = scene.add.rectangle(0, 0, 80, 80, color, 0.3).setStrokeStyle(2, color);
+            let label = scene.add.text(0, 50, name, { font: '12px Arial', fill: '#fff' }).setOrigin(0.5);
+            container.add([icon, label]);
+            icon.setInteractive().on('pointerdown', () => {
+                alert(`ACCESSING ${name} DATA...`);
+            });
+            return container;
+        }
+    </script>
+</body>
+</html>
