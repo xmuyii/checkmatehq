@@ -5569,12 +5569,16 @@ async def main():
     print("[OK] Round timer started (120s rounds with streak reset)")
     
     # Start GameMaster announcements task (using imported CHECKMATE_HQ_GROUP_ID)
+    # Note: Telegram group IDs are NEGATIVE numbers (e.g., -1003835925366)
     announce_task = None
     status_task = None
     mining_task_handle = None
     sheets_sync_task = None
     
-    if CHECKMATE_HQ_GROUP_ID and CHECKMATE_HQ_GROUP_ID > 0:
+    # Check if group ID is valid (Telegram group IDs are negative integers)
+    is_valid_group = CHECKMATE_HQ_GROUP_ID and isinstance(CHECKMATE_HQ_GROUP_ID, int) and CHECKMATE_HQ_GROUP_ID < 0
+    
+    if is_valid_group:
         try:
             announce_task = asyncio.create_task(gamemaster_announcement_task(bot, CHECKMATE_HQ_GROUP_ID))
             print(f"[OK] Announcements started for group {CHECKMATE_HQ_GROUP_ID}")
@@ -5599,7 +5603,7 @@ async def main():
         except Exception as e:
             print(f"[WARN] Google Sheets sync failed: {e}")
     else:
-        print(f"[WARN] CHECKMATE_HQ_GROUP_ID not set or invalid ({CHECKMATE_HQ_GROUP_ID}) - announcements disabled")
+        print(f"[WARN] CHECKMATE_HQ_GROUP_ID invalid or not set (got: {CHECKMATE_HQ_GROUP_ID}) - announcements disabled")
     
     task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
     print("[OK] Polling started successfully - waiting for messages...")

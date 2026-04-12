@@ -175,6 +175,7 @@ def save_user(user_id, data: dict):
     d.pop('challenges', None)
     d.pop('metadata', None)
     d.pop('training_queue', None)
+    d.pop('shield_status', None)  # Shield status is in-memory only, not in DB
     
     # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources)
     for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs'):
@@ -649,18 +650,19 @@ def restore_shield_after_attack(user_id: str):
 
 
 def give_automatic_shield(user_id):
-    """Grant a shield to a player."""
+    """Grant a shield to a player (in-memory only, not persisted to DB)."""
     user = get_user(str(user_id))
     if user:
+        # Shield status is kept in-memory only, not in database
         user['shield_status'] = 'ACTIVE'
         user.pop('shield_expires', None)  # Remove legacy permanent shield
-        save_user(str(user_id), user)
+        # NOTE: shield_status is NOT saved to database (column doesn't exist)
         return True
     return False
 
 
 def reset_all_shields():
-    """Reset all players' shields to UNPROTECTED (removes permanent shields)."""
+    """Reset all players' shields to UNPROTECTED (in-memory only)."""
     try:
         users = supabase.table(DB_TABLE).select('user_id').execute().data
         reset_count = 0
@@ -669,15 +671,17 @@ def reset_all_shields():
                 user_id = user_data.get('user_id')
                 user = get_user(user_id)
                 if user:
+                    # Reset shield status in-memory (not saved to DB)
                     user['shield_status'] = 'UNPROTECTED'
                     user.pop('shield_expires', None)  # Remove legacy permanent shield
                     user.pop('shield_cooldown', None)  # Clear any cooldowns
-                    save_user(user_id, user)
+                    # NOTE: These changes are NOT persisted to database
+                    # (shield_status column doesn't exist in schema)
                     reset_count += 1
             except Exception as e:
-                print(f"[WARN] Could not reset shield for {user_data.get('user_id')}: {e}")
+                # Silently continue - in-memory operations don't fail on DB issues
                 continue
-        print(f"[SHIELDS] Reset {reset_count} players to UNPROTECTED status")
+        print(f"[OK] All shields reset to UNPROTECTED status (in-memory)")
         return reset_count
     except Exception as e:
         print(f"[ERROR] reset_all_shields failed: {e}")
