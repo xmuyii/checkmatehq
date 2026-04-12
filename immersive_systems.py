@@ -396,42 +396,153 @@ ACHIEVEMENTS = {
         "reward": "150 XP + 100 silver",
         "gm":     "\"Vengeance served cold. As it should be.\"",
     },
-    "untouchable": {
-        "name":   "🛡️ UNTOUCHABLE",
-        "desc":   "Block 5 attacks with your shield",
-        "reward": "300 XP",
-        "gm":     "\"They keep hitting a wall. That wall is you.\"",
+}
+
+# ══════════════════════════════════════════════════════════════════
+#  SECTOR CONSCIOUSNESS SPLIT — When player ≠ base location
+# ══════════════════════════════════════════════════════════════════
+
+def consciousness_split_awareness(player_sector: int, base_sector: int, player_name: str) -> str:
+    """
+    Triggered when player realizes they are in a different sector than their base.
+    This creates psychological urgency and awakens their competitive consciousness.
+    """
+    if player_sector == base_sector:
+        return ""
+    
+    distance = abs(player_sector - base_sector)
+    is_far = distance > 3
+    
+    awakening_messages = {
+        "realization": [
+            f"🌌 You stand in SECTOR {player_sector}, yet your base anchors in SECTOR {base_sector}.",
+            f"⚡ Your consciousness is SPLIT across the dimension. SECTOR {player_sector} surrounds you. But your power base lies in SECTOR {base_sector}.",
+            f"💫 You feel the pull. Your empire beckons from SECTOR {base_sector}, yet you walk SECTOR {player_sector}.",
+        ],
+        "urgency": [
+            f"⚠️  Your base is EXPOSED while you wander.",
+            f"🔥 Every second in SECTOR {player_sector} is time your SECTOR {base_sector} base could be ATTACKED.",
+            f"💢 Your resources flow from SECTOR {base_sector}. Your defenses weaken with each passing moment.",
+        ] if is_far else [],
+        "power_call": [
+            f"📍 Return to SECTOR {base_sector} and consolidate your power.",
+            f"🎯 Or stay here and CONQUER SECTOR {player_sector} for yourself.",
+            f"⚔️  The choice defines you. Which reality do you claim?",
+        ],
+    }
+    
+    msg = random.choice(awakening_messages["realization"])
+    if is_far and awakening_messages["urgency"]:
+        msg += "\n\n" + random.choice(awakening_messages["urgency"])
+    msg += "\n\n" + random.choice(awakening_messages["power_call"])
+    
+    return msg
+
+
+# ══════════════════════════════════════════════════════════════════
+#  SHOP SYSTEM — Resource purchasing with silver
+# ══════════════════════════════════════════════════════════════════
+
+SHOP_CATALOG = {
+    "wood": {
+        "name": "🪵 WOOD",
+        "quantities": [100, 500, 1000, 5000],
+        "price_per_unit": 0.5,  # silver per wood
+        "description": "Foundation. Structure. Permanence."
     },
-    "warlord_trained": {
-        "name":   "💀 WARLORD FORGED",
-        "desc":   "Train your first Warlord unit",
-        "reward": "500 XP",
-        "gm":     "\"A legend joins your ranks. The game changes.\"",
+    "bronze": {
+        "name": "🧱 BRONZE",
+        "quantities": [50, 250, 500, 2500],
+        "price_per_unit": 1.0,
+        "description": "Training material. Your soldiers' backbone."
     },
-    "void_survivor": {
-        "name":   "🌑 VOID SURVIVOR",
-        "desc":   "Survive 10 battles in Sector 9",
-        "reward": "1000 XP + 500 silver",
-        "gm":     "\"The Void tried to claim you. It failed. Remarkable.\"",
+    "iron": {
+        "name": "⛓️ IRON",
+        "quantities": [25, 125, 250, 1000],
+        "price_per_unit": 2.0,
+        "description": "Rare. Powerful. Unbreakable."
     },
-    "intelligence_master": {
-        "name":   "🕵️ SHADOW BROKER",
-        "desc":   "Successfully scout 10 players",
-        "reward": "200 XP",
-        "gm":     "\"Information is power. You understand this now.\"",
+    "diamond": {
+        "name": "💎 DIAMOND",
+        "quantities": [10, 50, 100, 500],
+        "price_per_unit": 5.0,
+        "description": "Elite tier. Legendary units demand it."
     },
 }
 
-def format_achievement_unlock(achievement_id: str) -> str:
-    ach = ACHIEVEMENTS.get(achievement_id)
-    if not ach:
-        return ""
-    return (
-        f"🏅 *ACHIEVEMENT UNLOCKED!*\n"
-        f"{'═' * 32}\n"
-        f"{ach['name']}\n"
-        f"_{ach['desc']}_\n"
-        f"🎁 *Reward:* {ach['reward']}\n"
-        f"{'─' * 32}\n"
-        f"🃏 *GameMaster:* {ach['gm']}"
-    )
+def format_shop_menu(player_silver: int) -> str:
+    """Display interactive shop for buying resources with silver."""
+    menu = """
+╔════════════════════════════════════════════════════════╗
+║         🏬  THE SILVER VAULT  🏬                      ║
+║         Exchange your wealth for power                 ║
+╠════════════════════════════════════════════════════════╣
+║                                                        ║
+"""
+    for idx, (resource_key, resource_data) in enumerate(SHOP_CATALOG.items(), 1):
+        menu += f"║  {idx}️⃣  {resource_data['name']:<25} ⦿ {resource_data['description']}\n"
+    
+    menu += f"""║                                                        ║
+║  Your Silver: {player_silver:,} ⚔️                                 ║
+║                                                        ║
+║  Type: !shop [resource] [quantity] to buy             ║
+║  Example: !shop wood 1000 (costs {1000 * 0.5:,.0f} silver)        ║
+║                                                        ║
+╚════════════════════════════════════════════════════════╝
+"""
+    return menu
+
+
+# ══════════════════════════════════════════════════════════════════
+#  INTERACTIVE BASE SETUP — Choose your starting sector
+# ══════════════════════════════════════════════════════════════════
+
+SECTOR_SELECTION_FLOW = """
+╔════════════════════════════════════════════════════════╗
+║        🏰  ESTABLISH YOUR BASE  🏰                    ║
+║        Choose your starting sector wisely              ║
+╠════════════════════════════════════════════════════════╣
+║                                                        ║
+║  Where will you plant your flag?                       ║
+║                                                        ║
+║  🏜️  SECTOR 1-3  (Badlands/Crimson)                  ║
+║      Raw resources. High competition.                  ║
+║      Best for: Aggressive warriors                     ║
+║                                                        ║
+║  ⛰️  SECTOR 4-6  (Obsidian/Shattered/Frozen)         ║
+║      Balanced resources & terrain.                     ║
+║      Best for: Survivors & tacticians                  ║
+║                                                        ║
+║  🔥  SECTOR 7-9  (Molten/Twilight/Void)              ║
+║      Rare resources. Deadly opponents.                 ║
+║      Best for: Legendary players                       ║
+║                                                        ║
+║  Type: !setup_base [sector] [BaseName]               ║
+║  Example: !setup_base 5 "Obsidian Fortress"          ║
+║                                                        ║
+╚════════════════════════════════════════════════════════╝
+"""
+
+# ══════════════════════════════════════════════════════════════════
+#  AWAKENING HOOKS — Irresistible psychological pull
+# ══════════════════════════════════════════════════════════════════
+
+AWAKENING_HOOKS = {
+    "first_check": "You feel it calling. Open my profile.",
+    "claimed_reward": "Your coffers grow. The power beckons. !profile",
+    "level_ready": "You're ONE victory away. See what awaits: !profile",
+    "resources_full": "Your base is BURSTING with potential. !lab to unlock power.",
+    "idle_24h": "The sectors have shifted. New opportunities. Come see: !profile",
+    "sector_danger": "A player from SECTOR [X] grows MIGHTY. Do you challenge? !attack @user",
+    "legendary_spawned": "⚫ THE ASSASSIN HAS APPEARED. 1,000,000 XP. ONE CLAIM. NOW.",
+}
+
+def get_awakening_hook(hook_type: str, **context) -> str:
+    """Get a psychological hook message tailored to player state."""
+    base_msg = AWAKENING_HOOKS.get(hook_type, "The game awaits.")
+    
+    # Interpolate context variables
+    for key, value in context.items():
+        base_msg = base_msg.replace(f"[{key.upper()}]", str(value))
+    
+    return base_msg

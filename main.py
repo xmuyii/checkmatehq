@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 main.py — Checkmate HQ Bot
 ===========================
@@ -62,7 +63,9 @@ try:
     from immersive_systems import (
         ASSASSIN_PROFILE, get_assassin_encounter, BURNED_BASE_IMAGERY,
         OBELISK_GATEWAY, ATTACK_DECISION_SCREEN, SECTOR_CONSCIOUSNESS,
-        format_battle_intensity, format_victory_ascension, format_defeat_devastation
+        format_battle_intensity, format_victory_ascension, format_defeat_devastation,
+        consciousness_split_awareness, format_shop_menu, SECTOR_SELECTION_FLOW,
+        get_awakening_hook, SHOP_CATALOG
     )
     print("✅ Immersive systems loaded (Deep psychological narratives)")
 except Exception as e:
@@ -99,6 +102,26 @@ try:
     print("✅ Advanced scout system loaded")
 except Exception as e:
     print(f"⚠️  Advanced scout system failed ({e})")
+
+# ── Trap System (Building & Defense) ────────────────────────────────────────
+try:
+    from trap_system import (
+        TRAP_TYPES, get_max_traps, get_available_traps, can_build_trap,
+        calculate_trap_damage, format_trap_menu, format_trap_defense_report
+    )
+    print("✅ Trap system loaded")
+except Exception as e:
+    print(f"⚠️  Trap system failed ({e})")
+
+# ── Build System (Internal Structures) ──────────────────────────────────────
+try:
+    from build_system import (
+        BUILDING_TYPES, get_available_buildings, can_build_building,
+        calculate_building_cost, format_buildings_menu, apply_building_bonuses
+    )
+    print("✅ Build system loaded")
+except Exception as e:
+    print(f"⚠️  Build system failed ({e})")
 
 # ── Attack System ──────────────────────────────────────────────────────────
 try:
@@ -935,7 +958,78 @@ Good luck, warrior. The GameMaster is watching. 👀
 
 @dp.message(_cmd("shop"))
 async def cmd_shop(message: types.Message):
-    await message.answer("🃏 *GameMaster:* \"The shop? Still under construction. Your impatience amuses me. Come back later, peasant.\"", parse_mode="Markdown")
+    """Buy resources with silver from the vault."""
+    if message.chat.type != "private":
+        await message.answer(_dm_only("!shop"), parse_mode="Markdown")
+        return
+    
+    try:
+        user_id = message.from_user.id
+        user = get_user(user_id)
+        if not user:
+            await message.answer("❌ Player not found. Register first.", parse_mode="Markdown")
+            return
+        
+        # Parse command: !shop [resource] [quantity]
+        parts = message.text.split()
+        if len(parts) < 2:
+            # Show menu if no args
+            menu = format_shop_menu(user.get("silver", 0))
+            await message.answer(menu, parse_mode="Markdown")
+            return
+        
+        resource = parts[1].lower()
+        if resource not in SHOP_CATALOG:
+            available = ", ".join(SHOP_CATALOG.keys())
+            await message.answer(f"❌ Unknown resource. Available: {available}", parse_mode="Markdown")
+            return
+        
+        if len(parts) < 3:
+            await message.answer(f"❌ Specify quantity. Example: !shop {resource} 1000", parse_mode="Markdown")
+            return
+        
+        try:
+            quantity = int(parts[2])
+        except ValueError:
+            await message.answer("❌ Quantity must be a number.", parse_mode="Markdown")
+            return
+        
+        # Calculate cost
+        resource_data = SHOP_CATALOG[resource]
+        total_cost = int(quantity * resource_data["price_per_unit"])
+        player_silver = user.get("silver", 0)
+        
+        if total_cost > player_silver:
+            deficit = total_cost - player_silver
+            await message.answer(
+                f"❌ Insufficient silver!\n\n"
+                f"Cost: {total_cost:,} silver\n"
+                f"You have: {player_silver:,} silver\n"
+                f"Needed: {deficit:,} more silver",
+                parse_mode="Markdown"
+            )
+            return
+        
+        # Deduct silver and add resource
+        user["silver"] = player_silver - total_cost
+        user[resource] = user.get(resource, 0) + quantity
+        save_user(str(user_id), user)
+        
+        msg = f"""
+✅ **PURCHASE COMPLETE**
+
+{resource_data['name']} × {quantity:,}
+Cost: {total_cost:,} silver
+
+Your Balance: {user['silver']:,} silver
+
+🏬 *More power flows your way.*
+*Will you use it wisely?*
+"""
+        await message.answer(msg, parse_mode="Markdown")
+        
+    except Exception as e:
+        await message.answer(f"❌ Shop error: {e}", parse_mode="Markdown")
 
 @dp.message(_cmd("upgrade"))
 async def cmd_upgrade(message: types.Message):
@@ -1021,13 +1115,25 @@ async def cmd_profile(message: types.Message):
         f"🏺 {base_res.get('relics', 0)}"
     )
     
+    # Check for sector consciousness split
+    current_sector = profile.get('sector')
+    base_sector = user.get('sector')
+    sector_split_msg = ""
+    if current_sector and base_sector and current_sector != base_sector:
+        try:
+            sector_split_msg = consciousness_split_awareness(current_sector, base_sector, profile['username'])
+            sector_split_msg = "\n\n" + sector_split_msg
+        except:
+            pass
+    
     await message.answer(
         f"🃏 *GameMaster:* \"Staring at your own reflection. Fine.\"\n"
         f"{divider()}\n\n"
         f"👤 *{profile['username']}* — *LEVEL {profile['level']}*\n\n"
         f"⭐ XP Progress:\n{xp_bar}\n"
         f"💰 Silver: *{profile['silver']}*\n"
-        f"📍 Sector: _{profile.get('sector_display','Not Assigned')}_\n"
+        f"📍 Current Sector: _{profile.get('sector_display','Not Assigned')}_\n"
+        f"🏰 Base Sector: _{get_sector_display(base_sector)}_\n"
         f"🛡️ Shield: {shield_status_str}\n\n"
         f"{divider()}\n\n"
         f"📊 *BATTLE RECORDS*\n"
@@ -1039,7 +1145,7 @@ async def cmd_profile(message: types.Message):
         f"📦 *INVENTORY* ({profile['inventory_count']}/{profile['backpack_slots']} slots)\n"
         f"├─ Unclaimed: *{profile['unclaimed_count']}* ⚠️\n"
         f"└─ Crates: *{profile['crate_count']}* | Shields: *{profile['shield_count']}*\n"
-        f"{divider()}",
+        f"{divider()}{sector_split_msg}",
         parse_mode="Markdown"
     )
 
@@ -1366,49 +1472,105 @@ async def cmd_setup_base(message: types.Message):
     if user.get("base_name"):
         await message.answer(f"🃏 *GameMaster:* \"Your loyalty is fickle. You already rule **{user['base_name']}**.\"", parse_mode="Markdown"); return
     
-    # Extract base name from message
-    parts = message.text.strip().split(maxsplit=1)
-    if len(parts) < 2:
-        await message.answer("🃏 *GameMaster:* \"A fortress needs a name. Use: `!setup_base [Name]`\"", parse_mode="Markdown"); return
+    # Parse command: !setup_base [sector] [Name]
+    parts = message.text.strip().split(maxsplit=2)
     
-    base_name = parts[1].strip()[:25]
+    if len(parts) < 3:
+        # Show selection flow if not enough args
+        await message.answer(SECTOR_SELECTION_FLOW, parse_mode="Markdown")
+        return
+    
+    try:
+        sector = int(parts[1])
+    except ValueError:
+        await message.answer("❌ Sector must be a number (1-9). Example: `!setup_base 5 \"Obsidian Fortress\"`", parse_mode="Markdown")
+        return
+    
+    if sector < 1 or sector > 9:
+        await message.answer("❌ Sector must be between 1 and 9.", parse_mode="Markdown")
+        return
+    
+    base_name = parts[2].strip()[:25]
     
     # Initialize base structure
     user["base_name"] = base_name
     user["base_level"] = 1
-    user["sector"] = random.randint(1, 9)  # Random sector 1-9
+    user["sector"] = sector  # Player's chosen sector
     user["war_points"] = 0
     user["wins"] = 0
     user["losses"] = 0
     user["kings_captured"] = 0
     user["times_captured"] = 0
-    user["base_name_changes"] = 0  # Track name changes (limit to 1)
+    user["base_name_changes"] = 0
     user["alliance_id"] = None
     
-    # Initialize base resources and military
+    # Starting resources vary by sector
+    base_resources_template = {"wood": 20, "bronze": 10, "iron": 0, "diamond": 0, "relics": 0}
+    
+    # Sector bonuses (theme-based resource distribution)
+    sector_bonuses = {
+        1: {"wood": 30},    # Badlands: more wood
+        2: {"bronze": 20},  # Crimson: more bronze
+        3: {"wood": 25},    # Resource rich
+        4: {"bronze": 15},  # Balanced
+        5: {"iron": 5},     # Rare iron
+        6: {"iron": 5},     # Rare iron
+        7: {"diamond": 2},  # Very rare diamond
+        8: {"bronze": 20},  # Balanced
+        9: {"diamond": 3},  # Void sector has rarest
+    }
+    
+    # Apply sector bonus
+    sector_resources = dict(base_resources_template)
+    if sector in sector_bonuses:
+        for res, amt in sector_bonuses[sector].items():
+            sector_resources[res] = sector_resources.get(res, 0) + amt
+    
     user["base_resources"] = {
-        "resources": {"wood": 20, "bronze": 10, "iron": 0, "diamond": 0, "relics": 0},
+        "resources": sector_resources,
         "food": 50,
         "current_streak": 0
     }
-    user["military"] = {"pawn": 5}  # Start with 5 footmen
+    user["military"] = {"pawn": 5}
     user["traps"] = {}
     user["buffs"] = {}
     
     try:
         save_user(u_id, user)
-        print(f"[BASE] {user.get('username', message.from_user.first_name)} created base '{base_name}'")
+        print(f"[BASE] {user.get('username', message.from_user.first_name)} created base '{base_name}' in SECTOR {sector}")
         
-        await message.answer(
-            f"🚩 **TERRITORY CLAIMED**\n"
-            f"━━━━━━━━━━━━━━━━━━━\n"
-            f"🏰 **Base:** {base_name}\n"
-            f"📍 **Sector:** {user['sector']}\n"
-            f"⭐ **Level:** 1\n"
-            f"🛡️ **Garrison:** 5x Footmen\n\n"
-            f"🃏 *GameMaster:* \"Welcome to the map, Lord {message.from_user.first_name}. Try not to let it burn.\"",
-            parse_mode="Markdown"
-        )
+        # Get sector consciousness description
+        sector_info = SECTOR_CONSCIOUSNESS.get(sector, {})
+        sector_name = sector_info.get("name", f"SECTOR {sector}")
+        
+        # Resources breakdown
+        resources_str = ", ".join([f"{v}x {k}" for k, v in sector_resources.items() if v > 0])
+        
+        msg = f"""
+╔════════════════════════════════════════════════════╗
+║        🚩  TERRITORY CLAIMED  🚩                  ║
+╠════════════════════════════════════════════════════╣
+║                                                    ║
+║  🏰 **Base:** {base_name}                          
+║  📍 **Location:** {sector_name}                    
+║  ⭐ **Level:** 1                                   ║
+║  🛡️ **Garrison:** 5x Footmen                       ║
+║  💰 **Starting Resources:** {resources_str}       ║
+║                                                    ║
+║  You awakened here because something called you.   ║
+║  {sector_info.get('consciousness', 'Your destiny awaits.')}           ║
+║                                                    ║
+║  The map expands before you.                       ║
+║  Other players emerge from the darkness.           ║
+║  War is coming.                                    ║
+║                                                    ║
+║  Type `!profile` to see your empire.              ║
+║  Type `!obelisk` to understand this dimension.    ║
+║                                                    ║
+╚════════════════════════════════════════════════════╝
+"""
+        await message.answer(msg, parse_mode="Markdown")
+        
     except Exception as e:
         print(f"[ERROR] Failed to create base for {u_id}: {e}")
         import traceback
@@ -1760,6 +1922,98 @@ async def cmd_base(message: types.Message):
     await message.answer(info, parse_mode="Markdown")
 
 
+@dp.message(_cmd("build"))
+async def cmd_build(message: types.Message):
+    """Build structures inside your base for bonuses."""
+    if message.chat.type != "private":
+        await message.answer(_dm_only("!build"), parse_mode="Markdown")
+        return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    
+    if not user:
+        await message.answer("🃏 *GameMaster:* \"You're not registered.\"", parse_mode="Markdown")
+        return
+    
+    if not user.get("base_name"):
+        await message.answer("🏰 *GameMaster:* \"You have no base. Use `!setup_base [sector] [name]` first.\"", parse_mode="Markdown")
+        return
+    
+    # Calculate base level
+    xp = user.get("xp", 0)
+    base_level = max(1, 1 + (xp // 1000))
+    
+    # Parse command: !build [building_name]
+    args = message.text.strip().split(maxsplit=1)
+    
+    if len(args) < 2:
+        # Show menu
+        current_buildings = user.get("buildings", {})
+        menu = format_buildings_menu(base_level, current_buildings)
+        await message.answer(menu, parse_mode="Markdown")
+        return
+    
+    building_name = args[1].lower().replace(" ", "_").replace("-", "_")
+    
+    # Check if building exists
+    can_build, error_msg = can_build_building(building_name, base_level)
+    if not can_build:
+        await message.answer(f"❌ {error_msg}", parse_mode="Markdown")
+        return
+    
+    # Get current buildings
+    buildings = user.get("buildings", {})
+    current_level = buildings.get(building_name, 0)
+    
+    # Calculate cost for next level
+    cost = calculate_building_cost(building_name, current_level + 1)
+    
+    # Check if player has resources
+    base_res = user.get("base_resources", {})
+    if isinstance(base_res, str):
+        import json as json_lib
+        try:
+            base_res = json_lib.loads(base_res)
+        except:
+            base_res = {}
+    
+    resources = base_res.get("resources", {})
+    
+    for resource, amount in cost.items():
+        if resources.get(resource, 0) < amount:
+            await message.answer(
+                f"❌ Insufficient {resource}!\n"
+                f"Need: {amount}\n"
+                f"Have: {resources.get(resource, 0)}",
+                parse_mode="Markdown"
+            )
+            return
+    
+    # Deduct resources and build
+    for resource, amount in cost.items():
+        resources[resource] = resources.get(resource, 0) - amount
+    
+    buildings[building_name] = current_level + 1
+    
+    base_res["resources"] = resources
+    user["buildings"] = buildings
+    user["base_resources"] = base_res
+    
+    save_user(u_id, user)
+    
+    building_info = BUILDING_TYPES.get(building_name, {})
+    
+    await message.answer(
+        f"✅ **CONSTRUCTION COMPLETE!**\n\n"
+        f"{building_info.get('name', building_name)}\n"
+        f"Level: {buildings[building_name]}\n\n"
+        f"*Bonus:* {building_info.get('description', 'N/A')}\n\n"
+        f"🃏 *GameMaster:* \"Your infrastructure grows stronger. The game notices.\"",
+        parse_mode="Markdown"
+    )
+
+
 @dp.message(_cmd("scout"))
 async def cmd_scout(message: types.Message):
     """Scout a target player to reveal their army and traps."""
@@ -1779,9 +2033,10 @@ async def cmd_scout(message: types.Message):
         await message.answer(
             "🛰️ *SCOUT COMMAND*\n\n"
             "Cost: 100 Silver\n"
-            "Success Rate: 70% (30% fail)\n\n"
+            "Success Rate: 70% (30% honeypot)\n\n"
             "Usage: `!scout @username` or `!scout <name>`\n\n"
-            "_Reveals enemy army and traps if successful._",
+            "_Reveals enemy army and traps if successful._\n"
+            "_Watch out for mousetraps and firewalls!_",
             parse_mode="Markdown"
         )
         return
@@ -1791,21 +2046,101 @@ async def cmd_scout(message: types.Message):
     # Find target player
     from supabase_db import supabase, DB_TABLE
     try:
-        r = supabase.table(DB_TABLE).select("user_id, username, military, traps").ilike("username", f"%{target_name}%").limit(1).execute()
+        r = supabase.table(DB_TABLE).select("user_id, username, military, traps, sector").ilike("username", f"%{target_name}%").limit(1).execute()
         if not r.data:
             await message.answer(f"🔍 *GM:* \"No player named '{target_name}' found.\"", parse_mode="Markdown")
             return
         target_id = r.data[0]["user_id"]
         target_display_name = r.data[0].get("username", target_name)
-    except:
-        await message.answer(f"🔍 *GM:* \"Scout query failed. Try again.\"", parse_mode="Markdown")
+        target_sector = r.data[0].get("sector")
+        
+    except Exception as e:
+        await message.answer(f"🔍 *GM:* \"Scout query failed: {str(e)[:50]}\"", parse_mode="Markdown")
         return
     
-    # Execute scout
-    from revenge_system import scout_player, format_scout_report
-    success, result = scout_player(u_id, target_id, target_display_name)
+    # Check silver cost
+    scout_cost = 100
+    scout_silver = scout_user.get("silver", 0)
+    if scout_silver < scout_cost:
+        await message.answer(
+            f"❌ Insufficient silver!\n"
+            f"Cost: {scout_cost} silver\n"
+            f"You have: {scout_silver} silver",
+            parse_mode="Markdown"
+        )
+        return
     
-    report = format_scout_report(result)
+    # Can't scout self
+    if target_id == u_id:
+        await message.answer("🛰️ *GM:* \"You can't scout yourself, fool.\"", parse_mode="Markdown")
+        return
+    
+    # Deduct silver
+    scout_user["silver"] = scout_silver - scout_cost
+    save_user(u_id, scout_user)
+    
+    # 70% success chance
+    success = random.random() < 0.7
+    
+    if success:
+        # Get target's military and traps
+        target = get_user(target_id)
+        if not target:
+            await message.answer("❌ Target no longer exists.", parse_mode="Markdown")
+            return
+        
+        military = target.get("military", {})
+        traps = target.get("traps", {})
+        
+        report = f"""
+╔════════════════════════════════════════════════════╗
+║          📸  SCOUT REPORT  📸                     ║
+╠════════════════════════════════════════════════════╣
+║                                                    ║
+║  Target: **{target_display_name}**                
+║  📍 Sector: {target_sector}                        
+║  Level: {target.get('level', '?')}                
+║  Silver: {target.get('silver', 0):,}              
+║                                                    ║
+║  🎖️ MILITARY:                                      
+"""
+        if military:
+            for unit_type, count in military.items():
+                report += f"║    {unit_type}: {count}\n"
+        else:
+            report += "║    (No troops)\n"
+        
+        report += f"""║                                                    ║
+║  🕳️ TRAPS:                                        
+"""
+        if traps:
+            for trap_type, count in traps.items():
+                report += f"║    {trap_type}: {count}\n"
+        else:
+            report += "║    (No traps)\n"
+        
+        report += """║                                                    ║
+║  ✅ Scout returned safely with intel!             ║
+║                                                    ║
+╚════════════════════════════════════════════════════╝
+"""
+    else:
+        # Failed - honeypot triggered
+        report = f"""
+╔════════════════════════════════════════════════════╗
+║          ❌  SCOUT HONEYPOT  ❌                   ║
+╠════════════════════════════════════════════════════╣
+║                                                    ║
+║  Your scout was detected!                          ║
+║                                                    ║
+║  {target_display_name} now knows you spied on them.║
+║  They've set mousetraps and firewalls.             ║
+║                                                    ║
+║  🚨 WARNING: They may retaliate!                  ║
+║                                                    ║
+╚════════════════════════════════════════════════════╝
+"""
+    
     await message.answer(report, parse_mode="Markdown")
 
 
@@ -1900,7 +2235,7 @@ async def cmd_attack(message: types.Message):
     # Find target player
     from supabase_db import supabase, DB_TABLE
     try:
-        r = supabase.table(DB_TABLE).select("user_id, username, military, base_resources").ilike(
+        r = supabase.table(DB_TABLE).select("user_id, username, military, base_resources, sector").ilike(
             "username", f"%{target_name}%"
         ).limit(1).execute()
         if not r.data:
@@ -1908,6 +2243,7 @@ async def cmd_attack(message: types.Message):
             return
         target_id = r.data[0]["user_id"]
         target_display_name = r.data[0].get("username", target_name)
+        target_sector = r.data[0].get("sector")
     except Exception as e:
         await message.answer(f"🔍 *GM:* \"Attack query failed: {e}\"", parse_mode="Markdown")
         return
@@ -1915,6 +2251,21 @@ async def cmd_attack(message: types.Message):
     # Can't attack self
     if target_id == u_id:
         await message.answer("⚔️ *GM:* \"You can't attack yourself, fool.\"", parse_mode="Markdown")
+        return
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    #  SECTOR VALIDATION — Can only attack same sector
+    # ═══════════════════════════════════════════════════════════════════════════
+    
+    attacker_sector = attacker.get("sector")
+    if attacker_sector != target_sector:
+        await message.answer(
+            f"⚔️ *GM:* \"You stand in SECTOR {attacker_sector}, but {target_display_name} inhabits SECTOR {target_sector}.\"\n\n"
+            f"📍 *Cross-sector attacks are forbidden.*\n\n"
+            f"_You must use !teleport to move to their sector, or find them in the lands you walk._\n\n"
+            f"Cost: {30 if target_sector != attacker_sector else 0} Silver to teleport",
+            parse_mode="Markdown"
+        )
         return
     
     # ═══════════════════════════════════════════════════════════════════════════

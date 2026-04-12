@@ -170,9 +170,11 @@ def save_user(user_id, data: dict):
     base_data = d.pop('base', None)
     resources_data = d.pop('resources', None)
     
-    # Exclude challenges if saving to DB (since the column doesn't exist yet)
-    # Challenges are tracked in memory but not persisted to database
+    # Exclude fields that don't exist in DB schema
+    # These are tracked in memory but not persisted to database
     d.pop('challenges', None)
+    d.pop('metadata', None)
+    d.pop('training_queue', None)
     
     # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources)
     for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs'):
@@ -660,7 +662,7 @@ def give_automatic_shield(user_id):
 def reset_all_shields():
     """Reset all players' shields to UNPROTECTED (removes permanent shields)."""
     try:
-        users = supabase.table(DB_TABLE).select('user_id, shield_status').execute().data
+        users = supabase.table(DB_TABLE).select('user_id').execute().data
         reset_count = 0
         for user_data in users:
             try:

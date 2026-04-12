@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The 64 - Sectors Visualization | Phaser.io</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Courier New', monospace;
+            background: #000814;
+            color: #00ff41;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        #game { display: flex; }
+        #ui {
+            width: 300px;
+            background: rgba(0,8,20,0.95);
+            border: 2px solid #00ff41;
+            padding: 20px;
+            overflow-y: auto;
+            max-height: 100vh;
+        }
+        .sector-info {
+            margin-bottom: 15px;
+            padding: 10px;
+            border: 1px solid #00ff41;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .sector-info:hover {
+            background: rgba(0,255,65,0.1);
+            transform: scale(1.02);
+        }
+        .sector-info h3 {
+            color: #00ff41;
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+        .sector-info p {
+            font-size: 12px;
+            color: #00dd33;
+            line-height: 1.4;
+        }
+        h1 { 
+            position: absolute; 
+            top: 10px; 
+            left: 10px; 
+            z-index: 100;
+            font-size: 24px;
+        }
+        .controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            z-index: 100;
+            font-size: 12px;
+            background: rgba(0,8,20,0.9);
+            padding: 10px;
+            border: 1px solid #00ff41;
+        }
+    </style>
+</head>
+<body>
+    <div id="game"></div>
+    
+    <div id="ui">
+        <h2>⚔️ THE 64 SECTORS</h2>
+        <p style="font-size: 11px; margin-bottom: 15px; color: #00aa00;">
+            Click sector to teleport. Drag to move camera.
+        </p>
+        <div id="sectors-list"></div>
+    </div>
+
+    <h1>🌌 THE 64 - SECTOR MAP</h1>
+    <div class="controls">
+        <p>🖱️ Click sector to select</p>
+        <p>⌨️ WASD to move</p>
+        <p>🔍 Scroll to zoom</p>
+    </div>
+
+    <script>
+        // ═══════════════════════════════════════════════════════════════════
+        //  PHASER GAME CONFIGURATION
+        // ═══════════════════════════════════════════════════════════════════
+
+        const SECTOR_DATA = {
+            1: { name: "🏜️ BADLANDS-8", color: 0xff8800, x: 100, y: 100, consciousness: "Raw. Primal." },
+            2: { name: "🔴 CRIMSON WASTES", color: 0xff0000, x: 300, y: 100, consciousness: "Violent. Aggressive." },
+            3: { name: "⛰️ OBSIDIAN PEAKS", color: 0x1a1a1a, x: 500, y: 100, consciousness: "Merciless. Isolated." },
+            4: { name: "💔 SHATTERED VALLEY", color: 0xaa00ff, x: 100, y: 300, consciousness: "Chaotic. Paranoid." },
+            5: { name: "❄️ FROZEN ABYSS", color: 0x0088ff, x: 300, y: 300, consciousness: "Addictive. Beautiful." },
+            6: { name: "🔥 MOLTEN GORGE", color: 0xff4400, x: 500, y: 300, consciousness: "GODLIKE. TRANSCENDENT." },
+            7: { name: "🌙 TWILIGHT MARSHES", color: 0xaa00ff, x: 100, y: 500, consciousness: "Dreamlike. Surreal." },
+            8: { name: "🌲 SILENT FOREST", color: 0x00aa00, x: 300, y: 500, consciousness: "Honorable. Fair." },
+            9: { name: "🌑 VOID CANYON", color: 0x000033, x: 500, y: 500, consciousness: "COSMIC. LEGENDARY." },
+        };
+
+        const config = {
+            type: Phaser.AUTO,
+            parent: 'game',
+            width: window.innerWidth - 300,
+            height: window.innerHeight,
+            backgroundColor: '#000814',
+            physics: {
+                default: 'arcade',
+                arcade: { debug: false }
+            },
+            scene: {
+                preload: preload,
+                create: create,
+                update: update
+            },
+            render: {
+                pixelArt: true,
+                antialias: false
+            }
+        };
+
+        const game = new Phaser.Game(config);
+
+        let selectedSector = null;
+        let sectorGraphics = {};
+        let camera = null;
+
+        function preload() {}
+
+        function create() {
+            camera = this.cameras.main;
+            camera.setBounds(-500, -500, 2000, 2000);
+            camera.setZoom(1);
+
+            // Create sector graphics
+            let graphics = this.add.graphics();
+
+            for (let sectorId = 1; sectorId <= 9; sectorId++) {
+                const info = SECTOR_DATA[sectorId];
+                
+                // Draw sector circle
+                graphics.fillStyle(info.color, 0.3);
+                graphics.fillCircle(info.x, info.y, 60);
+                graphics.lineStyle(3, info.color, 0.8);
+                graphics.strokeCircle(info.x, info.y, 60);
+
+                // Create interactive zone
+                const zone = this.add.zone(info.x, info.y, 120, 120);
+                zone.setInteractive();
+                zone.sectorId = sectorId;
+                zone.on('pointerover', () => {
+                    graphics.clear();
+                    drawAllSectors(this, graphics, info.color);
+                    graphics.fillStyle(info.color, 0.6);
+                    graphics.fillCircle(info.x, info.y, 60);
+                });
+                zone.on('pointerout', () => {
+                    graphics.clear();
+                    drawAllSectors(this, graphics);
+                });
+                zone.on('pointerdown', () => selectSector(this, sectorId));
+
+                // Add sector label
+                this.add.text(info.x, info.y, sectorId, {
+                    font: 'bold 24px Arial',
+                    fill: '#ffffff',
+                    align: 'center'
+                }).setOrigin(0.5).setDepth(10);
+            }
+
+            // Draw all sectors initially
+            drawAllSectors(this, graphics);
+
+            // Setup keyboard controls
+            const keys = this.input.keyboard.createCursorKeys();
+            this.input.keyboard.on('keydown', (evt) => {
+                const speed = 5;
+                if (evt.key === 'w' || evt.key === 'W') camera.scrollY -= speed;
+                if (evt.key === 's' || evt.key === 'S') camera.scrollY += speed;
+                if (evt.key === 'a' || evt.key === 'A') camera.scrollX -= speed;
+                if (evt.key === 'd' || evt.key === 'D') camera.scrollX += speed;
+            });
+
+            // Mouse wheel zoom
+            this.input.on('wheel', (pointer, currentlyOver, delta) => {
+                const zoomFactor = delta > 0 ? 0.9 : 1.1;
+                const newZoom = camera.zoom * zoomFactor;
+                camera.setZoom(Math.max(0.5, Math.min(3, newZoom)));
+            });
+
+            // Populate UI
+            populateSectorList();
+        }
+
+        function update() {}
+
+        function drawAllSectors(scene, graphics, hoverColor = null) {
+            for (let sectorId = 1; sectorId <= 9; sectorId++) {
+                const info = SECTOR_DATA[sectorId];
+                graphics.fillStyle(info.color, 0.3);
+                graphics.fillCircle(info.x, info.y, 60);
+                graphics.lineStyle(3, info.color, 0.8);
+                graphics.strokeCircle(info.x, info.y, 60);
+            }
+        }
+
+        function selectSector(scene, sectorId) {
+            selectedSector = sectorId;
+            const info = SECTOR_DATA[sectorId];
+            console.log(`Sector ${sectorId} selected: ${info.name}`);
+            
+            // Highlight selected
+            const graphics = scene.add.graphics();
+            graphics.lineStyle(4, 0x00ff41, 1);
+            graphics.strokeCircle(info.x, info.y, 70);
+
+            // Show info
+            alert(`TELEPORTING TO:\n${info.name}\n\nConsciousness: ${info.consciousness}`);
+        }
+
+        function populateSectorList() {
+            const list = document.getElementById('sectors-list');
+            for (let id = 1; id <= 9; id++) {
+                const info = SECTOR_DATA[id];
+                const div = document.createElement('div');
+                div.className = 'sector-info';
+                div.style.borderColor = `hsl(${(id * 40) % 360}, 100%, 50%)`;
+                div.innerHTML = `
+                    <h3>${info.name}</h3>
+                    <p>${info.consciousness}</p>
+                `;
+                div.onclick = () => alert(`Sector ${id}: ${info.consciousness}`);
+                list.appendChild(div);
+            }
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            game.scale.resize(window.innerWidth - 300, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

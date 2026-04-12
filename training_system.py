@@ -219,6 +219,7 @@ def add_to_training_queue(user_id: str, unit_type: str, amount: int) -> Tuple[bo
     Queue units for training. Checks level, resources, and XP.
     Returns (success, message).
     """
+    user_id = str(user_id)
     user = get_user(user_id)
     if not user:
         return False, "❌ Player not found."
