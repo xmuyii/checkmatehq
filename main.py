@@ -61,15 +61,30 @@ from addictive_mechanics import (
 # ── Immersive Systems (Psychological Depth & Narrative) ───────────────────
 try:
     from immersive_systems import (
-        ASSASSIN_PROFILE, get_assassin_encounter, BURNED_BASE_IMAGERY,
-        OBELISK_GATEWAY, ATTACK_DECISION_SCREEN, SECTOR_CONSCIOUSNESS,
+        ASSASSIN_PROFILE, BURNED_BASE_IMAGERY,
+        OBELISK_GATEWAY, SECTOR_CONSCIOUSNESS,
         format_battle_intensity, format_victory_ascension, format_defeat_devastation,
         consciousness_split_awareness, format_shop_menu, SECTOR_SELECTION_FLOW,
         get_awakening_hook, SHOP_CATALOG
     )
+    ATTACK_DECISION_SCREEN = "⚔️ Choose your target carefully."
     print("✅ Immersive systems loaded (Deep psychological narratives)")
 except Exception as e:
     print(f"⚠️  Immersive systems failed ({e}), using standard narratives")
+    ASSASSIN_PROFILE = {}
+    BURNED_BASE_IMAGERY = "🔥 Your base has been raided. Rebuild or perish."
+    OBELISK_GATEWAY = "🌌 Welcome to the dimensional gateway.\n\nYou stand before the Obelisk...\nWill you enter the 9 sectors?"
+    ATTACK_DECISION_SCREEN = "⚔️ Choose your target carefully."
+    SECTOR_CONSCIOUSNESS = {}
+    # Stub functions for missing immersive functions
+    def format_battle_intensity(p, e, s): return f"⚔️ {p} battles {e}!"
+    def format_victory_ascension(w, l, xp, r): return f"🏆 {w} defeated {l}!"
+    def format_defeat_devastation(l, w): return f"💀 {l} was defeated by {w}."
+    def consciousness_split_awareness(ps, bs, pn): return "You are split between locations."
+    def format_shop_menu(s): return f"💰 You have {s} silver."
+    def get_awakening_hook(ht, **ctx): return "The game awaits."
+    SECTOR_SELECTION_FLOW = "Select a sector."
+    SHOP_CATALOG = {}
 
 # ── Bandit System (Strategic Enemy Encounters) ──────────────────────────────
 try:
@@ -86,7 +101,7 @@ except Exception as e:
 try:
     from revenge_system import (
         set_revenge_target, get_revenge_info, clear_revenge, get_revenge_multiplier,
-        scout_player, format_scout_report
+        scout_player, format_full_battle_report
     )
     print("✅ Revenge & Scout system loaded")
 except Exception as e:
@@ -122,6 +137,27 @@ try:
     print("✅ Build system loaded")
 except Exception as e:
     print(f"⚠️  Build system failed ({e})")
+
+# ── Weapon System (Combat & Sabotage) ────────────────────────────────────────
+try:
+    from weapon_system import (
+        WEAPONS, get_available_weapons, can_buy_weapon, can_use_weapon,
+        format_weapons_shop, add_weapon_to_inventory, use_weapon_on_target,
+        format_weapon_activation, format_weapon_damage_notification
+    )
+    print("✅ Weapon system loaded")
+except Exception as e:
+    print(f"⚠️  Weapon system failed ({e})")
+
+# ── Prestige System (Level Reset with Bonuses) ───────────────────────────────
+try:
+    from prestige_system import (
+        can_prestige, execute_prestige, get_prestige_tier, format_prestige_status,
+        format_prestige_confirmation, get_prestige_multiplier, PRESTIGE_BONUSES
+    )
+    print("✅ Prestige system loaded")
+except Exception as e:
+    print(f"⚠️  Prestige system failed ({e})")
 
 # ── Attack System ──────────────────────────────────────────────────────────
 try:
@@ -591,38 +627,19 @@ async def cmd_help(message: types.Message):
 async def cmd_obelisk(message: types.Message):
     """Experience the Obelisk — gateway to another dimension."""
     if message.chat.type != "private":
-        await message.answer("🌌 *The Obelisk calls to you in private...* Send this command in DM.", parse_mode="Markdown")
+        await message.answer("🌌 The Obelisk calls to you in private. Send this command in DM.", parse_mode="Markdown")
         return
     
     try:
-        await message.answer(OBELISK_GATEWAY)
+        if OBELISK_GATEWAY and OBELISK_GATEWAY.strip():
+            await message.answer(OBELISK_GATEWAY)
+            await asyncio.sleep(1)
         
-        await asyncio.sleep(1)
-        
-        msg = """
-🌌 **WELCOME, TRAVELER** 🌌
-
-You stand before something that should not exist. In your world:
-- You have no power
-- Your voice is unheard  
-- Others make decisions FOR you
-
-But here? In The 64?
-
-You are a **FORCE OF NATURE**.
-
-Your strategy defeats enemy armies.
-Your cunning reshapes reality.
-Your will determines fates.
-
-The Obelisk grants you passage to 9 different sectors, each with its own consciousness, its own rules, its own **TESTS**.
-
-Will you enter?
-"""
+        msg = "🌌 Welcome to the Obelisk\n\nYou stand before a gateway to 9 cosmic sectors.\n\nType !sectors to view them.\nType !teleport [1-9] to enter."
         await message.answer(msg, parse_mode="Markdown")
         
     except Exception as e:
-        await message.answer(f"❌ Obelisk error: {e}", parse_mode="Markdown")
+        await message.answer("Obelisk awaits you. Use !sectors to explore.", parse_mode="Markdown")
 
 
 @dp.message(_cmd("sectors"))
@@ -1031,6 +1048,79 @@ Your Balance: {user['silver']:,} silver
     except Exception as e:
         await message.answer(f"❌ Shop error: {e}", parse_mode="Markdown")
 
+
+@dp.message(_cmd("weapons"))
+async def cmd_weapons(message: types.Message):
+    """Browse and buy weapons from weapons shop."""
+    if message.chat.type != "private":
+        await message.answer(_dm_only("!weapons"), parse_mode="Markdown")
+        return
+    
+    try:
+        u_id = str(message.from_user.id)
+        user = get_user(u_id)
+        if not user:
+            await message.answer("Register first with `/start`", parse_mode="Markdown")
+            return
+        
+        level = user.get("level", 1)
+        silver = user.get("silver", 0)
+        
+        # Parse command
+        parts = message.text.split(maxsplit=1)
+        if len(parts) < 2:
+            # Show weapons menu
+            menu = format_weapons_shop(level, silver)
+            await message.answer(menu, parse_mode="Markdown")
+            return
+        
+        weapon_name = parts[1].lower().replace(" ", "_")
+        
+        # Find weapon
+        weapon_id = None
+        for wid in WEAPONS:
+            if wid == weapon_name or wid.replace("_", " ") == parts[1].lower():
+                weapon_id = wid
+                break
+        
+        if not weapon_id:
+            await message.answer(f"❌ Unknown weapon: {weapon_name}", parse_mode="Markdown")
+            return
+        
+        # Check if can buy
+        can_buy, error = can_buy_weapon(weapon_id, level, silver)
+        if not can_buy:
+            await message.answer(f"❌ Cannot buy: {error}", parse_mode="Markdown")
+            return
+        
+        weapon = WEAPONS[weapon_id]
+        cost = weapon["cost"].get("silver", 0)
+        
+        # Purchase
+        user["silver"] -= cost
+        if "weapons" not in user:
+            user["weapons"] = {}
+        user["weapons"] = add_weapon_to_inventory(user.get("weapons", {}), weapon_id)
+        
+        save_user(u_id, user)
+        
+        msg = f"""✅ WEAPON PURCHASED
+
+*{weapon['name']}*
+
+{weapon['description']}
+
+Cost: {cost} silver
+Charges: {weapon['charges']}
+Rarity: {weapon['rarity'].upper()}
+
+Your new silver: {user['silver']:,}
+"""
+        await message.answer(msg, parse_mode="Markdown")
+        
+    except Exception as e:
+        await message.answer(f"❌ Error: {e}", parse_mode="Markdown")
+
 @dp.message(_cmd("upgrade"))
 async def cmd_upgrade(message: types.Message):
     await message.answer("🃏 *GameMaster:* \"*Queen's Satchel!* Nice try. Not ready yet.\n\nWhen it arrives: unlocks 20 inventory slots for 900 Naira.\n\nUntil then? Manage your pathetic 5 slots like an adult. Stop asking.\"", parse_mode="Markdown")
@@ -1146,8 +1236,355 @@ async def cmd_profile(message: types.Message):
         f"├─ Unclaimed: *{profile['unclaimed_count']}* ⚠️\n"
         f"└─ Crates: *{profile['crate_count']}* | Shields: *{profile['shield_count']}*\n"
         f"{divider()}{sector_split_msg}",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📈 Check Prestige", callback_data="prestige_info")],
+            [InlineKeyboardButton(text="🎓 Training", callback_data="train_menu"), 
+             InlineKeyboardButton(text="🏰 Build", callback_data="build_menu")],
+        ])
+    )
+
+
+@dp.message(_cmd("prestige"))
+async def cmd_prestige(message: types.Message):
+    """Prestige (reset level) for bonuses."""
+    if message.chat.type != "private":
+        await message.answer("🃏 *GameMaster:* \"Prestige in private, coward.\"", parse_mode="Markdown")
+        return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("Register first with `/start`", parse_mode="Markdown")
+        return
+    
+    level = user.get("level", 1)
+    prestige = user.get("prestige", 0)
+    
+    can_do, error = can_prestige(level, prestige)
+    if not can_do:
+        await message.answer(f"❌ {error}", parse_mode="Markdown")
+        return
+    
+    # Execute prestige
+    result = execute_prestige(user)
+    if not result["success"]:
+        await message.answer(f"❌ {result['message']}", parse_mode="Markdown")
+        return
+    
+    # Save updated user
+    save_user(u_id, user)
+    
+    # Send confirmation
+    confirmation = format_prestige_confirmation(
+        result["new_prestige"],
+        result["bonus_xp"],
+        result["bonus_silver"]
+    )
+    
+    await message.answer(confirmation, parse_mode="Markdown")
+
+
+@dp.callback_query(lambda q: q.data == "prestige_info")
+async def callback_prestige_info(callback: types.CallbackQuery):
+    """Show prestige status when button clicked."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered")
+        return
+    
+    level = user.get("level", 1)
+    prestige = user.get("prestige", 0)
+    
+    status = format_prestige_status(level, prestige)
+    await callback.message.edit_text(status, parse_mode="Markdown")
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data == "train_menu")
+async def callback_train_menu(callback: types.CallbackQuery):
+    """Show training unit menu with inline buttons."""
+    await callback.message.edit_text(
+        "🎖️ *MILITARY TRAINING*\n\n"
+        "Select unit type to train:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👹 Pawns (5 wood)", callback_data="train_pawn"),
+             InlineKeyboardButton(text="🗡️ Knights (15 wood + 5 bronze)", callback_data="train_knight")],
+            [InlineKeyboardButton(text="⚜️ Bishops (10 bronze + 3 iron)", callback_data="train_bishop"),
+             InlineKeyboardButton(text="🏰 Rooks (10 iron + 2 diamond)", callback_data="train_rook")],
+            [InlineKeyboardButton(text="👑 Queens (20 iron + 5 diamond)", callback_data="train_queen"),
+             InlineKeyboardButton(text="⚔️ Kings (15 diamond + 1 relic)", callback_data="train_king")],
+        ]),
         parse_mode="Markdown"
     )
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data == "build_menu")
+async def callback_build_menu(callback: types.CallbackQuery):
+    """Show building/trap menu with inline select."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered", show_alert=True)
+        return
+    
+    xp = user.get("xp", 0)
+    base_level = max(1, 1 + (xp // 1000))
+    
+    available_buildings = get_available_buildings(base_level)
+    available_traps = get_available_traps(base_level)
+    
+    keyboard = [
+        [InlineKeyboardButton(text="🏰 Build Structure", callback_data="show_building_list"),
+         InlineKeyboardButton(text="🔱 Build Trap", callback_data="show_trap_list")],
+    ]
+    
+    msg = f"🏰 *BASE DEVELOPMENT*\n\nBase Level: {base_level}\n\nChoose what to build:"
+    
+    await callback.message.edit_text(
+        msg,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data == "show_building_list")
+async def callback_show_buildings(callback: types.CallbackQuery):
+    """Show list of available buildings."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered", show_alert=True)
+        return
+    
+    xp = user.get("xp", 0)
+    base_level = max(1, 1 + (xp // 1000))
+    current_buildings = user.get("buildings", {})
+    
+    available = get_available_buildings(base_level)
+    
+    # Create buttons for each building
+    keyboard = []
+    for building_id in available:
+        building = BUILDING_TYPES[building_id]
+        button = InlineKeyboardButton(
+            text=f"{building['name']} (Lv: {current_buildings.get(building_id, 0)})",
+            callback_data=f"build_{building_id}"
+        )
+        keyboard.append([button])
+    
+    msg = f"🏰 *AVAILABLE BUILDINGS* (Level {base_level})\n\nSelect to build:"
+    
+    await callback.message.edit_text(
+        msg,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data == "show_trap_list")
+async def callback_show_traps(callback: types.CallbackQuery):
+    """Show list of available traps."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered", show_alert=True)
+        return
+    
+    xp = user.get("xp", 0)
+    base_level = max(1, 1 + (xp // 1000))
+    current_traps = user.get("traps", {})
+    
+    available = get_available_traps(base_level)
+    
+    # Create buttons for each trap
+    keyboard = []
+    for trap_id in available:
+        trap = TRAP_TYPES[trap_id]
+        button = InlineKeyboardButton(
+            text=f"{trap['name']} (Ct: {current_traps.get(trap_id, 0)})",
+            callback_data=f"trap_{trap_id}"
+        )
+        keyboard.append([button])
+    
+    msg = f"🔱 *AVAILABLE TRAPS* (Level {base_level})\n\nSelect to build:"
+    
+    await callback.message.edit_text(
+        msg,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data.startswith("build_"))
+async def callback_build_structure(callback: types.CallbackQuery):
+    """Build selected structure."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered", show_alert=True)
+        return
+    
+    building_id = callback.data.replace("build_", "")
+    xp = user.get("xp", 0)
+    base_level = max(1, 1 + (xp // 1000))
+    
+    can_build, error = can_build_building(building_id, base_level)
+    if not can_build:
+        await callback.answer(f"❌ {error}", show_alert=True)
+        return
+    
+    # Calculate cost
+    current_buildings = user.get("buildings", {})
+    current_level = current_buildings.get(building_id, 0)
+    cost = calculate_building_cost(building_id, current_level + 1)
+    
+    building = BUILDING_TYPES[building_id]
+    msg = f"{building['name']}\n\n"
+    msg += f"Bonus: {building['description']}\n\n"
+    msg += f"Cost: " + " + ".join([f"{amt} {res.upper()}" for res, amt in cost.items()])
+    msg += f"\n\nConfirm build?"
+    
+    await callback.message.edit_text(
+        msg,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Build", callback_data=f"build_confirm_{building_id}"),
+             InlineKeyboardButton(text="❌ Cancel", callback_data="build_menu")],
+        ])
+    )
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data.startswith("build_confirm_"))
+async def callback_build_confirm(callback: types.CallbackQuery):
+    """Confirm and execute building."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered", show_alert=True)
+        return
+    
+    building_id = callback.data.replace("build_confirm_", "")
+    
+    current_buildings = user.get("buildings", {})
+    current_level = current_buildings.get(building_id, 0)
+    cost = calculate_building_cost(building_id, current_level + 1)
+    
+    # Get base resources
+    base_res = user.get('base_resources', {})
+    resources = base_res.get('resources', {})
+    
+    # Check resources
+    for res_type, needed in cost.items():
+        available = resources.get(res_type, 0)
+        if available < needed:
+            await callback.answer(
+                f"❌ Need {needed} {res_type.upper()}, only have {available}",
+                show_alert=True
+            )
+            return
+    
+    # Deduct and build
+    for res_type, needed in cost.items():
+        resources[res_type] -= needed
+    
+    current_buildings[building_id] = current_level + 1
+    user["buildings"] = current_buildings
+    save_user(u_id, user)
+    
+    building = BUILDING_TYPES[building_id]
+    await callback.message.edit_text(
+        f"✅ *{building['name']}* BUILT!\n\n"
+        f"Level: {current_level + 1}\n"
+        f"Bonus: {building['description']}"
+    )
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data.startswith("trap_"))
+async def callback_build_trap(callback: types.CallbackQuery):
+    """Build selected trap."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered", show_alert=True)
+        return
+    
+    trap_id = callback.data.replace("trap_", "")
+    xp = user.get("xp", 0)
+    base_level = max(1, 1 + (xp // 1000))
+    
+    can_build, error = can_build_trap(trap_id, base_level)
+    if not can_build:
+        await callback.answer(f"❌ {error}", show_alert=True)
+        return
+    
+    trap = TRAP_TYPES[trap_id]
+    cost = trap.get("cost", {})
+    
+    msg = f"{trap['name']}\n\n"
+    msg += f"Effect: {trap['effect']}\n\n"
+    msg += f"Cost: " + " + ".join([f"{amt} {res.upper()}" for res, amt in cost.items()])
+    msg += f"\n\nBuild?"
+    
+    await callback.message.edit_text(
+        msg,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Build", callback_data=f"trap_confirm_{trap_id}"),
+             InlineKeyboardButton(text="❌ Cancel", callback_data="show_trap_list")],
+        ])
+    )
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data.startswith("trap_confirm_"))
+async def callback_trap_confirm(callback: types.CallbackQuery):
+    """Confirm and build trap."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered", show_alert=True)
+        return
+    
+    trap_id = callback.data.replace("trap_confirm_", "")
+    trap = TRAP_TYPES[trap_id]
+    cost = trap.get("cost", {})
+    
+    # Get resources
+    base_res = user.get('base_resources', {})
+    resources = base_res.get('resources', {})
+    
+    # Check
+    for res_type, needed in cost.items():
+        available = resources.get(res_type, 0)
+        if available < needed:
+            await callback.answer(
+                f"❌ Need {needed} {res_type.upper()}, only have {available}",
+                show_alert=True
+            )
+            return
+    
+    # Deduct and build
+    for res_type, needed in cost.items():
+        resources[res_type] -= needed
+    
+    traps = user.get("traps", {})
+    traps[trap_id] = traps.get(trap_id, 0) + 1
+    user["traps"] = traps
+    save_user(u_id, user)
+    
+    await callback.message.edit_text(
+        f"✅ *{trap['name']}* BUILT!\n\n"
+        f"Count: {traps[trap_id]}\n"
+        f"Effect: {trap['effect']}"
+    )
+    await callback.answer()
+
 
 
 @dp.message(_cmd("inventory"))
@@ -5131,41 +5568,38 @@ async def main():
     round_task = asyncio.create_task(round_reset_task())
     print("[OK] Round timer started (120s rounds with streak reset)")
     
-    # Start GameMaster announcements task (if group chat ID provided)
+    # Start GameMaster announcements task (using imported CHECKMATE_HQ_GROUP_ID)
     announce_task = None
     status_task = None
     mining_task_handle = None
     sheets_sync_task = None
-    group_chat_id = os.environ.get('CHECKMATE_HQ_GROUP_ID')
-    if group_chat_id:
+    
+    if CHECKMATE_HQ_GROUP_ID and CHECKMATE_HQ_GROUP_ID > 0:
         try:
-            try:
-                announce_task = asyncio.create_task(gamemaster_announcement_task(bot, int(group_chat_id)))
-                print(f"[OK] Announcements started for group {group_chat_id}")
-            except Exception as e:
-                print(f"[WARN] Announcements failed: {e}")
-            
-            try:
-                status_task = asyncio.create_task(sector_status_task(bot, int(group_chat_id)))
-                print(f"[OK] Sector Status broadcasts started (hourly)")
-            except Exception as e:
-                print(f"[WARN] Sector Status failed: {e}")
-            
-            try:
-                mining_task_handle = asyncio.create_task(mining_task(bot, int(group_chat_id)))
-                print(f"[OK] Mining task started")
-            except Exception as e:
-                print(f"[WARN] Mining task failed: {e}")
-            
-            try:
-                sheets_sync_task = asyncio.create_task(sheets_sync_background_task(bot, int(group_chat_id)))
-                print(f"[OK] Google Sheets sync task started (every 30 min)")
-            except Exception as e:
-                print(f"[WARN] Google Sheets sync failed: {e}")
-        except (ValueError, TypeError) as e:
-            print(f"[WARN] Invalid CHECKMATE_HQ_GROUP_ID: {e}")
+            announce_task = asyncio.create_task(gamemaster_announcement_task(bot, CHECKMATE_HQ_GROUP_ID))
+            print(f"[OK] Announcements started for group {CHECKMATE_HQ_GROUP_ID}")
+        except Exception as e:
+            print(f"[WARN] Announcements failed: {e}")
+        
+        try:
+            status_task = asyncio.create_task(sector_status_task(bot, CHECKMATE_HQ_GROUP_ID))
+            print(f"[OK] Sector Status broadcasts started (hourly)")
+        except Exception as e:
+            print(f"[WARN] Sector Status failed: {e}")
+        
+        try:
+            mining_task_handle = asyncio.create_task(mining_task(bot, CHECKMATE_HQ_GROUP_ID))
+            print(f"[OK] Mining task started")
+        except Exception as e:
+            print(f"[WARN] Mining task failed: {e}")
+        
+        try:
+            sheets_sync_task = asyncio.create_task(sheets_sync_background_task(bot, CHECKMATE_HQ_GROUP_ID))
+            print(f"[OK] Google Sheets sync task started (every 30 min)")
+        except Exception as e:
+            print(f"[WARN] Google Sheets sync failed: {e}")
     else:
-        print("[WARN] CHECKMATE_HQ_GROUP_ID not set - announcements disabled")
+        print(f"[WARN] CHECKMATE_HQ_GROUP_ID not set or invalid ({CHECKMATE_HQ_GROUP_ID}) - announcements disabled")
     
     task = asyncio.create_task(dp.start_polling(bot, handle_signals=False))
     print("[OK] Polling started successfully - waiting for messages...")
