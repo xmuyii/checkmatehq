@@ -1077,7 +1077,7 @@ Your Balance: {user['silver']:,} silver
 
 @dp.message(_cmd("weapons"))
 async def cmd_weapons(message: types.Message):
-    """Browse and buy weapons from weapons shop."""
+    """Browse and buy weapons from weapons shop with inline buttons."""
     if message.chat.type != "private":
         await message.answer(_dm_only("!weapons"), parse_mode="Markdown")
         return
@@ -1092,60 +1092,119 @@ async def cmd_weapons(message: types.Message):
         level = user.get("level", 1)
         silver = user.get("silver", 0)
         
-        # Parse command
-        parts = message.text.split(maxsplit=1)
-        if len(parts) < 2:
-            # Show weapons menu
-            menu = format_weapons_shop(level, silver)
-            await message.answer(menu, parse_mode="Markdown")
+        # Get available weapons
+        available = get_available_weapons(level)
+        
+        if not available:
+            await message.answer("🃏 *GameMaster:* \"No weapons available for your level yet.\"", parse_mode="Markdown")
             return
         
-        weapon_name = parts[1].lower().replace(" ", "_")
+        # Build message
+        txt = f"🔫 **WEAPONS SHOP** (Lv{level})\n\n"
+        txt += f"Your silver: **{silver:,}**\n\n"
         
-        # Find weapon
-        weapon_id = None
-        for wid in WEAPONS:
-            if wid == weapon_name or wid.replace("_", " ") == parts[1].lower():
-                weapon_id = wid
-                break
+        # Build keyboard with weapon buttons
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(
+                    text=f"{'✅' if silver >= WEAPONS[wid]['cost'].get('silver', 0) else '❌'} {WEAPONS[wid]['name']} ({WEAPONS[wid]['cost'].get('silver', 0)} 💰)",
+                    callback_data=f"weapon_{wid}"
+                )] for wid in sorted(available)
+            ]
+        )
         
-        if not weapon_id:
-            await message.answer(f"❌ Unknown weapon: {weapon_name}", parse_mode="Markdown")
-            return
+        # Add inventory button
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(text="📦 Your Inventory", callback_data="show_weapons_inv")
+        ])
         
-        # Check if can buy
-        can_buy, error = can_buy_weapon(weapon_id, level, silver)
-        if not can_buy:
-            await message.answer(f"❌ Cannot buy: {error}", parse_mode="Markdown")
-            return
-        
-        weapon = WEAPONS[weapon_id]
-        cost = weapon["cost"].get("silver", 0)
-        
-        # Purchase
-        user["silver"] -= cost
-        if "weapons" not in user:
-            user["weapons"] = {}
-        user["weapons"] = add_weapon_to_inventory(user.get("weapons", {}), weapon_id)
-        
-        save_user(u_id, user)
-        
-        msg = f"""✅ WEAPON PURCHASED
-
-*{weapon['name']}*
-
-{weapon['description']}
-
-Cost: {cost} silver
-Charges: {weapon['charges']}
-Rarity: {weapon['rarity'].upper()}
-
-Your new silver: {user['silver']:,}
-"""
-        await message.answer(msg, parse_mode="Markdown")
+        await message.answer(txt, reply_markup=keyboard, parse_mode="Markdown")
         
     except Exception as e:
         await message.answer(f"❌ Error: {e}", parse_mode="Markdown")
+        print(f"Error in cmd_weapons: {e}")
+
+
+@dp.callback_query(lambda q: q.data.startswith("weapon_"))
+async def on_weapon_purchase(callback: types.CallbackQuery):
+    """Handle weapon purchase from inline buttons."""
+    try:
+        weapon_id = callback.data.replace("weapon_", "")
+        u_id = str(callback.from_user.id)
+        user = get_user(u_id)
+        
+        if not user:
+            await callback.answer("❌ User not found", show_alert=True)
+            return
+        
+        if weapon_id not in WEAPONS:
+            await callback.answer("❌ Weapon not found", show_alert=True)
+            return
+        
+        # Check if can buy
+        can_buy, error = can_buy_weapon(weapon_id, user.get("level", 1), user.get("silver", 0))
+        if not can_buy:
+            await callback.answer(f"❌ {error}", show_alert=True)
+            return
+        
+        # Process purchase
+        weapon = WEAPONS[weapon_id]
+        cost = weapon["cost"].get("silver", 0)
+        
+        user["silver"] -= cost
+        if "weapons" not in user:
+            user["weapons"] = {}
+        
+        user["weapons"] = add_weapon_to_inventory(user.get("weapons", {}), weapon_id)
+        save_user(u_id, user)
+        
+        # Notify user
+        msg = f"✅ **PURCHASED!**\n\n{weapon['name']}\n\nCharges: {weapon['charges']} | Rarity: {weapon['rarity'].upper()}\n\nYour silver: {user['silver']:,}"
+        await callback.answer(msg, show_alert=True)
+        await callback.message.edit_text(msg + "\n\nType `/weapons` for more", parse_mode="Markdown")
+        
+    except Exception as e:
+        await callback.answer(f"❌ Error: {e}", show_alert=True)
+        print(f"Error in weapon purchase: {e}")
+
+
+@dp.callback_query(lambda q: q.data == "show_weapons_inv")
+async def on_show_weapons_inventory(callback: types.CallbackQuery):
+    """Show weapons inventory from callback."""
+    try:
+        u_id = str(callback.from_user.id)
+        user = get_user(u_id)
+        
+        if not user:
+            await callback.answer("❌ User not found", show_alert=True)
+            return
+        
+        weapons = user.get('weapons', {})
+        if not weapons or len(weapons) == 0:
+            await callback.answer("🃏 You have no weapons yet. Buy some first!", show_alert=True)
+            return
+        
+        txt = "⚔️ **YOUR WEAPONS**\n\n"
+        for weapon_id, weapon_data in weapons.items():
+            if weapon_id not in WEAPONS:
+                continue
+            weapon = WEAPONS[weapon_id]
+            wname = weapon.get('name', weapon_id.upper())
+            
+            # Handle both simple and complex data formats
+            if isinstance(weapon_data, dict):
+                charges_left = weapon_data.get('charges_remaining', 0)
+            else:
+                charges_left = weapon_data
+            
+            txt += f"{wname}\n├─ Charges: **{charges_left}**\n└─ {weapon.get('rarity', 'common').upper()}\n\n"
+        
+        await callback.answer()
+        await callback.message.edit_text(txt + "\n\nType `/weapons` to buy more", parse_mode="Markdown")
+        
+    except Exception as e:
+        await callback.answer(f"❌ Error: {e}", show_alert=True)
+        print(f"Error in show_weapons_inv: {e}")
 
 @dp.message(_cmd("upgrade"))
 async def cmd_upgrade(message: types.Message):

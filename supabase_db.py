@@ -106,7 +106,7 @@ def _row_to_user(row: dict) -> dict:
             u[k] = []
     
     # Parse military, traps, buffs JSONB fields
-    for k in ('military', 'traps', 'buffs'):
+    for k in ('military', 'traps', 'buffs', 'weapons'):
         val = u.get(k, '{}')
         if isinstance(val, str):
             try:
