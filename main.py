@@ -588,9 +588,22 @@ async def cmd_weekly(message: types.Message):
         if not lb:
             text += "No scores yet this week. Shocking."
         else:
+            from datetime import datetime
             for i, p in enumerate(lb, 1):
                 medal = ["🥇", "🥈", "🥉"][i-1] if i <= 3 else f"{i}."
-                text += f"{medal} {p['username']} — {p['points']} pts\n"
+                
+                # Check if player has active name shield
+                display_name = p['username']
+                name_shield_until = p.get('name_shield_until')
+                if name_shield_until:
+                    try:
+                        expiry = datetime.fromisoformat(name_shield_until)
+                        if datetime.now() < expiry:
+                            display_name = "[🛡️ Anonymized]"
+                    except:
+                        pass
+                
+                text += f"{medal} {display_name} — {p['points']} pts\n"
         
         text += "\n━━━━━━━━━━━━━━━\n"
         text += "`!alltime` for all-time scores"
@@ -612,9 +625,22 @@ async def cmd_alltime(message: types.Message):
     if not lb:
         text += "Blank. Just like your future."
     else:
+        from datetime import datetime
         for i, p in enumerate(lb, 1):
             medal = ["🥇","🥈","🥉"][i-1] if i<=3 else f"{i}."
-            text += f"{medal} {p['username']} — {p['points']} pts\n"
+            
+            # Check if player has active name shield
+            display_name = p['username']
+            name_shield_until = p.get('name_shield_until')
+            if name_shield_until:
+                try:
+                    expiry = datetime.fromisoformat(name_shield_until)
+                    if datetime.now() < expiry:
+                        display_name = "[🛡️ Anonymized]"
+                except:
+                    pass
+            
+            text += f"{medal} {display_name} — {p['points']} pts\n"
     await message.answer(text, parse_mode="Markdown")
 
 
@@ -1726,6 +1752,7 @@ async def cmd_battle_items(message: types.Message):
     battle_items = {
         "common": [
             {"id": "7day_shield", "name": "🛡️ 7-Day Shield", "price": 500, "level": 1, "desc": "Protect your base for 7 days"},
+            {"id": "name_shield", "name": "🔐 Name Shield (24h)", "price": 800, "level": 5, "desc": "Hide your username • Block targeting • Anonymize on leaderboard"},
             {"id": "rank_disguise", "name": "🎭 Rank Disguise (24h)", "price": 300, "level": 3, "desc": "Hide your true rank for 24 hours"},
             {"id": "coin_explosion", "name": "🧨 Coin Explosion", "price": 400, "level": 5, "desc": "Double coins on next win"},
             {"id": "fake_shield", "name": "🧠 Fake Shield", "price": 250, "level": 2, "desc": "Decoy shield to trick attackers"},
@@ -1811,6 +1838,7 @@ async def cmd_buy(message: types.Message):
     # Define all items with pricing
     all_items = {
         "7day_shield": {"name": "🛡️ 7-Day Shield", "price": 500, "level": 1},
+        "name_shield": {"name": "🔐 Name Shield (24h)", "price": 800, "level": 5},
         "rank_disguise": {"name": "🎭 Rank Disguise", "price": 300, "level": 3},
         "coin_explosion": {"name": "🧨 Coin Explosion", "price": 400, "level": 5},
         "fake_shield": {"name": "🧠 Fake Shield", "price": 250, "level": 2},
@@ -1862,17 +1890,35 @@ async def cmd_buy(message: types.Message):
     
     # Purchase successful
     user["silver"] = player_silver - item["price"]
+    
+    # Apply special item effects
+    from datetime import datetime, timedelta
+    if item_id == "name_shield":
+        # Activate name shield for 24 hours
+        user["name_shield_until"] = (datetime.now() + timedelta(hours=24)).isoformat()
+        activation_msg = "🔐 **Name Shield ACTIVATED**\n\n" \
+                         "Your username is now hidden!\n" \
+                         "• Players cannot find you via `!attack` or `!scout`\n" \
+                         "• Your name will show as **[🛡️ Anonymized]** on leaderboards\n" \
+                         "• Attackers will appear as **[Anonymous]** in revenge notifications\n\n" \
+                         "⏱️ Shield expires in 24 hours!"
+    else:
+        activation_msg = ""
+    
     save_user(u_id, user)
     add_inventory_item(u_id, item_id, 1)
     
-    await message.answer(
-        f"✅ *PURCHASE SUCCESSFUL*\n\n"
-        f"🛍️ You bought: {item['name']}\n"
-        f"💰 Cost: ${item['price']}\n"
-        f"💾 Remaining silver: {user['silver']}\n\n"
-        f"🃏 *GameMaster:* \"A wise investment... or is it? We'll see.\"",
-        parse_mode="Markdown"
-    )
+    msg = f"✅ *PURCHASE SUCCESSFUL*\n\n" \
+          f"🛍️ You bought: {item['name']}\n" \
+          f"💰 Cost: ${item['price']}\n" \
+          f"💾 Remaining silver: {user['silver']}\n\n"
+    
+    if activation_msg:
+        msg += activation_msg
+    else:
+        msg += "🃏 *GameMaster:* \"A wise investment... or is it? We'll see.\""
+    
+    await message.answer(msg, parse_mode="Markdown")
 
 
 @dp.message(_cmd("changename"))
@@ -1893,6 +1939,78 @@ async def cmd_changename(message: types.Message):
     user["username"] = new_name
     save_user(u_id, user)
     await message.answer(f"✅ Name changed: *{old_name}* → *{new_name}*\n🃏 *GameMaster:* \"Running from your past? Noted.\"", parse_mode="Markdown")
+
+
+@dp.message(_cmd("name_shield_status"))
+async def cmd_name_shield_status(message: types.Message):
+    """Check if your name shield is active and when it expires."""
+    if message.chat.type != "private":
+        await message.answer(_dm_only("!name_shield_status"), parse_mode="Markdown")
+        return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("🔐 *GameMaster:* \"Not registered.\"", parse_mode="Markdown")
+        return
+    
+    name_shield_until = user.get("name_shield_until")
+    username = user.get("username", "Unknown")
+    
+    if not name_shield_until:
+        await message.answer(
+            f"🔐 *NAME SHIELD STATUS*\n\n"
+            f"❌ **INACTIVE**\n\n"
+            f"Your name is visible to all players!\n"
+            f"Players can attack or scout you using `!attack @{username}`\n"
+            f"Your username appears on leaderboards.\n\n"
+            f"Purchase a **Name Shield** from `!battle_items` to protect yourself!",
+            parse_mode="Markdown"
+        )
+        return
+    
+    from datetime import datetime
+    try:
+        expiry = datetime.fromisoformat(name_shield_until)
+        now = datetime.now()
+        
+        if now < expiry:
+            remaining = expiry - now
+            hours = remaining.seconds // 3600
+            minutes = (remaining.seconds % 3600) // 60
+            
+            await message.answer(
+                f"🔐 *NAME SHIELD STATUS*\n\n"
+                f"✅ **ACTIVE**\n\n"
+                f"Your name is **HIDDEN** from all players!\n\n"
+                f"⏱️ *Time Remaining:*\n"
+                f"• {hours}h {minutes}m\n\n"
+                f"*Benefits:*\n"
+                f"• ❌ Players cannot `!attack` or `!scout` you\n"
+                f"• 🛡️ You appear as **[🛡️ Anonymized]** on leaderboards\n"
+                f"• 🕵️ Attackers appear as **[Anonymous Attacker]** to you\n\n"
+                f"_Your shield expires at {expiry.strftime('%H:%M:%S UTC')}_",
+                parse_mode="Markdown"
+            )
+        else:
+            # Shield expired - clean it up
+            user.pop("name_shield_until", None)
+            save_user(u_id, user)
+            
+            await message.answer(
+                f"🔐 *NAME SHIELD STATUS*\n\n"
+                f"❌ **EXPIRED**\n\n"
+                f"Your name shield has worn off!\n"
+                f"You are now visible to other players again.\n\n"
+                f"Purchase another **Name Shield** to stay protected!",
+                parse_mode="Markdown"
+            )
+    except:
+        await message.answer(
+            f"🔐 *NAME SHIELD STATUS*\n\n"
+            f"⚠️ Error reading shield status. Try again.",
+            parse_mode="Markdown"
+        )
 
 
 @dp.message(_cmd("setup_base"))
@@ -2152,14 +2270,17 @@ async def cmd_shield_status(message: types.Message):
     if shield_status == 'UNPROTECTED':
         txt += "*Available Actions:*\n"
         txt += "• `!activateshield` - Activate your shield\n"
-        txt += "• `!battle_items` - Buy shield items\n\n"
+        txt += "• `!battle_items` - Buy shield items\n"
+        txt += "• `!name_shield_status` - Check name shield\n\n"
     elif shield_status == 'ACTIVE':
         txt += "*Available Actions:*\n"
         txt += "• `!deactivateshield` - Deactivate your shield\n"
+        txt += "• `!name_shield_status` - Check name shield\n"
         txt += "• Attack other players fearlessly!\n\n"
     elif shield_status == 'DISRUPTED':
         txt += "*What to do:*\n"
-        txt += "Wait for the next attack. Your shield will auto-restore to ACTIVE.\n\n"
+        txt += "Wait for the next attack. Your shield will auto-restore to ACTIVE.\n"
+        txt += "• `!name_shield_status` - Check name shield\n\n"
     
     txt += f"{divider()}"
     
@@ -2512,6 +2633,27 @@ async def cmd_scout(message: types.Message):
         await message.answer("🛰️ *GM:* \"You can't scout yourself, fool.\"", parse_mode="Markdown")
         return
     
+    # ═══════════════════════════════════════════════════════════════════════════
+    #  NAME SHIELD CHECK — Can't scout if target has active name shield
+    # ═══════════════════════════════════════════════════════════════════════════
+    from datetime import datetime
+    target = get_user(target_id)
+    name_shield_until = target.get("name_shield_until")
+    if name_shield_until:
+        try:
+            expiry = datetime.fromisoformat(name_shield_until)
+            if datetime.now() < expiry:
+                await message.answer(
+                    f"🛰️ *SCOUT BLOCKED*\n\n"
+                    f"This player has activated a **Name Shield**!\n\n"
+                    f"🔐 Your scout cannot locate them. Intelligence is unavailable.\n"
+                    f"Try scouting someone else.",
+                    parse_mode="Markdown"
+                )
+                return
+        except:
+            pass
+    
     # Deduct silver
     scout_user["silver"] = scout_silver - scout_cost
     save_user(u_id, scout_user)
@@ -2689,6 +2831,27 @@ async def cmd_attack(message: types.Message):
     if target_id == u_id:
         await message.answer("⚔️ *GM:* \"You can't attack yourself, fool.\"", parse_mode="Markdown")
         return
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    #  NAME SHIELD CHECK — Can't attack if target has active name shield
+    # ═══════════════════════════════════════════════════════════════════════════
+    from datetime import datetime
+    target = get_user(target_id)
+    name_shield_until = target.get("name_shield_until")
+    if name_shield_until:
+        try:
+            expiry = datetime.fromisoformat(name_shield_until)
+            if datetime.now() < expiry:
+                await message.answer(
+                    f"🔐 *ATTACK BLOCKED*\n\n"
+                    f"This player has activated a **Name Shield** and cannot be targeted!\n\n"
+                    f"🛡️ Their identity is protected for now.\n"
+                    f"Try attacking someone else.",
+                    parse_mode="Markdown"
+                )
+                return
+        except:
+            pass
     
     # ═══════════════════════════════════════════════════════════════════════════
     #  SECTOR VALIDATION — Can only attack same sector
@@ -3211,8 +3374,20 @@ async def _execute_attack(attacker_id: str, target_id: str, target_display_name:
     await message.answer(battle_report, parse_mode="Markdown")
     
     # Send raid notification to defender (if they're in group)
+    # Check if attacker has name shield - anonymize if active
+    from datetime import datetime
+    attacker_display_name = attacker.get("username", "Unknown")
+    name_shield_until = attacker.get("name_shield_until")
+    if name_shield_until:
+        try:
+            expiry = datetime.fromisoformat(name_shield_until)
+            if datetime.now() < expiry:
+                attacker_display_name = "[Anonymous Attacker]"
+        except:
+            pass
+    
     raid_notif = format_raid_notification(
-        attacker.get("username", "Unknown"),
+        attacker_display_name,
         target_display_name,
         result
     )
@@ -3232,7 +3407,7 @@ async def _execute_attack(attacker_id: str, target_id: str, target_display_name:
         await broadcast(
             CHECKMATE_HQ_GROUP_ID,
             f"⚔️ **RAID REPORT**\n\n"
-            f"🏆 {attacker.get('username', 'Unknown')} defeated {target_display_name}!\n"
+            f"🏆 {attacker_display_name} defeated {target_display_name}!\n"
             f"💎 Plunder: {result.get('total_loot_value', 0)} resources stolen"
         )
         
