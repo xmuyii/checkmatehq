@@ -1613,6 +1613,34 @@ async def callback_trap_confirm(callback: types.CallbackQuery):
 
 
 
+@dp.message(_cmd("weapons_inventory"))
+async def cmd_weapons_inventory(message: types.Message):
+    """Display all weapons currently owned by player."""
+    if message.chat.type != "private":
+        await message.answer(_dm_only("!weapons_inventory"), parse_mode="Markdown"); return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("🃏 *GameMaster:* \"Not registered.\"", parse_mode="Markdown"); return
+    
+    weapons = user.get('weapons', {})
+    if not weapons:
+        await message.answer("🃏 *GameMaster:* \"No weapons. You fight like a peasant. Buy some from `!weapons`\"", parse_mode="Markdown"); return
+    
+    txt = "⚔️ *YOUR WEAPONS ARSENAL*\n━━━━━━━━━━━━━━━━━━━━\n\n"
+    
+    for weapon_id, charges_left in weapons.items():
+        if weapon_id not in WEAPONS:
+            continue
+        weapon = WEAPONS[weapon_id]
+        wname = weapon.get('name', weapon_id.upper())
+        txt += f"{wname}\n├─ Charges: **{charges_left}**\n└─ {weapon.get('rarity', 'common').upper()}\n\n"
+    
+    txt += "━━━━━━━━━━━━━━━━━━━━\nBuy more: `!weapons`"
+    await message.answer(txt, parse_mode="Markdown")
+
+
 @dp.message(_cmd("inventory"))
 async def cmd_inventory(message: types.Message):
     if message.chat.type != "private":

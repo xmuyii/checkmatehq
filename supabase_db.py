@@ -177,10 +177,9 @@ def save_user(user_id, data: dict):
     d.pop('training_queue', None)
     d.pop('shield_status', None)  # Shield status is in-memory only, not in DB
     d.pop('prestige', None)  # Prestige tier is in-memory only, not in DB
-    d.pop('weapons', None)  # Weapons inventory is in-memory only, not in DB
     
-    # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources)
-    for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs'):
+    # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources, weapons)
+    for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs', 'weapons'):
         if isinstance(d.get(k), (list, dict)):
             d[k] = json.dumps(d[k])
     
