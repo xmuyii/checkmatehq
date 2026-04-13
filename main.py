@@ -138,6 +138,31 @@ try:
 except Exception as e:
     print(f"⚠️  Build system failed ({e})")
 
+# ── Training System (Unit Production) ──────────────────────────────────────
+try:
+    from training_system import UNITS
+    print("✅ Training system loaded (UNITS)")
+except Exception as e:
+    print(f"⚠️  Training system failed ({e}), unit training may be broken")
+    UNITS = {}
+
+# ── Research System (Tech Tree & Unlocks) ──────────────────────────────────
+try:
+    from research_system import (
+        RESEARCH_TYPES, get_available_research, get_research_by_tier,
+        format_research_info, can_research, start_research,
+        check_research_complete, apply_research_unlocks
+    )
+    print("✅ Research system loaded")
+except Exception as e:
+    print(f"⚠️  Research system failed ({e})")
+    RESEARCH_TYPES = {}
+    def get_available_research(level): return {}
+    def can_research(user, rid): return False, "System not loaded"
+    def start_research(uid, user, rid, db): return False, "System not loaded"
+    def check_research_complete(uid, user): return []
+    def apply_research_unlocks(user, rid): return user
+
 # ── Weapon System (Combat & Sabotage) ────────────────────────────────────────
 try:
     from weapon_system import (
@@ -476,6 +501,7 @@ def _help_text() -> str:
         "`!tutorial` — Complete game walkthrough (DM only)\n"
         "`!fusion` — Start a word game round (group only)\n"
         "`!help` — This message\n\n"
+        
         "*PLAYER COMMANDS* _(DM only)_\n"
         "`!profile` — Your stats, base, resources, shield status\n"
         "`!base` — Full base details, military, traps\n"
@@ -485,19 +511,54 @@ def _help_text() -> str:
         "`!changename [Name]` — Change your username\n"
         "`!setup_base [Name]` — Create your first base\n"
         "`!changebasename [Name]` — Rename your base (1-time)\n"
-        "`!lab` — Research lab: upgrade your army\n"
         "`!activateshield` — Activate shield (24h cooldown)\n"
         "`!deactivateshield` — Deactivate shield\n"
         "`!disruptor @user` — Break enemy shield for 1 attack\n\n"
+        
+        "*⚔️ MILITARY & TRAINING*\n"
+        "`!train` — Train military units for your army\n"
+        "  Available units: Pawns, Footmen, Archers, Lancers, Castellans\n"
+        "  Cost: Wood, Bronze, Iron, Silver\n"
+        "  Example: Train 10 footmen to strengthen your forces\n\n"
+        
+        "*🏗️ BUILDING & STRUCTURES*\n"
+        "`!build` — Manage your base structures\n"
+        "  Available buildings: Training Grounds, Science Lab, Barracks, Treasury, Trap Workshop, Farm\n"
+        "  Each building: Unlocks new capabilities, increases resource capacity\n"
+        "  Level up buildings to unlock special bonuses\n"
+        "  Example: Build a Science Lab to research new technologies\n\n"
+        
+        "*🔬 SCIENCE & RESEARCH*\n"
+        "`!research` or `/science` — Access Science Laboratory\n"
+        "  Research technologies to unlock:\n"
+        "    📦 New items (potions, artifacts, upgrades)\n"
+        "    ⚔️ New weapons (special attack types)\n"
+        "    ✨ New abilities (passive & active powers)\n"
+        "    🏗️ Base sections (new buildings, expansions)\n"
+        "  Tiers: Basic (Lvl 1+) → Advanced (Lvl 3+) → Elite (Lvl 5+)\n"
+        "  Research takes time - check back when ready!\n\n"
+        
+        "*🔫 WEAPON SYSTEM*\n"
+        "`!weapon_help` — View all available weapons\n"
+        "  *Group Chat Usage:* Type emoji + victim name to attack\n"
+        "  Example: `🔫 Alice_Smith` attacks Alice with machine gun\n"
+        "  *Offensive Weapons:* Deal damage, steal resources, disable abilities\n"
+        "  *Defensive Weapons:* Shield, reflect damage, counter-attack\n"
+        "  Each weapon costs silver and has limited charges\n"
+        "  Unlock new weapons through science research\n"
+        "  Recharge weapons with silver in your inventory\n\n"
+        
+        "*🌌 IMMERSIVE EXPERIENCE* _(DM only)_\n"
+        "`!obelisk` — Enter the Obelisk: gateway to consciousness\n"
+        "`!sectors` — Explore all 9 sectors and their consciousness\n\n"
+        
         "*GAME COMMANDS* _(group)_\n"
         "`!fusion` — Start new game round\n"
         "`!words` — Show current word pair\n"
         "`!forcerestart` — End the round\n"
         "`!weekly` — Weekly leaderboard\n"
         "`!alltime` — All-time leaderboard\n\n"
-        "*🌌 IMMERSIVE EXPERIENCE* _(DM only)_\n"
-        "`!obelisk` — Enter the Obelisk: gateway to consciousness\n"
-        "`!sectors` — Explore all 9 sectors and their consciousness\n\n"
+        
         "*INVITE FRIENDS*\n"
         "Enjoy the game? Invite others! https://t.me/checkmateHQ"
     )
@@ -1405,6 +1466,56 @@ async def cmd_upgrade(message: types.Message):
     await message.answer("🃏 *GameMaster:* \"*Queen's Satchel!* Nice try. Not ready yet.\n\nWhen it arrives: unlocks 20 inventory slots for 900 Naira.\n\nUntil then? Manage your pathetic 5 slots like an adult. Stop asking.\"", parse_mode="Markdown")
 
 
+@dp.message(_cmd("weapon_help"))
+async def cmd_weapon_help(message: types.Message):
+    """Show how to use weapons in group chat (emoji-based system)."""
+    txt = "🎯 **WEAPON SYSTEM - GROUP CHAT ACTIVATION**\n\n"
+    txt += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    txt += "*📍 HOW TO USE WEAPONS:*\n\n"
+    txt += "In the group chat, type the emoji followed by victim's username:\n"
+    txt += "`emoji username`\n\n"
+    txt += "*Examples:*\n"
+    txt += "🔫 Alice_Smith\n"
+    txt += "⚡ Bob_Johnson\n"
+    txt += "💥 Carol_Williams\n\n"
+    txt += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    txt += "*YOUR AVAILABLE WEAPONS:*\n\n"
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    
+    if not user or not user.get('weapons'):
+        txt += "_You have no weapons yet!_\n"
+        txt += "Buy weapons with `/weapons`\n\n"
+    else:
+        for weapon_id, weapon_data in user.get('weapons', {}).items():
+            if weapon_id not in WEAPONS:
+                continue
+            weapon = WEAPONS[weapon_id]
+            name = weapon.get('name', 'Unknown')
+            if isinstance(weapon_data, dict):
+                charges = weapon_data.get('charges_remaining', 0)
+            else:
+                charges = weapon_data
+            emoji = name[0] if name else '❓'
+            txt += f"{name} ({charges} charges)\n"
+    
+    txt += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    txt += "*REQUIREMENTS:*\n"
+    txt += "• Must own the weapon\n"
+    txt += "• Must have charges remaining\n"
+    txt += "• Can only target players in the group\n"
+    txt += "• Target must use exact username\n\n"
+    txt += "*EFFECTS:*\n"
+    txt += "• Damage to silver/resources\n"
+    txt += "• XP stealing\n"
+    txt += "• Notifications to target\n"
+    txt += "• Group announcement\n\n"
+    txt += "⚔️ *Unleash chaos!*"
+    
+    await message.answer(txt, parse_mode="Markdown")
+
+
 @dp.message(_cmd("challenges"))
 async def cmd_challenges(message: types.Message):
     """Show weekly challenges and progress."""
@@ -1594,6 +1705,37 @@ async def callback_train_menu(callback: types.CallbackQuery):
              InlineKeyboardButton(text="🏰 Rooks (10 iron + 2 diamond)", callback_data="train_rook")],
             [InlineKeyboardButton(text="👑 Queens (20 iron + 5 diamond)", callback_data="train_queen"),
              InlineKeyboardButton(text="⚔️ Kings (15 diamond + 1 relic)", callback_data="train_king")],
+        ]),
+        parse_mode="Markdown"
+    )
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data == "build_menu")
+async def callback_build_menu(callback: types.CallbackQuery):
+    """Show building menu with inline buttons."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered", show_alert=True)
+        return
+    
+    xp = user.get("xp", 0)
+    base_level = max(1, 1 + (xp // 1000))
+    
+    msg = f"🏰 *BUILDING MENU*\n\n"
+    msg += f"Base Level: {base_level}\n\n"
+    msg += "Select option:\n"
+    
+    await callback.message.edit_text(
+        msg,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏗️ Training Grounds", callback_data="build_training"),
+             InlineKeyboardButton(text="🔬 Science Lab", callback_data="build_science")],
+            [InlineKeyboardButton(text="🏠 Barracks", callback_data="build_barracks"),
+             InlineKeyboardButton(text="💰 Treasury", callback_data="build_treasury")],
+            [InlineKeyboardButton(text="🔴 Trap Workshop", callback_data="build_traps"),
+             InlineKeyboardButton(text="🌾 Farm", callback_data="build_farm")]
         ]),
         parse_mode="Markdown"
     )
@@ -1807,7 +1949,7 @@ async def callback_build_trap(callback: types.CallbackQuery):
     cost = trap.get("cost", {})
     
     msg = f"{trap['name']}\n\n"
-    msg += f"Effect: {trap['effect']}\n\n"
+    msg += f"Effect: {trap.get('description', 'N/A')}\n\n"
     msg += f"Cost: " + " + ".join([f"{amt} {res.upper()}" for res, amt in cost.items()])
     msg += f"\n\nBuild?"
     
@@ -4689,6 +4831,410 @@ async def cb_locked(callback: types.CallbackQuery):
     await callback.answer("Sectors 10-64 unlock as you level up!", show_alert=True)
 
 
+# ======================== BUILDING SYSTEM HANDLERS ========================
+
+BUILDING_INFO = {
+    "training": {
+        "name": "🎖️ Training Grounds",
+        "description": "Train military units to boost your army",
+        "cost": 500,
+        "cost_type": "silver",
+        "time": 3600,  # 1 hour
+        "max_level": 3,
+        "benefits": "Train pawns, knights, bishops, rooks, queens, kings",
+    },
+    "science": {
+        "name": "🔬 Science Laboratory",
+        "description": "Research new technologies and unlock abilities",
+        "cost": 800,
+        "cost_type": "silver",
+        "time": 7200,  # 2 hours
+        "max_level": 5,
+        "benefits": "Unlock new items, abilities, and base sections",
+    },
+    "barracks": {
+        "name": "🏰 Barracks",
+        "description": "House and train your military forces",
+        "cost": 600,
+        "cost_type": "silver",
+        "time": 4800,  # 1.3 hours
+        "max_level": 4,
+        "benefits": "Increase unit capacity, reduce training time",
+    },
+    "treasury": {
+        "name": "💰 Treasury",
+        "description": "Store resources and manage trade",
+        "cost": 700,
+        "cost_type": "silver",
+        "time": 5400,  # 1.5 hours
+        "max_level": 3,
+        "benefits": "Increase resource storage, trade better prices",
+    },
+    "traps": {
+        "name": "⚠️ Trap Workshop",
+        "description": "Craft defensive devices to protect your base",
+        "cost": 650,
+        "cost_type": "silver",
+        "time": 5000,  # 1.4 hours
+        "max_level": 4,
+        "benefits": "Craft lethal traps, deter invaders",
+    },
+    "farm": {
+        "name": "🌾 Farm",
+        "description": "Grow food to support your population",
+        "cost": 400,
+        "cost_type": "silver",
+        "time": 2400,  # 40 mins
+        "max_level": 5,
+        "benefits": "Generate food income, feed units",
+    },
+}
+
+
+@dp.callback_query(F.data.startswith("build_"))
+async def cb_building_selection(callback: types.CallbackQuery):
+    """Handle building type selection from build menu."""
+    building_type = callback.data.replace("build_", "")
+    
+    # Special case: science lab goes to science menu
+    if building_type == "science":
+        await cb_science_menu(callback)
+        return
+    
+    if building_type not in BUILDING_INFO:
+        await callback.answer("❌ Unknown building type.", show_alert=True)
+        return
+    
+    building = BUILDING_INFO[building_type]
+    user_id = callback.from_user.id
+    
+    # Get user resources (use supabase_db functions)
+    user = get_user(str(user_id))
+    if not user:
+        await callback.answer("❌ User profile not found.", show_alert=True)
+        return
+    
+    user_silver = user.get("silver", 0)
+    building_cost = building["cost"]
+    
+    # Check if already building this
+    buildings = user.get("buildings", {})
+    if building_type in buildings and buildings[building_type].get("status") == "building":
+        await callback.answer(
+            f"⏳ Already building {building['name']}\nCompletion: <timestamp>",
+            show_alert=True
+        )
+        return
+    
+    # Check if already built to max level
+    current_level = buildings.get(building_type, {}).get("level", 0)
+    if current_level >= building["max_level"]:
+        await callback.answer(
+            f"✅ {building['name']} is at max level {building['max_level']}",
+            show_alert=True
+        )
+        return
+    
+    # Show building info
+    text = f"""
+<b>{building['name']}</b>
+
+📝 <b>Description:</b> {building['description']}
+
+💡 <b>Benefits:</b> {building['benefits']}
+
+💰 <b>Cost:</b> {building['cost']} {building['cost_type']}
+⏱️ <b>Build Time:</b> {building['time']}s ({building['time']//60}m)
+📊 <b>Max Level:</b> {building['max_level']}
+🏗️ <b>Current Level:</b> {current_level}/{building['max_level']}
+
+💸 <b>Your Silver:</b> {user_silver}
+    """
+    
+    can_afford = user_silver >= building_cost
+    if can_afford:
+        text += f"\n✅ You can afford this building!"
+    else:
+        text += f"\n❌ You need {building_cost - user_silver} more silver"
+    
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Build Now" if can_afford else "❌ Can't Afford",
+                    callback_data=f"confirm_build_{building_type}" if can_afford else "skip"
+                )
+            ],
+            [InlineKeyboardButton(text="« Back to Buildings", callback_data="build_menu")]
+        ]
+    )
+    
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+
+
+@dp.callback_query(F.data.startswith("confirm_build_"))
+async def cb_confirm_build(callback: types.CallbackQuery):
+    """Confirm and start building."""
+    building_type = callback.data.replace("confirm_build_", "")
+    
+    if building_type not in BUILDING_INFO:
+        await callback.answer("❌ Unknown building.", show_alert=True)
+        return
+    
+    building = BUILDING_INFO[building_type]
+    user_id = callback.from_user.id
+    
+    # Get user
+    user = await db.get_user(user_id)
+    if not user:
+        await callback.answer("❌ User not found.", show_alert=True)
+        return
+    
+    user_silver = user.get("silver", 0)
+    
+    # Verify still have resources
+    if user_silver < building["cost"]:
+        await callback.answer(f"❌ Insufficient silver! Need {building['cost']}", show_alert=True)
+        return
+    
+    # Deduct cost
+    new_silver = user_silver - building["cost"]
+    
+    # Get current level
+    buildings = user.get("buildings", {})
+    current_level = buildings.get(building_type, {}).get("level", 0)
+    new_level = current_level + 1
+    
+    # Calculate completion timestamp
+    import time
+    completion_time = int(time.time()) + building["time"]
+    
+    # Update building status
+    if building_type not in buildings:
+        buildings[building_type] = {}
+    
+    buildings[building_type].update({
+        "level": new_level,
+        "status": "building",
+        "started_at": int(time.time()),
+        "completes_at": completion_time
+    })
+    
+    # Update user
+    user["silver"] = new_silver
+    user["buildings"] = buildings
+    save_user(user_id, user)
+    
+    # Format completion time
+    from datetime import datetime, timedelta
+    completion_dt = datetime.fromtimestamp(completion_time)
+    completion_str = completion_dt.strftime("%H:%M:%S")
+    time_remaining = timedelta(seconds=building["time"])
+    
+    # Notify user
+    confirmation_msg = f"""
+✅ <b>Building Started!</b>
+
+<b>{building['name']}</b> construction in progress...
+
+🏗️ <b>Level:</b> {new_level}/{building['max_level']}
+⏱️ <b>Completion:</b> {completion_str} ({time_remaining})
+
+💸 <b>Resources Used:</b> {building['cost']} {building['cost_type']}
+💰 <b>Remaining Silver:</b> {new_silver}
+    """
+    
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🏗️ View Buildings", callback_data="build_menu")],
+        ]
+    )
+    
+    await callback.message.edit_text(confirmation_msg, parse_mode="HTML", reply_markup=kb)
+    
+    # Also send notification in private
+    try:
+        await callback.bot.send_message(
+            int(user_id),
+            f"🏗️ {building['name']} construction started!\nLevel: {new_level}/{building['max_level']}\nCompletion: {completion_str}"
+        )
+    except:
+        pass
+
+
+# ======================== SCIENCE LAB SYSTEM ============================
+
+@dp.callback_query(F.data == "science_menu")
+async def cb_science_menu(callback: types.CallbackQuery):
+    """Show research options from science lab."""
+    user_id = callback.from_user.id
+    user = get_user(str(user_id))
+    
+    if not user:
+        await callback.answer("❌ User not found.", show_alert=True)
+        return
+    
+    user_level = user.get("level", 1)
+    available = get_available_research(user_level)
+    
+    if not available:
+        await callback.answer(f"❌ No research available at level {user_level}", show_alert=True)
+        return
+    
+    # Check for active research
+    research_progress = user.get("research_progress", {})
+    active_research = None
+    for rid, progress in research_progress.items():
+        if progress.get("status") == "in_progress":
+            active_research = rid
+            break
+    
+    text = f"<b>🔬 SCIENCE LABORATORY</b>\n\n"
+    text += f"Your Level: {user_level}\n\n"
+    
+    if active_research:
+        active_data = research_progress[active_research]
+        import time
+        time_remaining = max(0, active_data.get("completes_at", 0) - int(time.time()))
+        text += f"⏳ <b>Current Research:</b> {RESEARCH_TYPES[active_research]['name']}\n"
+        text += f"⏱️ Time remaining: {time_remaining}s\n\n"
+    
+    text += "<b>Available Research:</b>\n"
+    
+    # Group by tier
+    tier_groups = {}
+    for rid, research in available.items():
+        tier = research.get("tier", 1)
+        if tier not in tier_groups:
+            tier_groups[tier] = []
+        tier_groups[tier].append((rid, research))
+    
+    kb_buttons = []
+    for tier in sorted(tier_groups.keys()):
+        text += f"\n<b>Tier {tier}:</b>\n"
+        tier_research = tier_groups[tier]
+        
+        for rid, research in tier_research:
+            status = "✅" if rid in user.get("research_completed", []) else "🔍"
+            text += f"{status} {research['name']} ({research['time']}s)\n"
+            
+            # Add button only if not completed
+            if rid not in user.get("research_completed", []) and not active_research:
+                kb_buttons.append(
+                    InlineKeyboardButton(
+                        text=f"{research['name'][:20]}...",
+                        callback_data=f"research_view_{rid}"
+                    )
+                )
+    
+    if not kb_buttons:
+        kb_buttons = [InlineKeyboardButton(text="« Back", callback_data="science_menu")]
+    else:
+        kb_buttons.append(InlineKeyboardButton(text="« Back", callback_data="build_menu"))
+    
+    # Arrange buttons in rows
+    kb_rows = []
+    for i in range(0, len(kb_buttons), 2):
+        if i + 1 < len(kb_buttons):
+            kb_rows.append(kb_buttons[i:i+2])
+        else:
+            kb_rows.append([kb_buttons[i]])
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
+    
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except:
+        await callback.message.reply(text, parse_mode="HTML", reply_markup=kb)
+    
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("research_view_"))
+async def cb_research_view(callback: types.CallbackQuery):
+    """Show detailed research info and start option."""
+    research_id = callback.data.replace("research_view_", "")
+    
+    if research_id not in RESEARCH_TYPES:
+        await callback.answer("❌ Unknown research.", show_alert=True)
+        return
+    
+    user_id = str(callback.from_user.id)
+    user = get_user(user_id)
+    if not user:
+        await callback.answer("❌ User not found.", show_alert=True)
+        return
+    
+    research = RESEARCH_TYPES[research_id]
+    
+    # Check if can research
+    can_do, reason = can_research(user, research_id)
+    
+    text = format_research_info(research_id)
+    text += f"\n\n<b>Status:</b> {reason}"
+    
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Start Research" if can_do else "❌ " + reason,
+                    callback_data=f"research_start_{research_id}" if can_do else "skip"
+                )
+            ],
+            [InlineKeyboardButton(text="« Back to Labs", callback_data="science_menu")]
+        ]
+    )
+    
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    except:
+        await callback.message.reply(text, parse_mode="HTML", reply_markup=kb)
+    
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("research_start_"))
+async def cb_research_start(callback: types.CallbackQuery):
+    """Start a research project."""
+    research_id = callback.data.replace("research_start_", "")
+    
+    if research_id not in RESEARCH_TYPES:
+        await callback.answer("❌ Unknown research.", show_alert=True)
+        return
+    
+    user_id = str(callback.from_user.id)
+    user = get_user(user_id)
+    if not user:
+        await callback.answer("❌ User not found.", show_alert=True)
+        return
+    
+    # Start research
+    import supabase_db as db_module
+    success, message = start_research(user_id, user, research_id, db_module)
+    
+    if success:
+        research = RESEARCH_TYPES[research_id]
+        confirmation = f"""
+✅ <b>Research Started!</b>
+
+<b>{research['name']}</b> is now underway...
+
+⏱️ Duration: {research['time']}s ({research['time']//60}m)
+
+📚 Check back when complete to claim your unlocks!
+        """
+        
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🔬 Back to Labs", callback_data="science_menu")],
+            ]
+        )
+        
+        await callback.message.edit_text(confirmation, parse_mode="HTML", reply_markup=kb)
+    else:
+        await callback.answer(f"❌ {message}", show_alert=True)
+
+
 @dp.callback_query(F.data.startswith("train_"))
 async def cb_train_unit(callback: types.CallbackQuery):
     """Handle unit training selection."""
@@ -4701,28 +5247,28 @@ async def cb_train_unit(callback: types.CallbackQuery):
             await callback.answer("❌ User not found.", show_alert=True)
             return
         
-        # Unit definitions with costs
-        units = {
-            "pawn": {"name": "👹 Pawns", "cost": {"wood": 5}},
-            "knight": {"name": "🗡️ Knights", "cost": {"wood": 15, "bronze": 5}},
-            "bishop": {"name": "⚜️ Bishops", "cost": {"bronze": 10, "iron": 3}},
-            "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "diamond": 2}},
-            "queen": {"name": "👑 Queens", "cost": {"iron": 20, "diamond": 5}},
-            "king": {"name": "⚔️ Kings", "cost": {"diamond": 15, "relics": 1}}
-        }
+        # Use UNITS from training_system (consolidated training definitions)
+        if not UNITS:
+            await callback.answer("❌ Training system not loaded.", show_alert=True)
+            return
         
-        if unit_key not in units:
+        if unit_key not in UNITS:
             await callback.answer("❌ Unknown unit.", show_alert=True)
             return
         
-        unit = units[unit_key]
-        cost_str = " + ".join([f"{amt} {res.upper()}" for res, amt in unit['cost'].items()])
+        unit = UNITS[unit_key]
+        # Convert costs dict to cost string (only show non-zero costs)
+        cost_items = [(amt, res.upper()) for res, amt in unit['costs'].items() if amt > 0]
+        cost_str = " + ".join([f"{amt} {res}" for amt, res in cost_items]) if cost_items else "Free"
         
         # Show quantity selector
         await callback.message.edit_text(
-            f"🎯 *{unit['name']}* Training\n\n"
-            f"Cost per unit: {cost_str}\n\n"
-            f"How many {unit['name'].lower()} do you want to train?",
+            f"🎯 <b>{unit['name']}</b> Training\n\n"
+            f"<i>{unit.get('description', 'Elite military unit')}</i>\n\n"
+            f"Cost per unit: {cost_str}\n"
+            f"Training time: {unit.get('train_time', 30)}s\n"
+            f"Min level: {unit.get('min_level', 1)}\n\n"
+            f"How many do you want to train?",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="5", callback_data=f"train_confirm_{unit_key}_5"),
                  InlineKeyboardButton(text="10", callback_data=f"train_confirm_{unit_key}_10"),
@@ -4730,7 +5276,7 @@ async def cb_train_unit(callback: types.CallbackQuery):
                 [InlineKeyboardButton(text="50", callback_data=f"train_confirm_{unit_key}_50"),
                  InlineKeyboardButton(text="100", callback_data=f"train_confirm_{unit_key}_100")]
             ]),
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         await callback.answer()
     except Exception as e:
@@ -4757,26 +5303,23 @@ async def cb_train_confirm(callback: types.CallbackQuery):
             await callback.answer("❌ User not found.", show_alert=True)
             return
         
-        # Unit costs
-        units = {
-            "pawn": {"name": "👹 Pawns", "cost": {"wood": 5}},
-            "knight": {"name": "🗡️ Knights", "cost": {"wood": 15, "bronze": 5}},
-            "bishop": {"name": "⚜️ Bishops", "cost": {"bronze": 10, "iron": 3}},
-            "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "diamond": 2}},
-            "queen": {"name": "👑 Queens", "cost": {"iron": 20, "diamond": 5}},
-            "king": {"name": "⚔️ Kings", "cost": {"diamond": 15, "relics": 1}}
-        }
+        # Unit costs - use UNITS from training_system (consolidated)
+        if not UNITS:
+            await callback.answer("❌ Training system not loaded.", show_alert=True)
+            return
         
-        if unit_key not in units:
+        if unit_key not in UNITS:
             await callback.answer("❌ Unknown unit.", show_alert=True)
             return
         
-        unit = units[unit_key]
+        unit = UNITS[unit_key]
         base_res = user.get('base_resources', {})
         resources = base_res.get('resources', {})
         
-        # Check if enough resources
-        for res_type, cost_per_unit in unit['cost'].items():
+        # Check if enough resources (only check non-zero costs)
+        for res_type, cost_per_unit in unit['costs'].items():
+            if cost_per_unit == 0:
+                continue  # Skip free resources
             total_cost = cost_per_unit * quantity
             available = resources.get(res_type, 0) if res_type != 'food' else base_res.get('food', 0)
             if available < total_cost:
@@ -4787,7 +5330,9 @@ async def cb_train_confirm(callback: types.CallbackQuery):
                 return
         
         # Deduct resources
-        for res_type, cost_per_unit in unit['cost'].items():
+        for res_type, cost_per_unit in unit['costs'].items():
+            if cost_per_unit == 0:
+                continue
             total_cost = cost_per_unit * quantity
             resources[res_type] = resources.get(res_type, 0) - total_cost
         
@@ -4802,10 +5347,10 @@ async def cb_train_confirm(callback: types.CallbackQuery):
         save_user(u_id, user)
         
         await callback.message.edit_text(
-            f"✅ *TRAINING COMPLETE!*\n\n"
+            f"✅ <b>TRAINING COMPLETE!</b>\n\n"
             f"🎖️ +{quantity} {unit['name'].lower()}\n\n"
             f"Your army grows stronger. The weak tremble.",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         await callback.answer()
     except Exception as e:
@@ -5355,6 +5900,12 @@ async def _do_use_item(message: types.Message, user_id: str, item_id: int):
             ]),
             parse_mode="Markdown"
         ); return
+    elif itype == "scout" or "scout" in itype:
+        await message.answer("🃏 *GameMaster:* \"Type `!scout [player_name]` to spy on an opponent's base resources.\"", parse_mode="Markdown"); return
+    elif itype == "eternal_shard" or "eternal" in itype:
+        await message.answer("🃏 *GameMaster:* \"Eternal Shards are used in FORGING to create legendary items.\"", parse_mode="Markdown"); return
+    elif itype == "mythic_shard" or "mythic" in itype:
+        await message.answer("🃏 *GameMaster:* \"Mythic Shards are rare! Use them in FORGING to create godlike items.\"", parse_mode="Markdown"); return
     else:
         await message.answer("🃏 *GameMaster:* \"Unknown item.\"", parse_mode="Markdown"); return
 
@@ -5409,6 +5960,272 @@ async def _do_claim_all(target, user_id: str, edit: bool = False, is_command: bo
     else:
         await target.answer(txt, parse_mode="Markdown")
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  EMOJI WEAPON SYSTEM  (Group Chat Activation)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def build_emoji_weapon_map():
+    """Extract emoji → weapon_id mapping from WEAPONS."""
+    emoji_map = {}
+    for weapon_id, weapon_data in WEAPONS.items():
+        name = weapon_data.get('name', '')
+        if name and len(name) > 0:
+            emoji = name[0]  # First character is emoji
+            emoji_map[emoji] = weapon_id
+    return emoji_map
+
+EMOJI_WEAPONS = build_emoji_weapon_map()  # {🔫: machine_gun_turret, etc}
+
+@dp.message(F.chat.type.in_({"group","supergroup"}), F.text)
+async def on_emoji_weapon_activation(message: types.Message):
+    """Detect emoji + victim name pattern: 🔫 username"""
+    if not message.text or message.from_user.is_bot:
+        return
+    
+    text = message.text.strip()
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    
+    if not user:
+        return  # Not registered
+    
+    # Parse pattern: emoji + victim name (e.g. "🔫 John_Doe")
+    parts = text.split(maxsplit=1)
+    if len(parts) < 2:
+        return  # Not a weapon activation
+    
+    emoji = parts[0]
+    victim_name = parts[1].strip()
+    
+    # Check if emoji maps to a weapon
+    if emoji not in EMOJI_WEAPONS:
+        return  # Not a weapon emoji
+    
+    weapon_id = EMOJI_WEAPONS[emoji]
+    weapon = WEAPONS[weapon_id]
+    
+    # Check if attacker has this weapon with charges
+    weapons = user.get('weapons', {})
+    if weapon_id not in weapons:
+        return  # Don't have weapon
+    
+    weapon_data = weapons[weapon_id]
+    if isinstance(weapon_data, dict):
+        charges = weapon_data.get('charges_remaining', 0)
+    else:
+        charges = weapon_data
+    
+    if charges <= 0:
+        return  # Out of charges
+    
+    # Find victim by username
+    from supabase_db import supabase, DB_TABLE
+    try:
+        resp = supabase.table(DB_TABLE).select("user_id, username, level, silver, base_resources").eq("username", victim_name).execute()
+        if not resp.data:
+            return  # Victim not found
+        
+        target = resp.data[0]
+        target_id = str(target['user_id'])
+        
+        if target_id == u_id:
+            return  # Can't attack self
+        
+        # Execute weapon effect
+        attacker = user
+        attacker_copy = attacker.copy()
+        target_copy = target.copy()
+        
+        effect_result = f"💥 **WEAPON STRIKE!**\n"
+        effect_result += f"⚔️ {attacker['username']} activated {weapon['name']}\n"
+        effect_result += f"🎯 Target: **{victim_name}** (Lv{target['level']})\n\n"
+        
+        # Apply effects based on weapon type
+        effect = weapon.get('effect', '')
+        
+        if 'score_and_silver_damage' in effect:
+            damage = weapon.get('damage_silver', 100)
+            target_copy['silver'] = max(0, target_copy.get('silver', 0) - damage)
+            effect_result += f"💰 Target lost {damage} silver!\n"
+        
+        elif 'steal_xp' in effect:
+            steal_pct = weapon.get('steal_percentage', 1.0)
+            xp_stolen = int((target_copy.get('xp', 0) * steal_pct) // 100)
+            xp_stolen = max(0, min(xp_stolen, 1000))  # Cap at 1000 XP
+            target_copy['xp'] = max(0, target_copy.get('xp', 0) - xp_stolen)
+            attacker_copy['xp'] = attacker_copy.get('xp', 0) + xp_stolen
+            effect_result += f"🔋 Stole {xp_stolen} XP from target!\n"
+        
+        elif 'steal_silver' in effect:
+            steal_pct = weapon.get('steal_percentage', 1.0)
+            silver_stolen = int((target_copy.get('silver', 0) * steal_pct) // 10)
+            silver_stolen = max(0, min(silver_stolen, 500))
+            target_copy['silver'] = max(0, target_copy.get('silver', 0) - silver_stolen)
+            attacker_copy['silver'] = attacker_copy.get('silver', 0) + silver_stolen
+            effect_result += f"💰 Stole {silver_stolen} silver!\n"
+        
+        elif 'steal_resource_type' in effect:
+            res_type = weapon.get('resource_type', 'wood')
+            steal_amt = weapon.get('steal_amount', 100)
+            base_res = target_copy.get('base_resources', {}).get('resources', {})
+            stolen = min(steal_amt, base_res.get(res_type, 0))
+            base_res[res_type] = base_res.get(res_type, 0) - stolen
+            if 'base_resources' not in target_copy:
+                target_copy['base_resources'] = {}
+            target_copy['base_resources']['resources'] = base_res
+            attacker_base = attacker_copy.get('base_resources', {})
+            if 'resources' not in attacker_base:
+                attacker_base['resources'] = {}
+            attacker_base['resources'][res_type] = attacker_base['resources'].get(res_type, 0) + stolen
+            attacker_copy['base_resources'] = attacker_base
+            effect_result += f"🌪️ Stole {stolen} {res_type.upper()} from target's base!\n"
+        
+        elif 'disable_words' in effect:
+            disabled_count = weapon.get('disabled_word_count', 3)
+            effect_result += f"💫 Target's next {disabled_count} words disabled!\n"
+        
+        # ═══════════════════════════════════════════════════════════════════
+        # DEFENSIVE WEAPONS (Shield/Counter effects)
+        # ═══════════════════════════════════════════════════════════════════
+        elif weapon.get('category') == 'defensive':
+            # Defensive weapons: user activates for self-protection
+            # These apply status effects rather than damage
+            
+            if 'block_damage' in effect:
+                # Shield Barrier: Blocks next incoming attack (100% reduction)
+                import time
+                defense_status = {
+                    'type': 'shield_barrier',
+                    'active': True,
+                    'blocks_remaining': 1,
+                    'activated_at': int(time.time()),
+                    'duration': 3600  # 1 hour
+                }
+                if 'defense_status' not in attacker_copy:
+                    attacker_copy['defense_status'] = {}
+                attacker_copy['defense_status']['shield_barrier'] = defense_status
+                effect_result = f"🛡️ **SHIELD ACTIVATED!**\n\n"
+                effect_result += f"⚔️ {attacker['username']} raised {weapon['name']}\n"
+                effect_result += f"🔒 Next incoming attack will be BLOCKED!\n"
+                effect_result += f"⏱️ Duration: 1 hour or until hit\n"
+            
+            elif 'reflect_damage' in effect:
+                # Reflective Armor: Reflects 75% of incoming damage back to attacker
+                import time
+                defense_status = {
+                    'type': 'reflective_armor',
+                    'active': True,
+                    'damage_reflection': weapon.get('reflect_percentage', 0.75),
+                    'activated_at': int(time.time()),
+                    'duration': 3600
+                }
+                if 'defense_status' not in attacker_copy:
+                    attacker_copy['defense_status'] = {}
+                attacker_copy['defense_status']['reflective'] = defense_status
+                effect_result = f"🪞 **MIRROR SHIELD CAST!**\n\n"
+                effect_result += f"⚔️ {attacker['username']} activated {weapon['name']}\n"
+                effect_result += f"🔄 Next attack damage will be REFLECTED (75%)\n"
+                effect_result += f"⏱️ Duration: 1 hour\n"
+            
+            elif 'counter_attack' in effect:
+                # Counter Striker: Auto-counterattack on next hit (80% damage back)
+                import time
+                defense_status = {
+                    'type': 'counter_striker',
+                    'active': True,
+                    'counter_damage_pct': weapon.get('counter_percentage', 0.80),
+                    'counters_remaining': 3,  # Can counter 3 attacks
+                    'activated_at': int(time.time()),
+                    'duration': 3600
+                }
+                if 'defense_status' not in attacker_copy:
+                    attacker_copy['defense_status'] = {}
+                attacker_copy['defense_status']['counter'] = defense_status
+                effect_result = f"⚡ **COUNTER-STRIKE PREPARED!**\n\n"
+                effect_result += f"⚔️ {attacker['username']} readied {weapon['name']}\n"
+                effect_result += f"🔪 Next 3 incoming attacks trigger COUNTERATTACK (80%)\n"
+                effect_result += f"⏱️ Duration: 1 hour\n"
+            
+            elif 'damage_absorb' in effect:
+                # Fortified Keep: Absorbs up to 500 damage before breaking
+                import time
+                defense_status = {
+                    'type': 'fortified_keep',
+                    'active': True,
+                    'absorption_pool': weapon.get('absorption_amount', 500),
+                    'activated_at': int(time.time()),
+                    'duration': 3600
+                }
+                if 'defense_status' not in attacker_copy:
+                    attacker_copy['defense_status'] = {}
+                attacker_copy['defense_status']['fortified'] = defense_status
+                effect_result = f"🏰 **FORTIFIED KEEP RAISED!**\n\n"
+                effect_result += f"⚔️ {attacker['username']} deployed {weapon['name']}\n"
+                effect_result += f"🛡️ Next {weapon.get('absorption_amount', 500)} damage ABSORBED\n"
+                effect_result += f"⏱️ Duration: 1 hour or until depleted\n"
+            
+            elif 'protect_resources' in effect:
+                # Resource Shield: Protects resources from being stolen (24h)
+                import time
+                defense_status = {
+                    'type': 'resource_shield',
+                    'active': True,
+                    'protection_duration': weapon.get('protection_duration', 86400),  # 24 hours
+                    'activated_at': int(time.time()),
+                }
+                if 'defense_status' not in attacker_copy:
+                    attacker_copy['defense_status'] = {}
+                attacker_copy['defense_status']['resource_protect'] = defense_status
+                effect_result = f"💰 **RESOURCE SHIELD ACTIVE!**\n\n"
+                effect_result += f"⚔️ {attacker['username']} cast {weapon['name']}\n"
+                effect_result += f"🔐 All your resources are PROTECTED from theft\n"
+                effect_result += f"⏱️ Duration: 24 hours\n"
+        
+        # Deduct charge
+        attacker_copy['weapons'][weapon_id] = {
+            "charges_remaining": max(0, charges - 1),
+            "cooldown_until": 0,
+            "last_used": None
+        }
+        
+        # Save both users
+        save_user(u_id, attacker_copy)
+        save_user(target_id, target_copy)
+        
+        effect_result += f"\n✅ Weapon activated successfully!"
+        effect_result += f"\n🔄 Charges remaining: {charges - 1}/{weapon.get('charges', 1)}"
+        
+        # Broadcast to group
+        try:
+            await message.answer(effect_result, parse_mode="Markdown")
+        except:
+            pass
+        
+        # Notify victim in DM (only for offensive weapons)
+        if weapon.get('category') != 'defensive':
+            try:
+                victim_msg = f"⚠️ **YOU WERE ATTACKED!**\n\n"
+                victim_msg += f"Weapon: {weapon['name']}\n"
+                victim_msg += f"Attacker: {attacker['username']} (Lv{attacker['level']})\n"
+                victim_msg += f"Effect: {weapon.get('description', 'N/A')}"
+                await bot.send_message(int(target_id), victim_msg, parse_mode="Markdown")
+            except:
+                pass
+        else:
+            # For defensive weapons, notify the user themselves
+            try:
+                defense_msg = f"✅ **DEFENSE ACTIVATED!**\n\n"
+                defense_msg += f"{weapon['name']} is now protecting you!\n"
+                defense_msg += f"Check your profile to see active defenses."
+                await bot.send_message(int(u_id), defense_msg, parse_mode="Markdown")
+            except:
+                pass
+        
+        print(f"[WEAPON] {attacker['username']} used {weapon['name']} (type: {weapon.get('category', 'offensive')})")
+        
+    except Exception as e:
+        print(f"[EMOJI_WEAPON_ERROR] {e}")
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  WORD-GUESS CATCH-ALL  ←── MUST BE THE LAST @dp.message HANDLER
