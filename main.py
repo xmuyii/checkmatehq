@@ -738,30 +738,30 @@ async def cmd_sectors(message: types.Message):
     
     try:
         msg = """
-🗺️ **THE 9 SECTORS OF CONSCIOUSNESS** 🗺️
+🗺️ <b>THE 9 SECTORS OF CONSCIOUSNESS</b> 🗺️
 
 From the raw deserts to the cosmic void, each sector has its own SOUL:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 """
-        await message.answer(msg, parse_mode="Markdown")
+        await message.answer(msg, parse_mode="HTML")
         
         # Show each sector's details
         for sector_num in range(1, 10):
             sector = SECTOR_CONSCIOUSNESS[sector_num]
             sector_msg = f"""
-**{sector['name']}**
+<b>{sector['name']}</b>
 
-🧠 *Consciousness:* {sector['consciousness']}
+🧠 <i>Consciousness:</i> {sector['consciousness']}
 
-💫 *What you feel:* {sector['feeling']}
+💫 <i>What you feel:</i> {sector['feeling']}
 
 {sector['color']}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
-            await message.answer(sector_msg, parse_mode="Markdown")
+            await message.answer(sector_msg, parse_mode="HTML")
             await asyncio.sleep(0.3)  # Brief pause between sectors
         
         final_msg = """
@@ -771,7 +771,7 @@ Will you master all 9 realms?
 
 The Obelisk awaits your decision. 🌌
 """
-        await message.answer(final_msg, parse_mode="Markdown")
+        await message.answer(final_msg, parse_mode="HTML")
         
     except Exception as e:
         await message.answer(f"❌ Sectors error: {e}", parse_mode="Markdown")
@@ -1161,8 +1161,8 @@ async def cmd_weapons(message: types.Message):
             return
         
         # Build message
-        txt = f"🔫 **WEAPONS SHOP** (Lv{level})\n\n"
-        txt += f"Your silver: **{silver:,}**\n\n"
+        txt = f"🔫 <b>WEAPONS SHOP</b> (Lv{level})\n\n"
+        txt += f"Your silver: <b>{silver:,}</b>\n\n"
         
         # Build keyboard with weapon buttons
         keyboard = InlineKeyboardMarkup(
@@ -1179,7 +1179,7 @@ async def cmd_weapons(message: types.Message):
             InlineKeyboardButton(text="📦 Your Inventory", callback_data="show_weapons_inv")
         ])
         
-        await message.answer(txt, reply_markup=keyboard, parse_mode="Markdown")
+        await message.answer(txt, reply_markup=keyboard, parse_mode="HTML")
         
     except Exception as e:
         await message.answer(f"❌ Error: {e}", parse_mode="Markdown")
@@ -1220,9 +1220,9 @@ async def on_weapon_purchase(callback: types.CallbackQuery):
         save_user(u_id, user)
         
         # Notify user
-        msg = f"✅ **PURCHASED!**\n\n{weapon['name']}\n\nCharges: {weapon['charges']} | Rarity: {weapon['rarity'].upper()}\n\nYour silver: {user['silver']:,}"
+        msg = f"✅ <b>PURCHASED!</b>\n\n{weapon['name']}\n\nCharges: {weapon['charges']} | Rarity: {weapon['rarity'].upper()}\n\nYour silver: {user['silver']:,}"
         await callback.answer(msg, show_alert=True)
-        await callback.message.edit_text(msg + "\n\nType `/weapons` for more", parse_mode="Markdown")
+        await callback.message.edit_text(msg + "\n\nType /weapons for more", parse_mode="HTML")
         
     except Exception as e:
         await callback.answer(f"❌ Error: {e}", show_alert=True)
@@ -1284,11 +1284,11 @@ async def cmd_use_weapon(message: types.Message):
         
         weapons = user.get('weapons', {})
         if not weapons:
-            await message.answer("❌ You have no weapons to use. Buy from `/weapons`", parse_mode="Markdown")
+            await message.answer("❌ You have no weapons to use. Buy from /weapons", parse_mode="Markdown")
             return
         
         # Show weapons with charges
-        txt = "🎯 **SELECT WEAPON TO LAUNCH**\n\n"
+        txt = "🎯 <b>SELECT WEAPON TO LAUNCH</b>\n\n"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[])
         
@@ -1318,7 +1318,7 @@ async def cmd_use_weapon(message: types.Message):
             await message.answer("❌ All your weapons are out of charges!", parse_mode="Markdown")
             return
         
-        await message.answer(txt, reply_markup=keyboard, parse_mode="Markdown")
+        await message.answer(txt, reply_markup=keyboard, parse_mode="HTML")
         
     except Exception as e:
         await message.answer(f"❌ Error: {e}", parse_mode="Markdown")
@@ -1348,7 +1348,7 @@ async def on_select_target(callback: types.CallbackQuery):
             return
         
         weapon = WEAPONS[weapon_id]
-        txt = f"🔫 **{weapon['name']}**\n\n"
+        txt = f"🔫 <b>{weapon['name']}</b>\n\n"
         txt += f"Select target to attack:\n\n"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[])
@@ -1362,7 +1362,7 @@ async def on_select_target(callback: types.CallbackQuery):
             ])
         
         await callback.answer()
-        await callback.message.edit_text(txt, reply_markup=keyboard, parse_mode="Markdown")
+        await callback.message.edit_text(txt, reply_markup=keyboard, parse_mode="HTML")
         
     except Exception as e:
         await callback.answer(f"❌ Error: {e}", show_alert=True)
@@ -1400,7 +1400,7 @@ async def on_confirm_attack(callback: types.CallbackQuery):
             return
         
         # Execute weapon effect
-        result_msg = f"💥 **WEAPON ACTIVATED!**\n\n"
+        result_msg = f"💥 <b>WEAPON ACTIVATED!</b>\n\n"
         result_msg += f"Attacker: {attacker['username']} (Lv{attacker['level']})\n"
         result_msg += f"Weapon: {weapon['name']}\n"
         result_msg += f"Target: {target['username']} (Lv{target['level']})\n\n"
@@ -1425,9 +1425,9 @@ async def on_confirm_attack(callback: types.CallbackQuery):
             result_msg += f"🌪️ Target loses {stolen} {resource}!\n"
         
         if 'turret' in weapon['name'].lower() or 'cannon' in weapon['name'].lower():
-            result_msg += f"\n⚡ **BLAST!** The target's defenses shatter!\n"
+            result_msg += f"\n⚡ <b>BLAST!</b> The target's defenses shatter!\n"
         elif 'gun' in weapon['name'].lower():
-            result_msg += f"\n🔫 **BANG BANG!** Shots fired!\n"
+            result_msg += f"\n🔫 <b>BANG BANG!</b> Shots fired!\n"
         
         # Deduct charge
         if weapon_id in attacker.get('weapons', {}):
@@ -1444,18 +1444,18 @@ async def on_confirm_attack(callback: types.CallbackQuery):
         result_msg += f"\n📊 Charges remaining: {charges - 1}"
         
         # Also notify target
-        target_notification = f"⚠️ **UNDER ATTACK!**\n\n"
+        target_notification = f"⚠️ <b>UNDER ATTACK!</b>\n\n"
         target_notification += f"Attacker: {attacker['username']} (Lv{attacker['level']})\n"
         target_notification += f"Weapon: {weapon['name']}\n"
         target_notification += f"Effect: {weapon.get('description', 'Unknown')}"
         
         try:
-            await bot.send_message(int(target_id), target_notification, parse_mode="Markdown")
+            await bot.send_message(int(target_id), target_notification, parse_mode="HTML")
         except:
             pass  # Target may not have DM enabled
         
         await callback.answer(result_msg, show_alert=True)
-        await callback.message.edit_text(result_msg, parse_mode="Markdown")
+        await callback.message.edit_text(result_msg, parse_mode="HTML")
         
     except Exception as e:
         await callback.answer(f"❌ Error: {e}", show_alert=True)
@@ -1469,24 +1469,24 @@ async def cmd_upgrade(message: types.Message):
 @dp.message(_cmd("weapon_help"))
 async def cmd_weapon_help(message: types.Message):
     """Show how to use weapons in group chat (emoji-based system)."""
-    txt = "🎯 **WEAPON SYSTEM - GROUP CHAT ACTIVATION**\n\n"
+    txt = "🎯 <b>WEAPON SYSTEM - GROUP CHAT ACTIVATION</b>\n\n"
     txt += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    txt += "*📍 HOW TO USE WEAPONS:*\n\n"
+    txt += "<b>📍 HOW TO USE WEAPONS:</b>\n\n"
     txt += "In the group chat, type the emoji followed by victim's username:\n"
-    txt += "`emoji username`\n\n"
-    txt += "*Examples:*\n"
+    txt += "<code>emoji username</code>\n\n"
+    txt += "<b>Examples:</b>\n"
     txt += "🔫 Alice_Smith\n"
     txt += "⚡ Bob_Johnson\n"
     txt += "💥 Carol_Williams\n\n"
     txt += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    txt += "*YOUR AVAILABLE WEAPONS:*\n\n"
+    txt += "<b>YOUR AVAILABLE WEAPONS:</b>\n\n"
     
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     
     if not user or not user.get('weapons'):
-        txt += "_You have no weapons yet!_\n"
-        txt += "Buy weapons with `/weapons`\n\n"
+        txt += "<i>You have no weapons yet!</i>\n"
+        txt += "Buy weapons with /weapons\n\n"
     else:
         for weapon_id, weapon_data in user.get('weapons', {}).items():
             if weapon_id not in WEAPONS:
@@ -1501,19 +1501,19 @@ async def cmd_weapon_help(message: types.Message):
             txt += f"{name} ({charges} charges)\n"
     
     txt += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    txt += "*REQUIREMENTS:*\n"
+    txt += "<b>REQUIREMENTS:</b>\n"
     txt += "• Must own the weapon\n"
     txt += "• Must have charges remaining\n"
     txt += "• Can only target players in the group\n"
     txt += "• Target must use exact username\n\n"
-    txt += "*EFFECTS:*\n"
+    txt += "<b>EFFECTS:</b>\n"
     txt += "• Damage to silver/resources\n"
     txt += "• XP stealing\n"
     txt += "• Notifications to target\n"
     txt += "• Group announcement\n\n"
-    txt += "⚔️ *Unleash chaos!*"
+    txt += "⚔️ <i>Unleash chaos!</i>"
     
-    await message.answer(txt, parse_mode="Markdown")
+    await message.answer(txt, parse_mode="HTML")
 
 
 @dp.message(_cmd("challenges"))
@@ -2021,9 +2021,9 @@ async def cmd_weapons_inventory(message: types.Message):
     
     weapons = user.get('weapons', {})
     if not weapons:
-        await message.answer("🃏 *GameMaster:* \"No weapons. You fight like a peasant. Buy some from `!weapons`\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"No weapons. You fight like a peasant. Buy some from !weapons\"", parse_mode="Markdown"); return
     
-    txt = "⚔️ *YOUR WEAPONS ARSENAL*\n━━━━━━━━━━━━━━━━━━━━\n\n"
+    txt = "⚔️ <b>YOUR WEAPONS ARSENAL</b>\n━━━━━━━━━━━━━━━━━━━━\n\n"
     
     for weapon_id, weapon_data in weapons.items():
         if weapon_id not in WEAPONS:
@@ -2037,10 +2037,10 @@ async def cmd_weapons_inventory(message: types.Message):
         else:
             charges_left = weapon_data
         
-        txt += f"{wname}\n├─ Charges: **{charges_left}**\n└─ {weapon.get('rarity', 'common').upper()}\n\n"
+        txt += f"{wname}\n├─ Charges: <b>{charges_left}</b>\n└─ {weapon.get('rarity', 'common').upper()}\n\n"
     
-    txt += "━━━━━━━━━━━━━━━━━━━━\nBuy more: `!weapons`"
-    await message.answer(txt, parse_mode="Markdown")
+    txt += "━━━━━━━━━━━━━━━━━━━━\nBuy more: !weapons"
+    await message.answer(txt, parse_mode="HTML")
 
 
 @dp.message(_cmd("inventory"))
