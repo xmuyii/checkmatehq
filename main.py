@@ -1206,6 +1206,200 @@ async def on_show_weapons_inventory(callback: types.CallbackQuery):
         await callback.answer(f"❌ Error: {e}", show_alert=True)
         print(f"Error in show_weapons_inv: {e}")
 
+
+@dp.message(_cmd("use_weapon"))
+async def cmd_use_weapon(message: types.Message):
+    """Launch weapon with inline keyboard target selection."""
+    if message.chat.type != "private":
+        await message.answer("🎯 Use weapons in private only", parse_mode="Markdown")
+        return
+    
+    try:
+        u_id = str(message.from_user.id)
+        user = get_user(u_id)
+        if not user:
+            await message.answer("Register first", parse_mode="Markdown")
+            return
+        
+        weapons = user.get('weapons', {})
+        if not weapons:
+            await message.answer("❌ You have no weapons to use. Buy from `/weapons`", parse_mode="Markdown")
+            return
+        
+        # Show weapons with charges
+        txt = "🎯 **SELECT WEAPON TO LAUNCH**\n\n"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+        
+        for weapon_id, weapon_data in weapons.items():
+            if weapon_id not in WEAPONS:
+                continue
+            
+            weapon = WEAPONS[weapon_id]
+            if isinstance(weapon_data, dict):
+                charges = weapon_data.get('charges_remaining', 0)
+            else:
+                charges = weapon_data
+            
+            if charges <= 0:
+                continue
+            
+            txt += f"✅ {weapon['name']} ({charges} charges)\n"
+            
+            keyboard.inline_keyboard.append([
+                InlineKeyboardButton(
+                    text=f"🎯 {weapon['name'].split()[-1]} ({charges})",
+                    callback_data=f"use_weapon_{weapon_id}"
+                )
+            ])
+        
+        if not keyboard.inline_keyboard:
+            await message.answer("❌ All your weapons are out of charges!", parse_mode="Markdown")
+            return
+        
+        await message.answer(txt, reply_markup=keyboard, parse_mode="Markdown")
+        
+    except Exception as e:
+        await message.answer(f"❌ Error: {e}", parse_mode="Markdown")
+        print(f"Error in use_weapon: {e}")
+
+
+@dp.callback_query(lambda q: q.data.startswith("use_weapon_"))
+async def on_select_target(callback: types.CallbackQuery):
+    """Select target for weapon attack."""
+    try:
+        from supabase_db import supabase, DB_TABLE
+        
+        weapon_id = callback.data.replace("use_weapon_", "")
+        u_id = str(callback.from_user.id)
+        user = get_user(u_id)
+        
+        if not user or weapon_id not in WEAPONS:
+            await callback.answer("❌ Invalid weapon", show_alert=True)
+            return
+        
+        # Get top 10 targets from leaderboard (excluding self)
+        targets = supabase.table(DB_TABLE).select("user_id, username, level, war_points").order("war_points", desc=True).limit(10).execute()
+        target_list = [t for t in targets.data if t['user_id'] != u_id][:8]
+        
+        if not target_list:
+            await callback.answer("❌ No targets available", show_alert=True)
+            return
+        
+        weapon = WEAPONS[weapon_id]
+        txt = f"🔫 **{weapon['name']}**\n\n"
+        txt += f"Select target to attack:\n\n"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+        
+        for target in target_list:
+            keyboard.inline_keyboard.append([
+                InlineKeyboardButton(
+                    text=f"⚔️ {target['username']} (Lv{target['level']}) - {target.get('war_points', 0)} pts",
+                    callback_data=f"attack_weapon_{weapon_id}_{target['user_id']}"
+                )
+            ])
+        
+        await callback.answer()
+        await callback.message.edit_text(txt, reply_markup=keyboard, parse_mode="Markdown")
+        
+    except Exception as e:
+        await callback.answer(f"❌ Error: {e}", show_alert=True)
+        print(f"Error in select_target: {e}")
+
+
+@dp.callback_query(lambda q: q.data.startswith("attack_weapon_"))
+async def on_confirm_attack(callback: types.CallbackQuery):
+    """Confirm and execute weapon attack."""
+    try:
+        from supabase_db import supabase, DB_TABLE
+        
+        parts = callback.data.replace("attack_weapon_", "").split("_")
+        weapon_id = parts[0]
+        target_id = parts[1]
+        
+        u_id = str(callback.from_user.id)
+        attacker = get_user(u_id)
+        target = get_user(target_id)
+        
+        if not attacker or not target or weapon_id not in WEAPONS:
+            await callback.answer("❌ Invalid attack", show_alert=True)
+            return
+        
+        weapon = WEAPONS[weapon_id]
+        weapon_data = attacker.get('weapons', {}).get(weapon_id, {})
+        
+        if isinstance(weapon_data, dict):
+            charges = weapon_data.get('charges_remaining', 0)
+        else:
+            charges = weapon_data
+        
+        if charges <= 0:
+            await callback.answer(f"❌ {weapon['name']} out of charges!", show_alert=True)
+            return
+        
+        # Execute weapon effect
+        result_msg = f"💥 **WEAPON ACTIVATED!**\n\n"
+        result_msg += f"Attacker: {attacker['username']} (Lv{attacker['level']})\n"
+        result_msg += f"Weapon: {weapon['name']}\n"
+        result_msg += f"Target: {target['username']} (Lv{target['level']})\n\n"
+        
+        # Apply weapon effect based on type
+        effect = weapon.get('effect', '')
+        
+        if 'damage' in effect:
+            damage = weapon.get('damage_silver', 100)
+            target['silver'] = max(0, target.get('silver', 0) - damage)
+            result_msg += f"💰 Target loses {damage} silver!\n"
+        
+        if 'drain' in effect or 'steal' in effect:
+            steal_amt = weapon.get('steal_amount', 100)
+            resource = weapon.get('resource_type', 'silver')
+            base_res = target.get('base_resources', {}).get('resources', {})
+            stolen = min(steal_amt, base_res.get(resource, 0))
+            base_res[resource] = base_res.get(resource, 0) - stolen
+            if 'base_resources' not in target:
+                target['base_resources'] = {}
+            target['base_resources']['resources'] = base_res
+            result_msg += f"🌪️ Target loses {stolen} {resource}!\n"
+        
+        if 'turret' in weapon['name'].lower() or 'cannon' in weapon['name'].lower():
+            result_msg += f"\n⚡ **BLAST!** The target's defenses shatter!\n"
+        elif 'gun' in weapon['name'].lower():
+            result_msg += f"\n🔫 **BANG BANG!** Shots fired!\n"
+        
+        # Deduct charge
+        if weapon_id in attacker.get('weapons', {}):
+            attacker['weapons'][weapon_id] = {
+                "charges_remaining": max(0, charges - 1),
+                "cooldown_until": 0,
+                "last_used": None
+            }
+        
+        # Save both players
+        save_user(u_id, attacker)
+        save_user(target_id, target)
+        
+        result_msg += f"\n📊 Charges remaining: {charges - 1}"
+        
+        # Also notify target
+        target_notification = f"⚠️ **UNDER ATTACK!**\n\n"
+        target_notification += f"Attacker: {attacker['username']} (Lv{attacker['level']})\n"
+        target_notification += f"Weapon: {weapon['name']}\n"
+        target_notification += f"Effect: {weapon.get('description', 'Unknown')}"
+        
+        try:
+            await bot.send_message(int(target_id), target_notification, parse_mode="Markdown")
+        except:
+            pass  # Target may not have DM enabled
+        
+        await callback.answer(result_msg, show_alert=True)
+        await callback.message.edit_text(result_msg, parse_mode="Markdown")
+        
+    except Exception as e:
+        await callback.answer(f"❌ Error: {e}", show_alert=True)
+        print(f"Error in execute attack: {e}")
+
 @dp.message(_cmd("upgrade"))
 async def cmd_upgrade(message: types.Message):
     await message.answer("🃏 *GameMaster:* \"*Queen's Satchel!* Nice try. Not ready yet.\n\nWhen it arrives: unlocks 20 inventory slots for 900 Naira.\n\nUntil then? Manage your pathetic 5 slots like an adult. Stop asking.\"", parse_mode="Markdown")

@@ -197,11 +197,12 @@ Available for Level {player_level}:
         affordability = "✅" if can_afford else "❌"
         
         menu += f"{affordability} {weapon['name']}\n"
-        menu += f"   {weapon['description']}\n"
-        menu += f"   Cost: {weapon['cost'].get('silver', 0)} silver | Charges: {weapon['charges']}\n\n"
+        menu += f"   Cost: {weapon['cost'].get('silver', 0)} silver | Charges: {weapon['charges']}\n"
+        menu += f"   → {weapon['description']}\n\n"
     
-    menu += f"Buy: !buy_weapon [weapon_name]\n"
-    menu += f"Your silver: {player_silver}"
+    menu += f"*How to Buy:*\n`!weapons [weapon_name]`\n\n"
+    menu += f"*Your silver:* {player_silver:,}\n"
+    menu += f"✅ = You can afford | ❌ = Too expensive"
     
     return menu
 
