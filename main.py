@@ -184,6 +184,15 @@ try:
 except Exception as e:
     print(f"⚠️  Prestige system failed ({e})")
 
+# ── Save/Load/Reset System ───────────────────────────────────────────────────
+try:
+    from save_system import (
+        save_game, load_game, reset_game, list_saves, format_reset_status
+    )
+    print("✅ Save/Load system loaded")
+except Exception as e:
+    print(f"⚠️  Save/Load system failed ({e})")
+
 # ── Attack System ──────────────────────────────────────────────────────────
 try:
     from attack_system import (
@@ -258,6 +267,7 @@ class GameEngine:
         self.crates_dropping  = 0
         self.crate_claimers   = []
         self.crate_msg_id     = None
+        self.is_fake_crate    = False  # Track if current crate is fake (steals resources)
 
 active_games: dict[int, GameEngine] = {}
 
@@ -367,9 +377,12 @@ async def game_loop(chat_id: int):
                         break
                     if eng.crates_dropping > 0 and elapsed == 50 and not crate_dropped:
                         crate_dropped = True
+                        # Randomly decide if this is a fake crate (30% chance)
+                        eng.is_fake_crate = random.random() < 0.3
+                        crate_msg = "⚡ *CRATE DROP!*   🐵" if eng.is_fake_crate else "⚡ *CRATE DROP!*"
                         m = await bot.send_message(
                             chat_id,
-                            "⚡ *CRATE DROP!*",
+                            crate_msg,
                             parse_mode="Markdown"
                         )
                         eng.crate_msg_id   = m.message_id
@@ -395,9 +408,26 @@ async def game_loop(chat_id: int):
                     # Crate bonus notification
                     if eng.crates_dropping > 0 and eng.crate_claimers:
                         try:
-                            for cl in eng.crate_claimers:
-                                add_unclaimed_item(str(cl['user_id']), "super_crate", 1)
-                            result += f"🎁 *{len(eng.crate_claimers)} LUCKY PLAYERS CLAIMED MID-ROUND CRATES!*\n\n"
+                            if eng.is_fake_crate:
+                                # Fake crate steals from players
+                                for cl in eng.crate_claimers:
+                                    user = get_user(str(cl['user_id']))
+                                    if user:
+                                        # Steal 100 silver
+                                        user['silver'] = max(0, user.get('silver', 0) - 100)
+                                        # Steal 100 points from their score
+                                        if str(cl['user_id']) in eng.scores:
+                                            eng.scores[str(cl['user_id'])]['pts'] = max(0, eng.scores[str(cl['user_id'])]['pts'] - 100)
+                                        # Clean up before saving
+                                        user.pop('xp_in_level', None)
+                                        user.pop('building_cooldowns', None)
+                                        save_user(str(cl['user_id']), user)
+                                result += f"🐵 *FAKE CRATE! {len(eng.crate_claimers)} PLAYERS LOST 100 SILVER + 100 POINTS!*\n\n"
+                            else:
+                                # Real crate gives rewards
+                                for cl in eng.crate_claimers:
+                                    add_unclaimed_item(str(cl['user_id']), "super_crate", 1)
+                                result += f"🎁 *{len(eng.crate_claimers)} LUCKY PLAYERS CLAIMED MID-ROUND CRATES!*\n\n"
                         except Exception as e:
                             print(f"[ERROR] Crate handling: {e}")
                     
@@ -703,6 +733,72 @@ async def cmd_alltime(message: types.Message):
             
             text += f"{medal} {display_name} — {p['points']} pts\n"
     await message.answer(text, parse_mode="Markdown")
+
+
+@dp.message(_cmd("mystats"))
+async def cmd_mystats(message: types.Message):
+    """Display personalized stats card for the current round/session."""
+    user_id = str(message.from_user.id)
+    user = get_user(user_id)
+    
+    if not user:
+        await message.answer(_unreg(), parse_mode="Markdown")
+        return
+    
+    # Get user's permanent prestige/level info
+    prestige = user.get("prestige", 0)
+    level = user.get("level", 1)
+    username = user.get("username", "Unknown")
+    
+    # Round-based stats
+    weekly_points = user.get("points", 0) or user.get("weekly_points", 0)
+    silver_earned = user.get("silver", 0)
+    war_points = user.get("war_points", 0)
+    total_words = user.get("total_words", 0)
+    xp = user.get("xp", 0)
+    
+    # Get prestige tier info
+    from prestige_system import get_prestige_tier
+    prestige_tier = get_prestige_tier(prestige)
+    
+    # Build aesthetic card
+    card = f"""<b>╔═════════════════════════════╗
+║  ⚔️ YOUR STATS CARD ⚔️     ║
+╚═════════════════════════════╝</b>
+
+👤  <b>{username}</b>
+
+<b>🎖️  RANK & PRESTIGE</b>
+   Level: <b>{level}</b>
+   {prestige_tier['name']}
+   
+<b>💎  RESOURCE STATS</b>
+   Silver: <b>{silver_earned:,}</b>
+   War Points: <b>{war_points:,}</b>
+   Weekly Points: <b>{weekly_points:,}</b>
+   
+<b>📊  PROGRESSION</b>
+   Total XP: <b>{xp:,}</b>
+   Words Used: <b>{total_words:,}</b>
+   
+<b>🎯  MULTIPLIERS (Prestige {prestige})</b>
+   XP: ×{prestige_tier['xp_multiplier']}
+   Silver: ×{prestige_tier['silver_multiplier']}
+   Resources: ×{prestige_tier['resource_multiplier']}
+   Training: ×{prestige_tier['troop_training_speed']}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
+    
+    if level >= 1000:
+        card += f"\n✨ <b>READY TO PRESTIGE!</b>\n"
+        card += f"Use `/prestige` to ascend to the next tier.\n"
+    else:
+        progress = int((level / 1000) * 100)
+        card += f"\n◈ Level {level}/1000 ({progress}%)\n"
+    
+    card += "═══════════════════════════════"
+    
+    await message.answer(card, parse_mode="HTML")
 
 
 @dp.message(_cmd("help"))
@@ -1114,9 +1210,18 @@ async def cmd_shop(message: types.Message):
             )
             return
         
-        # Deduct silver and add resource
+        # Deduct silver and add resource to base_resources
         user["silver"] = player_silver - total_cost
-        user[resource] = user.get(resource, 0) + quantity
+        
+        # Store in base_resources correctly
+        if "base_resources" not in user:
+            user["base_resources"] = {"resources": {}}
+        if "resources" not in user["base_resources"]:
+            user["base_resources"]["resources"] = {}
+        
+        resources_dict = user["base_resources"]["resources"]
+        resources_dict[resource] = resources_dict.get(resource, 0) + quantity
+        
         save_user(str(user_id), user)
         
         msg = f"""
@@ -1270,9 +1375,9 @@ async def on_show_weapons_inventory(callback: types.CallbackQuery):
 
 @dp.message(_cmd("use_weapon"))
 async def cmd_use_weapon(message: types.Message):
-    """Launch weapon with inline keyboard target selection."""
+    """Show instructions for using weapons in group chat."""
     if message.chat.type != "private":
-        await message.answer("🎯 Use weapons in private only", parse_mode="Markdown")
+        await message.answer("🎯 Use `/use_weapon` in private only", parse_mode="Markdown")
         return
     
     try:
@@ -1287,10 +1392,9 @@ async def cmd_use_weapon(message: types.Message):
             await message.answer("❌ You have no weapons to use. Buy from /weapons", parse_mode="Markdown")
             return
         
-        # Show weapons with charges
-        txt = "🎯 <b>SELECT WEAPON TO LAUNCH</b>\n\n"
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+        # Show TEXT instruction instead of buttons
+        txt = "<b>🔫 HOW TO USE WEAPONS IN GROUP</b>\n\n"
+        txt += "Your available weapons:\n\n"
         
         for weapon_id, weapon_data in weapons.items():
             if weapon_id not in WEAPONS:
@@ -1305,20 +1409,19 @@ async def cmd_use_weapon(message: types.Message):
             if charges <= 0:
                 continue
             
-            txt += f"✅ {weapon['name']} ({charges} charges)\n"
-            
-            keyboard.inline_keyboard.append([
-                InlineKeyboardButton(
-                    text=f"🎯 {weapon['name'].split()[-1]} ({charges})",
-                    callback_data=f"use_weapon_{weapon_id}"
-                )
-            ])
+            emoji = weapon['name'][0]  # Get emoji
+            txt += f"{emoji} <b>{weapon['name']}</b> ({charges} charges)\n"
         
-        if not keyboard.inline_keyboard:
-            await message.answer("❌ All your weapons are out of charges!", parse_mode="Markdown")
-            return
+        txt += "\n<b>📌 TO USE WEAPONS IN GROUP CHAT:</b>\n\n"
+        txt += "1. Go to the group chat\n"
+        txt += "2. Type: <code>emoji username</code>\n\n"
+        txt += "<b>Examples:</b>\n"
+        txt += "🔫 Alice_Smith\n"
+        txt += "⚡ Bob_Johnson\n"
+        txt += "💥 Carol_Williams\n\n"
+        txt += "<i>Replace emoji with your weapon emoji and username with exact player name</i>"
         
-        await message.answer(txt, reply_markup=keyboard, parse_mode="HTML")
+        await message.answer(txt, parse_mode="HTML")
         
     except Exception as e:
         await message.answer(f"❌ Error: {e}", parse_mode="Markdown")
@@ -1558,7 +1661,7 @@ async def cmd_profile(message: types.Message):
     u_id = str(message.from_user.id)
     profile = get_profile(u_id)
     if not profile:
-        await message.answer("🃏 *GameMaster:* \"No profile? You haven't even *started* the tutorial? What are you doing here, fool? DM me, run `!start`, and actually play the game.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"No profile? Join the group first! Send a message in *The 64* and you'll be registered.\"", parse_mode="Markdown"); return
     
     xp_pct = (profile['xp_progress'] / profile['xp_needed'] * 100) if profile['xp_needed'] > 0 else 0
     xp_bar = progress_bar(profile['xp_progress'], profile['xp_needed'], width=15)
@@ -1616,6 +1719,11 @@ async def cmd_profile(message: types.Message):
         f"🏰 Base Sector: _{get_sector_display(base_sector)}_\n"
         f"🛡️ Shield: {shield_status_str}\n\n"
         f"{divider()}\n\n"
+        f"📊 *PRESTIGE TIER*\n"
+        f"├─ Tier: *{PRESTIGE_BONUSES[user.get('prestige', 0)]['name']}*\n"
+        f"├─ XP Multiplier: {PRESTIGE_BONUSES[user.get('prestige', 0)]['xp_multiplier']}x\n"
+        f"├─ Silver Multiplier: {PRESTIGE_BONUSES[user.get('prestige', 0)]['silver_multiplier']}x\n"
+        f"└─ Resource Multiplier: {PRESTIGE_BONUSES[user.get('prestige', 0)]['resource_multiplier']}x\n\n"
         f"📊 *BATTLE RECORDS*\n"
         f"├─ This Week: *{profile['weekly_points']}* pts\n"
         f"└─ All-Time: *{profile['all_time_points']}* pts\n\n"
@@ -1645,7 +1753,7 @@ async def cmd_prestige(message: types.Message):
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("Register first with `/start`", parse_mode="Markdown")
+        await message.answer("🃏 *GameMaster:* \"Join the group first! Send a message in *The 64* and you'll be registered automatically.\"", parse_mode="Markdown")
         return
     
     level = user.get("level", 1)
@@ -1661,6 +1769,10 @@ async def cmd_prestige(message: types.Message):
     if not result["success"]:
         await message.answer(f"❌ {result['message']}", parse_mode="Markdown")
         return
+    
+    # Clean up fields before saving
+    user.pop('xp_in_level', None)
+    user.pop('building_cooldowns', None)
     
     # Save updated user
     save_user(u_id, user)
@@ -1690,6 +1802,150 @@ async def callback_prestige_info(callback: types.CallbackQuery):
     status = format_prestige_status(level, prestige)
     await callback.message.edit_text(status, parse_mode="Markdown")
     await callback.answer()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  SAVE/LOAD/RESET COMMANDS
+# ═══════════════════════════════════════════════════════════════════════════
+
+@dp.message(_cmd("save"))
+async def cmd_save(message: types.Message):
+    """Save current game state."""
+    try:
+        if message.chat.type != "private":
+            await message.answer(_dm_only("!save"), parse_mode="Markdown"); return
+        
+        u_id = str(message.from_user.id)
+        user = get_user(u_id)
+        if not user:
+            await message.answer("🃏 *GameMaster:* Join the group first!", parse_mode="Markdown"); return
+        
+        # Parse slot number
+        args = message.text.strip().split()
+        slot = 1  # Default slot
+        if len(args) > 1:
+            try:
+                slot = int(args[1])
+                if not 1 <= slot <= 5:
+                    await message.answer("❌ Invalid slot! Use 1-5.", parse_mode="Markdown")
+                    return
+            except ValueError:
+                await message.answer("❌ Usage: `/save [slot]` (1-5)", parse_mode="Markdown")
+                return
+        
+        # Save game
+        success, msg = save_game(user, slot)
+        if success:
+            save_user(u_id, user)
+            print(f"[SAVE] User {u_id} saved to slot {slot}")
+        
+        await message.answer(msg, parse_mode="Markdown")
+    except Exception as e:
+        print(f"[ERROR] cmd_save: {e}")
+        import traceback; traceback.print_exc()
+        await message.answer("❌ Error saving game. Try again.", parse_mode="Markdown")
+
+
+@dp.message(_cmd("load"))
+async def cmd_load(message: types.Message):
+    """Load game from saved slot."""
+    try:
+        if message.chat.type != "private":
+            await message.answer(_dm_only("!load"), parse_mode="Markdown"); return
+        
+        u_id = str(message.from_user.id)
+        user = get_user(u_id)
+        if not user:
+            await message.answer("🃏 *GameMaster:* Join the group first!", parse_mode="Markdown"); return
+        
+        # Parse slot number
+        args = message.text.strip().split()
+        if len(args) < 2:
+            await message.answer(list_saves(user), parse_mode="Markdown")
+            return
+        
+        try:
+            slot = int(args[1])
+            if not 1 <= slot <= 5:
+                await message.answer("❌ Invalid slot! Use 1-5.", parse_mode="Markdown")
+                return
+        except ValueError:
+            await message.answer("❌ Usage: `/load [slot]` (1-5)", parse_mode="Markdown")
+            return
+        
+        # Load game
+        success, msg, restored_user = load_game(user, slot)
+        if success:
+            save_user(u_id, restored_user)
+            print(f"[LOAD] User {u_id} loaded from slot {slot}")
+        else:
+            print(f"[LOAD FAILED] User {u_id} slot {slot}: {msg}")
+        
+        await message.answer(msg, parse_mode="Markdown")
+    except Exception as e:
+        print(f"[ERROR] cmd_load: {e}")
+        import traceback; traceback.print_exc()
+        await message.answer("❌ Error loading game. Try again.", parse_mode="Markdown")
+
+
+@dp.message(_cmd("restores"))
+async def cmd_restores(message: types.Message):
+    """List all saved game slots."""
+    try:
+        if message.chat.type != "private":
+            await message.answer(_dm_only("!restores"), parse_mode="Markdown"); return
+        
+        u_id = str(message.from_user.id)
+        user = get_user(u_id)
+        if not user:
+            await message.answer("🃏 *GameMaster:* Join the group first!", parse_mode="Markdown"); return
+        
+        saves_list = list_saves(user)
+        print(f"[RESTORES] User {u_id} requested saves list")
+        await message.answer(saves_list, parse_mode="Markdown")
+    except Exception as e:
+        print(f"[ERROR] cmd_restores: {e}")
+        import traceback; traceback.print_exc()
+        await message.answer("❌ Error loading saves. Try again.", parse_mode="Markdown")
+
+
+@dp.message(_cmd("reset"))
+async def cmd_reset(message: types.Message):
+    """Reset game (with daily limit)."""
+    try:
+        if message.chat.type != "private":
+            await message.answer(_dm_only("!reset"), parse_mode="Markdown"); return
+        
+        u_id = str(message.from_user.id)
+        user = get_user(u_id)
+        if not user:
+            await message.answer("🃏 *GameMaster:* Join the group first!", parse_mode="Markdown"); return
+        
+        # Check for 'confirm' argument
+        args = message.text.strip().split()
+        
+        if len(args) < 2 or args[1].lower() != "confirm":
+            # Show reset status instead
+            status_msg = format_reset_status(user)
+            print(f"[RESET] User {u_id} checking reset status")
+            await message.answer(status_msg, parse_mode="Markdown")
+            return
+        
+        # Execute reset
+        success, msg, reset_user = reset_game(user)
+        if success:
+            save_user(u_id, reset_user)
+            print(f"[RESET] User {u_id} executed reset confirmed")
+        else:
+            print(f"[RESET FAILED] User {u_id}: {msg}")
+            await message.answer(msg, parse_mode="Markdown")
+            return
+        
+        await message.answer(msg, parse_mode="Markdown")
+    except Exception as e:
+        print(f"[ERROR] cmd_reset: {e}")
+        import traceback; traceback.print_exc()
+        await message.answer("❌ Error during reset. Try again.", parse_mode="Markdown")
 
 
 @dp.callback_query(lambda q: q.data == "train_menu")
@@ -2939,7 +3195,7 @@ async def cmd_build(message: types.Message):
         # Show menu
         current_buildings = user.get("buildings", {})
         menu = format_buildings_menu(base_level, current_buildings)
-        await message.answer(menu, parse_mode="Markdown")
+        await message.answer(menu, parse_mode="HTML")
         return
     
     building_name = args[1].lower().replace(" ", "_").replace("-", "_")
@@ -2953,6 +3209,23 @@ async def cmd_build(message: types.Message):
     # Get current buildings
     buildings = user.get("buildings", {})
     current_level = buildings.get(building_name, 0)
+    
+    # Check if building is on cooldown
+    building_cooldowns = user.get("building_cooldowns", {})
+    if building_name in building_cooldowns:
+        import time
+        cooldown_until = building_cooldowns[building_name]
+        remaining = cooldown_until - int(time.time())
+        if remaining > 0:
+            # Still on cooldown
+            await message.answer(
+                f"❌ Building still on cooldown!\nRemaining: {remaining}s",
+                parse_mode="Markdown"
+            )
+            return
+        else:
+            # Cooldown expired, remove it
+            del building_cooldowns[building_name]
     
     # Calculate cost for next level
     cost = calculate_building_cost(building_name, current_level + 1)
@@ -2982,24 +3255,39 @@ async def cmd_build(message: types.Message):
     for resource, amount in cost.items():
         resources[resource] = resources.get(resource, 0) - amount
     
-    buildings[building_name] = current_level + 1
+    # Set new building level and add cooldown
+    new_level = current_level + 1
+    buildings[building_name] = new_level
+    
+    # Add building cooldown (prevent spam)
+    import time
+    if "building_cooldowns" not in user:
+        user["building_cooldowns"] = {}
+    cooldown_duration = 30 * new_level  # Longer cooldown for higher levels (30s, 60s, 90s, etc)
+    user["building_cooldowns"][building_name] = int(time.time()) + cooldown_duration
     
     base_res["resources"] = resources
     user["buildings"] = buildings
     user["base_resources"] = base_res
     
+    # Clean up problematic fields before saving (they'll be popped in save_user anyway, but let's be explicit)
+    user.pop('xp_in_level', None)
     save_user(u_id, user)
     
     building_info = BUILDING_TYPES.get(building_name, {})
+    next_cost = calculate_building_cost(building_name, new_level + 1)
+    next_cost_str = ", ".join([f"{v}{k[0].upper()}" for k, v in next_cost.items()])
     
-    await message.answer(
-        f"✅ **CONSTRUCTION COMPLETE!**\n\n"
+    # Use Markdown instead of HTML to avoid formatting issues
+    msg = (
+        f"✅ LEVEL {new_level} BUILT!\n\n"
         f"{building_info.get('name', building_name)}\n"
-        f"Level: {buildings[building_name]}\n\n"
+        f"Current Level: *{new_level}*\n\n"
         f"*Bonus:* {building_info.get('description', 'N/A')}\n\n"
-        f"🃏 *GameMaster:* \"Your infrastructure grows stronger. The game notices.\"",
-        parse_mode="Markdown"
+        f"*Next Upgrade Cost:* {next_cost_str}\n"
+        f"🕐 Building cooldown: {cooldown_duration}s"
     )
+    await message.answer(msg, parse_mode="Markdown")
 
 
 @dp.message(_cmd("scout"))
@@ -3012,7 +3300,7 @@ async def cmd_scout(message: types.Message):
     u_id = str(message.from_user.id)
     scout_user = get_user(u_id)
     if not scout_user:
-        await message.answer("🃏 *GM:* \"You're not registered. Try `!start` first.\"", parse_mode="Markdown")
+        await message.answer("🃏 *GM:* \"You're not registered. Join the group in *The 64* first!\"", parse_mode="Markdown")
         return
     
     # Parse command: !scout @username or !scout user_id
@@ -3163,7 +3451,7 @@ async def cmd_revenge(message: types.Message):
     u_id = str(message.from_user.id)
     player = get_user(u_id)
     if not player:
-        await message.answer("🃏 *GM:* \"You're not registered. Try `!start` first.\"", parse_mode="Markdown")
+        await message.answer("🃏 *GM:* \"You're not registered. Join the group first!\"", parse_mode="Markdown")
         return
     
     # Check if player has active revenge debt
@@ -3211,7 +3499,7 @@ async def cmd_attack(message: types.Message):
     u_id = str(message.from_user.id)
     attacker = get_user(u_id)
     if not attacker:
-        await message.answer("🃏 *GM:* \"You're not registered. Try `!start` first.\"", parse_mode="Markdown")
+        await message.answer("🃏 *GM:* \"You're not registered. Join the group first!\"", parse_mode="Markdown")
         return
     
     # Check if attacker has troops
@@ -3599,7 +3887,7 @@ async def cb_defense_mousetraps(callback: types.CallbackQuery):
 
 @dp.message(_cmd("traps"))
 async def cmd_set_traps(message: types.Message):
-    """Set number of mousetraps."""
+    """Show all available traps and allow setting them."""
     if message.chat.type != "private":
         return
     
@@ -3609,19 +3897,52 @@ async def cmd_set_traps(message: types.Message):
         await message.answer("❌ Account not found.", parse_mode="Markdown")
         return
     
-    # Parse number
+    # Parse command: /traps [trap_type] [count]
     args = message.text.strip().split()
+    
     if len(args) < 2:
-        await message.answer(
-            "🪤 *SET MOUSETRAPS*\n\n"
-            "Usage: `/traps [number]`\n"
-            "Example: `/traps 5`",
-            parse_mode="Markdown"
-        )
+        # Show menu of all traps
+        from trap_system import TRAP_TYPES, get_max_traps
+        base_level = max(1, 1 + (user.get("xp", 0) // 1000))
+        max_traps = get_max_traps(base_level)
+        
+        txt = f"<b>🪤 TRAP WORKSHOP</b>\n\n"
+        txt += f"Base Level: {base_level} · Max per type: {max_traps}\n\n"
+        txt += "<b>Available Traps:</b>\n\n"
+        
+        current_traps = user.get("traps", {})
+        
+        for trap_id, trap_info in TRAP_TYPES.items():
+            current_count = current_traps.get(trap_id, 0) if isinstance(current_traps, dict) else 0
+            can_use = trap_info["min_level"] <= base_level
+            status = "✅" if can_use else "🔒"
+            cost_str = ", ".join([f"{v}{k[0].upper()}" for k, v in trap_info["cost"].items()])
+            txt += f"{status} <b>{trap_info['name']}</b>\n"
+            txt += f"   {trap_info['description']}\n"
+            txt += f"   Cost: {cost_str} | Current: {current_count}\n"
+            txt += f"   Capacity: {trap_info['capacity']} | Cooldown: {trap_info['cooldown']}s\n\n"
+        
+        txt += f"<b>Usage:</b> `/traps [trap_type] [count]`\n"
+        txt += f"<b>Example:</b> `/traps spike_pit 3`\n"
+        txt += f"<b>Trap types:</b> {', '.join(TRAP_TYPES.keys())}"
+        
+        await message.answer(txt, parse_mode="HTML")
+        return
+    
+    trap_type = args[1].lower()
+    from trap_system import TRAP_TYPES
+    
+    if trap_type not in TRAP_TYPES:
+        available = ", ".join(TRAP_TYPES.keys())
+        await message.answer(f"❌ Unknown trap type. Available: {available}", parse_mode="Markdown")
+        return
+    
+    if len(args) < 3:
+        await message.answer(f"❌ Specify count. Example: `/traps {trap_type} 5`", parse_mode="Markdown")
         return
     
     try:
-        trap_count = int(args[1])
+        trap_count = int(args[2])
         if trap_count < 0 or trap_count > 100:
             await message.answer("❌ Trap count must be 0-100.", parse_mode="Markdown")
             return
@@ -3629,16 +3950,29 @@ async def cmd_set_traps(message: types.Message):
         await message.answer("❌ Invalid number.", parse_mode="Markdown")
         return
     
-    # Set traps
-    set_mousetraps(u_id, trap_count)
+    # Set trap
+    from trap_system import TRAP_TYPES, get_max_traps
+    trap_info = TRAP_TYPES[trap_type]
+    base_level = max(1, 1 + (user.get("xp", 0) // 1000))
+    
+    if trap_info["min_level"] > base_level:
+        await message.answer(f"❌ You need level {trap_info['min_level']} to use {trap_info['name']}. (Your level: {base_level})", parse_mode="Markdown")
+        return
+    
+    # Initialize traps dict if needed
+    if "traps" not in user or not isinstance(user["traps"], dict):
+        user["traps"] = {}
+    
+    user["traps"][trap_type] = trap_count
+    save_user(u_id, user)
     
     await message.answer(
-        f"🪤 *TRAPS SET*: {trap_count}\n\n"
-        f"✅ {trap_count} mousetraps are now active on your base.\n"
-        f"Incoming scouts have a 30% chance of being caught.\n"
-        f"(Scouts have 70% chance to escape)\n\n"
-        f"Traps reset after catching a scout.",
-        parse_mode="Markdown"
+        f"✅ <b>TRAP SET</b>\n\n"
+        f"{trap_info['name']} × {trap_count}\n"
+        f"Damage: {trap_info['damage_range'][0]}-{trap_info['damage_range'][1]}\n"
+        f"Capacity: {trap_info['capacity']}\n\n"
+        f"Your base is now defended with {trap_type.upper()}!",
+        parse_mode="HTML"
     )
 
 
@@ -3854,29 +4188,6 @@ async def _execute_attack(attacker_id: str, target_id: str, target_display_name:
             f"🏆 {target_display_name} repelled {attacker.get('username', 'Unknown')}'s attack!\n"
             f"💀 Attacker lost {sum(result.get('attacker_losses', {}).values())} troops"
         )
-
-
-@dp.message(_cmd("tutorial", "start"))
-async def cmd_tutorial(message: types.Message, state: FSMContext):
-    if message.chat.type != "private":
-        await message.answer(_dm_only("!tutorial"), parse_mode="Markdown"); return
-    from initiation import Trial
-    u_id = str(message.from_user.id)
-    user = get_user(u_id)
-    cmd  = message.text.strip().lstrip("/!").lower().split("@")[0]
-    if user and user.get("completed_tutorial") and cmd == "tutorial":
-        await message.answer("🃏 *GameMaster:* \"You've already been through the trials. Try `!fusion` in the group.\"", parse_mode="Markdown"); return
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⚔️ I'm ready to enter", callback_data="trial_yes")],
-        [InlineKeyboardButton(text="🚪 I'm just lost",       callback_data="trial_no")],
-    ])
-    await message.answer(
-        "🃏 *GameMaster:* \"Well, well, well. Look what crawled into my domain.\"\n\n"
-        "\"You show up unannounced, uninvited, probably unprepared. I don't care who you are.\"\n\n"
-        "\"Are you here to join *The 64*? Or just wandering in by accident?\"",
-        parse_mode="Markdown", reply_markup=markup
-    )
-    await state.set_state(Trial.awaiting_username)
 
 
 @dp.message(_cmd("open"))
@@ -4985,7 +5296,7 @@ async def cb_confirm_build(callback: types.CallbackQuery):
     user_id = callback.from_user.id
     
     # Get user
-    user = await db.get_user(user_id)
+    user = get_user(str(user_id))
     if not user:
         await callback.answer("❌ User not found.", show_alert=True)
         return
@@ -5101,25 +5412,27 @@ async def cb_science_menu(callback: types.CallbackQuery):
     
     text += "<b>Available Research:</b>\n"
     
-    # Group by tier
+    # Group by tier and filter out completed research
     tier_groups = {}
+    completed = user.get("research_completed", [])
+    
     for rid, research in available.items():
         tier = research.get("tier", 1)
         if tier not in tier_groups:
             tier_groups[tier] = []
-        tier_groups[tier].append((rid, research))
+        status_indicator = "✅" if rid in completed else "🔍"
+        tier_groups[tier].append((rid, research, status_indicator))
     
     kb_buttons = []
     for tier in sorted(tier_groups.keys()):
         text += f"\n<b>Tier {tier}:</b>\n"
         tier_research = tier_groups[tier]
         
-        for rid, research in tier_research:
-            status = "✅" if rid in user.get("research_completed", []) else "🔍"
-            text += f"{status} {research['name']} ({research['time']}s)\n"
+        for rid, research, status_ind in tier_research:
+            text += f"{status_ind} {research['name']} ({research['time']}s)\n"
             
-            # Add button only if not completed
-            if rid not in user.get("research_completed", []) and not active_research:
+            # Add button ONLY if NOT completed
+            if rid not in completed and not active_research:
                 kb_buttons.append(
                     InlineKeyboardButton(
                         text=f"{research['name'][:20]}...",
@@ -5628,7 +5941,7 @@ async def on_reaction(event: types.MessageReactionUpdated):
             and eng.crates_dropping > 0
             and uid not in [c['user_id'] for c in eng.crate_claimers]
             and len(eng.crate_claimers) < 3):
-        eng.crate_claimers.append({'user_id': uid})
+        eng.crate_claimers.append({'user_id': uid, 'is_fake': eng.is_fake_crate})
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -5901,10 +6214,31 @@ async def _do_use_item(message: types.Message, user_id: str, item_id: int):
             parse_mode="Markdown"
         ); return
     elif itype == "scout" or "scout" in itype:
+        # Delete the scout item from inventory
+        from supabase_db import supabase, DB_TABLE
+        try:
+            supabase.table("inventory").delete().eq("id", item_id).execute()
+            print(f"[USE_ITEM] Scout item {item_id} deleted for user {user_id}")
+        except Exception as e:
+            print(f"[USE_ITEM] Error deleting scout item: {e}")
         await message.answer("🃏 *GameMaster:* \"Type `!scout [player_name]` to spy on an opponent's base resources.\"", parse_mode="Markdown"); return
     elif itype == "eternal_shard" or "eternal" in itype:
+        # Delete the eternal shard from inventory
+        from supabase_db import supabase, DB_TABLE
+        try:
+            supabase.table("inventory").delete().eq("id", item_id).execute()
+            print(f"[USE_ITEM] Eternal shard {item_id} deleted for user {user_id}")
+        except Exception as e:
+            print(f"[USE_ITEM] Error deleting eternal shard: {e}")
         await message.answer("🃏 *GameMaster:* \"Eternal Shards are used in FORGING to create legendary items.\"", parse_mode="Markdown"); return
     elif itype == "mythic_shard" or "mythic" in itype:
+        # Delete the mythic shard from inventory
+        from supabase_db import supabase, DB_TABLE
+        try:
+            supabase.table("inventory").delete().eq("id", item_id).execute()
+            print(f"[USE_ITEM] Mythic shard {item_id} deleted for user {user_id}")
+        except Exception as e:
+            print(f"[USE_ITEM] Error deleting mythic shard: {e}")
         await message.answer("🃏 *GameMaster:* \"Mythic Shards are rare! Use them in FORGING to create godlike items.\"", parse_mode="Markdown"); return
     else:
         await message.answer("🃏 *GameMaster:* \"Unknown item.\"", parse_mode="Markdown"); return
@@ -6022,7 +6356,7 @@ async def on_emoji_weapon_activation(message: types.Message):
     # Find victim by username
     from supabase_db import supabase, DB_TABLE
     try:
-        resp = supabase.table(DB_TABLE).select("user_id, username, level, silver, base_resources").eq("username", victim_name).execute()
+        resp = supabase.table(DB_TABLE).select("user_id, username, level, silver, base_resources, total_words").eq("username", victim_name).execute()
         if not resp.data:
             return  # Victim not found
         
@@ -6031,6 +6365,32 @@ async def on_emoji_weapon_activation(message: types.Message):
         
         if target_id == u_id:
             return  # Can't attack self
+        
+        # Check weapon trigger conditions (prevent instant activation)
+        trigger_condition = weapon.get('trigger_condition')
+        can_activate = True
+        reason = ""
+        
+        if trigger_condition == 'words_spoken':
+            # Only fire if victim has spoken enough words
+            min_words = weapon.get('trigger_threshold', 100)
+            victim_words = target.get('total_words', 0)
+            if victim_words < min_words:
+                can_activate = False
+                reason = f"Victim needs to speak {min_words} words first ({victim_words}/{min_words})"
+        
+        if trigger_condition == 'base_level':
+            # Only fire if victim reaches certain level
+            min_level = weapon.get('trigger_threshold', 5)
+            victim_level = target.get('level', 1)
+            if victim_level < min_level:
+                can_activate = False
+                reason = f"Victim needs to be level {min_level} ({victim_level}/{min_level})"
+        
+        if not can_activate:
+            # Weapon condition not met - don't fire
+            await message.reply(f"⚠️ Weapon not ready: {reason}")
+            return
         
         # Execute weapon effect
         attacker = user
@@ -6244,12 +6604,16 @@ async def on_group_message(message: types.Message):
 
     eng  = get_engine(message.chat.id)
     user = get_user(u_id)
-    print(f"[USER] {user.get('username') if user else 'NOT_REGISTERED'}, eng.active={eng.active}")
-
+    
+    # Auto-register new players on first message
     if not user:
-        if random.random() < 0.25:
-            await message.reply(_unreg(), parse_mode="Markdown")
-        print(f"[SKIP] User not registered"); return
+        username = message.from_user.first_name or message.from_user.username or f"Player{u_id[:4]}"
+        register_user(u_id, username)
+        user = get_user(u_id)
+        print(f"[AUTO-REGISTER] Registered {username}")
+        return  # Skip this message, let them start fresh
+    
+    print(f"[USER] {user.get('username') if user else 'NOT_REGISTERED'}, eng.active={eng.active}")
 
     if eng.active:
         eng.msg_count += 1
@@ -6461,6 +6825,9 @@ async def on_group_message(message: types.Message):
             
             # Save updated base_resources to database
             user_fresh['base_resources'] = base_res
+            # Clean up problematic fields before saving
+            user_fresh.pop('xp_in_level', None)
+            user_fresh.pop('building_cooldowns', None)
             save_user(u_id, user_fresh)
             print(f"[DB] Resources saved: {resources_awarded}")
             print(f"[DB] Total resources now: {resources_dict}")
@@ -6474,6 +6841,9 @@ async def on_group_message(message: types.Message):
                     buffs.pop('multiplier_count', None)
                     buffs.pop('multiplier_type', None)
                 user['buffs'] = buffs
+                # Clean up before saving
+                user.pop('xp_in_level', None)
+                user.pop('building_cooldowns', None)
                 save_user(u_id, user)
                 print(f"[MULTIPLIER] Decreased count: {mult_count} -> {buffs.get('multiplier_count', 0)}")
             

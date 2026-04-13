@@ -107,9 +107,6 @@ def execute_prestige(user: Dict) -> Dict:
     military["knight"] = military.get("knight", 0) + bonus_troops["knight"]
     user["military"] = military
     
-    # Reset XP counter (for level tracking)
-    user["xp_in_level"] = 0
-    
     return {
         "success": True,
         "new_prestige": new_prestige,

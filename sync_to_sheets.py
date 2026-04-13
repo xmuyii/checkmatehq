@@ -258,5 +258,14 @@ def main():
         return False
 
 
+def get_leaderboard_data():
+    """Get leaderboard data (wrapper for use in other modules like main.py)."""
+    try:
+        return get_weekly_leaderboard()
+    except Exception as e:
+        print(f"❌ Error fetching leaderboard: {e}")
+        return []
+
+
 if __name__ == '__main__':
     main()

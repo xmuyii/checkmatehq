@@ -26,6 +26,8 @@ WEAPONS = {
         "cooldown_hours": 168,  # 1 week
         "rarity": "uncommon",
         "min_level": 5,
+        "trigger_condition": "words_spoken",  # Only fires if victim has spoken min_words
+        "trigger_threshold": 50,  # Victim must have spoken 50+ words
     },
     
     "plasma_cannon": {
@@ -40,6 +42,8 @@ WEAPONS = {
         "cooldown_hours": 48,
         "rarity": "rare",
         "min_level": 15,
+        "trigger_condition": "words_spoken",
+        "trigger_threshold": 100,  # Victim must have spoken 100+ words
     },
     
     "emp_blast": {
@@ -53,6 +57,8 @@ WEAPONS = {
         "cooldown_hours": 72,
         "rarity": "uncommon",
         "min_level": 8,
+        "trigger_condition": "words_spoken",
+        "trigger_threshold": 25,  # Victim must have spoken 25+ words
     },
     
     # RESOURCE STEALERS
@@ -67,6 +73,8 @@ WEAPONS = {
         "cooldown_hours": 24,
         "rarity": "rare",
         "min_level": 12,
+        "trigger_condition": "base_level",
+        "trigger_threshold": 10,  # Victim must be level 10+
     },
     
     "silver_siphon": {
@@ -80,6 +88,8 @@ WEAPONS = {
         "cooldown_hours": 24,
         "rarity": "rare",
         "min_level": 14,
+        "trigger_condition": "base_level",
+        "trigger_threshold": 12,
     },
     
     "resource_drain": {
@@ -93,6 +103,8 @@ WEAPONS = {
         "cooldown_hours": 48,
         "rarity": "rare",
         "min_level": 20,
+        "trigger_condition": "words_spoken",
+        "trigger_threshold": 80,  # Victim must have 80+ words
     },
     
     # RESOURCE STEALERS - VARIANTS
@@ -108,6 +120,8 @@ WEAPONS = {
         "cooldown_hours": 12,
         "rarity": "uncommon",
         "min_level": 7,
+        "trigger_condition": "words_spoken",
+        "trigger_threshold": 20,  # Victim must have 20+ words
     },
     
     "bronze_extractor": {
@@ -122,6 +136,8 @@ WEAPONS = {
         "cooldown_hours": 12,
         "rarity": "uncommon",
         "min_level": 10,
+        "trigger_condition": "words_spoken",
+        "trigger_threshold": 30,  # Victim must have 30+ words
     },
     
     "iron_extractor": {
@@ -136,6 +152,8 @@ WEAPONS = {
         "cooldown_hours": 12,
         "rarity": "uncommon",
         "min_level": 12,
+        "trigger_condition": "words_spoken",
+        "trigger_threshold": 50,  # Victim must have 50+ words
     },
     
     "diamond_extractor": {
@@ -150,6 +168,8 @@ WEAPONS = {
         "cooldown_hours": 24,
         "rarity": "rare",
         "min_level": 25,
+        "trigger_condition": "words_spoken",
+        "trigger_threshold": 100,  # Victim must have 100+ words
     },
     
     # ═══ DEFENSIVE SHIELDS ═══
@@ -164,6 +184,8 @@ WEAPONS = {
         "cooldown_hours": 12,
         "rarity": "rare",
         "min_level": 10,
+        "trigger_condition": "base_level",
+        "trigger_threshold": 1,  # Always ready (attacker just needs to exist)
     },
     
     "reflective_armor": {
@@ -177,6 +199,8 @@ WEAPONS = {
         "cooldown_hours": 24,
         "rarity": "rare",
         "min_level": 15,
+        "trigger_condition": "base_level",
+        "trigger_threshold": 1,  # Always ready
     },
     
     "counter_striker": {
@@ -190,6 +214,8 @@ WEAPONS = {
         "cooldown_hours": 48,
         "rarity": "rare",
         "min_level": 18,
+        "trigger_condition": "base_level",
+        "trigger_threshold": 1,  # Always ready
     },
     
     "fortified_keep": {
@@ -203,6 +229,8 @@ WEAPONS = {
         "cooldown_hours": 18,
         "rarity": "rare",
         "min_level": 12,
+        "trigger_condition": "base_level",
+        "trigger_threshold": 1,  # Always ready
     },
     
     "resource_shield": {
@@ -216,6 +244,8 @@ WEAPONS = {
         "cooldown_hours": 72,
         "rarity": "rare",
         "min_level": 20,
+        "trigger_condition": "base_level",
+        "trigger_threshold": 1,  # Always ready
     },
 }
 

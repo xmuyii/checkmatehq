@@ -88,7 +88,7 @@ def _row_to_user(row: dict) -> dict:
     # Integers
     for k, default in [('weekly_points', 0), ('all_time_points', 0),
                         ('total_words', 0), ('xp', 0), ('silver', 0),
-                        ('level', 1), ('last_level', 1), ('backpack_slots', 5)]:
+                        ('level', 1), ('last_level', 1), ('prestige', 0), ('backpack_slots', 5)]:
         u[k] = int(u.get(k) or default)
     # Normalize week_start to just the date part (Supabase may return full timestamp)
     if u.get('week_start'):
@@ -105,8 +105,8 @@ def _row_to_user(row: dict) -> dict:
         elif val is None:
             u[k] = []
     
-    # Parse military, traps, buffs JSONB fields
-    for k in ('military', 'traps', 'buffs', 'weapons'):
+    # Parse military, traps, buffs, weapons, buildings, game_saves JSONB fields
+    for k in ('military', 'traps', 'buffs', 'weapons', 'buildings', 'game_saves'):
         val = u.get(k, '{}')
         if isinstance(val, str):
             try:
@@ -176,10 +176,16 @@ def save_user(user_id, data: dict):
     d.pop('metadata', None)
     d.pop('training_queue', None)
     d.pop('shield_status', None)  # Shield status is in-memory only, not in DB
-    d.pop('prestige', None)  # Prestige tier is in-memory only, not in DB
+    # NOTE: prestige IS saved to DB (needed for persistence)
+    # NOTE: buildings IS saved to DB (needed for progression tracking)
+    d.pop('researches', None)  # Research feature not yet in DB schema
+    d.pop('research_progress', None)  # Research progress tracking in-memory only
+    d.pop('research_completed', None)  # Research completion list in-memory only
+    d.pop('xp_in_level', None)  # XP tracking within level not in DB schema
+    d.pop('building_cooldowns', None)  # Building cooldown not in DB schema
     
-    # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources, weapons)
-    for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs', 'weapons'):
+    # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources, weapons, buildings, game_saves)
+    for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs', 'weapons', 'buildings', 'game_saves'):
         if isinstance(d.get(k), (list, dict)):
             d[k] = json.dumps(d[k])
     
@@ -218,6 +224,7 @@ def register_user(user_id, username: str):
         'xp': 0,
         'level': 1,
         'last_level': 1,
+        'prestige': 0,
         'backpack_slots': 5,
         'backpack_image': 'normal_backpack',
         'inventory': json.dumps([]),
@@ -232,6 +239,9 @@ def register_user(user_id, username: str):
         }),
         'military': json.dumps({}),
         'traps': json.dumps({}),
+        'buildings': json.dumps({}),
+        'game_saves': json.dumps({}),
+        'last_reset_date': None,
         'shield_status': 'UNPROTECTED',
         'shield_cooldown': None,
     }).execute()

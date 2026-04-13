@@ -32,7 +32,13 @@ from config import BOT_TOKEN, SUPABASE_URL as CONFIG_SUPABASE_URL, SUPABASE_KEY 
 API_TOKEN    = os.environ.get('API_TOKEN', BOT_TOKEN)
 SUPABASE_URL = os.environ.get('SUPABASE_URL', CONFIG_SUPABASE_URL).rstrip('/')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', CONFIG_SUPABASE_KEY)
-CHECKMATE_HQ_GROUP_ID = int(os.environ.get('CHECKMATE_HQ_GROUP_ID', '-1001234567890'))
+
+# Get CHECKMATE_HQ_GROUP_ID from environment (Telegram group IDs are negative)
+try:
+    group_id_str = os.environ.get('CHECKMATE_HQ_GROUP_ID')
+    CHECKMATE_HQ_GROUP_ID = int(group_id_str) if group_id_str else None
+except (ValueError, TypeError):
+    CHECKMATE_HQ_GROUP_ID = None
 
 bot = Bot(token=API_TOKEN)
 initiation_router = Router()

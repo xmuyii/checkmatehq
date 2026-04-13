@@ -142,17 +142,12 @@ def format_buildings_menu(base_level: int, current_buildings: Dict[str, int]) ->
     """Format menu of available buildings."""
     available = get_available_buildings(base_level)
     
-    menu = f"""
-╔════════════════════════════════════════════════════════════════╗
-║        🏰  BASE CONSTRUCTION MENU  🏰                         ║
-╠════════════════════════════════════════════════════════════════╣
-║                                                                ║
-║  Base Level: {base_level}                                             ║
-║  Upgrade buildings to unlock more bonuses                      ║
-║                                                                ║
-╠════════════════════════════════════════════════════════════════╣
-║  AVAILABLE STRUCTURES:                                         ║
-║
+    menu = f"""🏰 BASE CONSTRUCTION MENU
+
+Base Level: {base_level}
+
+AVAILABLE BUILDINGS:
+
 """
     
     for building_id in available:
@@ -165,17 +160,13 @@ def format_buildings_menu(base_level: int, current_buildings: Dict[str, int]) ->
         
         bonus_desc = building["description"]
         
-        menu += f"║  {building['name']:<25} | Level: {current_level}\n"
-        menu += f"║    {bonus_desc}\n"
-        menu += f"║    Cost: {cost_str}\n"
-        menu += f"║\n"
+        menu += f"{building['name']} (Level: {current_level})\n"
+        menu += f"  {bonus_desc}\n"
+        menu += f"  Cost: {cost_str}\n\n"
     
-    menu += """║                                                                ║
-║  Build: !build [building_name]                               ║
-║  Example: !build training_ground                             ║
-║                                                                ║
-╚════════════════════════════════════════════════════════════════╝
-"""
+    menu += """Build: !build [building_name]
+Example: !build training_ground"""
+    
     return menu
 
 

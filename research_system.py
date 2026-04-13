@@ -269,14 +269,13 @@ def get_research_by_tier(tier: int, user_level: int) -> dict:
 
 
 def format_research_info(research_id: str) -> str:
-    """Format research info for display."""
+    """Format research info for display (truncated for Telegram byte limits)."""
     if research_id not in RESEARCH_TYPES:
         return "❌ Unknown research type"
     
     research = RESEARCH_TYPES[research_id]
     
-    text = f"""
-<b>{research['name']}</b>
+    text = f"""<b>{research['name']}</b>
 
 📖 {research['description']}
 
@@ -285,23 +284,34 @@ def format_research_info(research_id: str) -> str:
 📊 Tier: {research['tier']}
 🎖️ Min Level: {research['min_level']}
 
-<b>Cost:</b>
-"""
+<b>Cost:</b>"""
     for res_type, amount in research['cost'].items():
         if amount > 0:
-            text += f"\n{amount} {res_type.upper()}"
+            text += f"\n• {amount} {res_type.upper()}"
     
-    text += "\n\n<b>Unlocks:</b>\n"
+    text += "\n\n<b>Unlocks (First 2):</b>"
     
     unlocks = research['unlocks']
     if unlocks.get('items'):
-        text += f"\n📦 Items: {', '.join(unlocks['items'])}"
+        items_list = ', '.join(unlocks['items'][:2])
+        if len(unlocks['items']) > 2:
+            items_list += f" +{len(unlocks['items'])-2} more"
+        text += f"\n📦 {items_list}"
     if unlocks.get('weapons'):
-        text += f"\n⚔️ Weapons: {', '.join(unlocks['weapons'])}"
+        weapons_list = ', '.join(unlocks['weapons'][:2])
+        if len(unlocks['weapons']) > 2:
+            weapons_list += f" +{len(unlocks['weapons'])-2} more"
+        text += f"\n⚔️ {weapons_list}"
     if unlocks.get('abilities'):
-        text += f"\n✨ Abilities: {', '.join(unlocks['abilities'])}"
+        abilities_list = ', '.join(unlocks['abilities'][:2])
+        if len(unlocks['abilities']) > 2:
+            abilities_list += f" +{len(unlocks['abilities'])-2} more"
+        text += f"\n✨ {abilities_list}"
     if unlocks.get('base_sections'):
-        text += f"\n🏗️ Base Sections: {', '.join(unlocks['base_sections'])}"
+        sections_list = ', '.join(unlocks['base_sections'][:2])
+        if len(unlocks['base_sections']) > 2:
+            sections_list += f" +{len(unlocks['base_sections'])-2} more"
+        text += f"\n🏗️ {sections_list}"
     
     return text
 
