@@ -87,8 +87,8 @@ def _row_to_user(row: dict) -> dict:
     u = dict(row)
     # Integers
     for k, default in [('weekly_points', 0), ('all_time_points', 0),
-                        ('total_words', 0), ('xp', 0), ('silver', 0),
-                        ('level', 1), ('last_level', 1), ('prestige', 0), ('backpack_slots', 5)]:
+                        ('total_words', 0), ('xp', 0), ('bitcoin', 0),
+                        ('level', 1), ('last_level', 1), ('backpack_slots', 5)]:
         u[k] = int(u.get(k) or default)
     # Normalize week_start to just the date part (Supabase may return full timestamp)
     if u.get('week_start'):
@@ -105,8 +105,8 @@ def _row_to_user(row: dict) -> dict:
         elif val is None:
             u[k] = []
     
-    # Parse military, traps, buffs, weapons, buildings, game_saves JSONB fields
-    for k in ('military', 'traps', 'buffs', 'weapons', 'buildings', 'game_saves'):
+    # Parse military, traps, buffs JSONB fields
+    for k in ('military', 'traps', 'buffs', 'weapons'):
         val = u.get(k, '{}')
         if isinstance(val, str):
             try:
@@ -142,8 +142,8 @@ def _row_to_user(row: dict) -> dict:
         if res_type not in stored_resources:
             stored_resources[res_type] = default_val
     
-    # Remove 'silver' if it exists (migration from old structure)
-    stored_resources.pop('silver', None)
+   
+   
     
     base_res['resources'] = stored_resources
     
@@ -176,16 +176,10 @@ def save_user(user_id, data: dict):
     d.pop('metadata', None)
     d.pop('training_queue', None)
     d.pop('shield_status', None)  # Shield status is in-memory only, not in DB
-    # NOTE: prestige IS saved to DB (needed for persistence)
-    # NOTE: buildings IS saved to DB (needed for progression tracking)
-    d.pop('researches', None)  # Research feature not yet in DB schema
-    d.pop('research_progress', None)  # Research progress tracking in-memory only
-    d.pop('research_completed', None)  # Research completion list in-memory only
-    d.pop('xp_in_level', None)  # XP tracking within level not in DB schema
-    d.pop('building_cooldowns', None)  # Building cooldown not in DB schema
+    d.pop('prestige', None)  # Prestige tier is in-memory only, not in DB
     
-    # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources, weapons, buildings, game_saves)
-    for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs', 'weapons', 'buildings', 'game_saves'):
+    # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources, weapons)
+    for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs', 'weapons'):
         if isinstance(d.get(k), (list, dict)):
             d[k] = json.dumps(d[k])
     
@@ -220,11 +214,10 @@ def register_user(user_id, username: str):
         'weekly_points': 0,
         'week_start': _current_week_key(),
         'total_words': 0,
-        'silver': 0,
+        'bitcoin': 0,
         'xp': 0,
         'level': 1,
         'last_level': 1,
-        'prestige': 0,
         'backpack_slots': 5,
         'backpack_image': 'normal_backpack',
         'inventory': json.dumps([]),
@@ -239,9 +232,6 @@ def register_user(user_id, username: str):
         }),
         'military': json.dumps({}),
         'traps': json.dumps({}),
-        'buildings': json.dumps({}),
-        'game_saves': json.dumps({}),
-        'last_reset_date': None,
         'shield_status': 'UNPROTECTED',
         'shield_cooldown': None,
     }).execute()
@@ -295,26 +285,26 @@ def use_xp(user_id, amount: int) -> bool:
     return True
 
 
-def add_silver(user_id, amount: int, username: str = ''):
+def add_bitcoin(user_id, amount: int, username: str = ''):
     user = get_user(str(user_id))
     if not user:
         register_user(user_id, username)
         user = get_user(str(user_id))
-    user['silver'] = user.get('silver', 0) + amount
+    user['bitcoin'] = user.get('bitcoin', 0) + amount
     save_user(str(user_id), user)
 
 
-def use_silver(user_id, amount: int) -> bool:
+def use_bitcoin(user_id, amount: int) -> bool:
     user = get_user(str(user_id))
-    if not user or user.get('silver', 0) < amount:
+    if not user or user.get('bitcoin', 0) < amount:
         return False
-    user['silver'] -= amount
+    user['bitcoin'] -= amount
     save_user(str(user_id), user)
     return True
 
 
 def add_resources_from_word_length(user_id, word_length: int, username: str = '') -> dict:
-    """Award resources based on word length: 3L→Wood, 4L→Bronze, 5L→Iron, 6L→Silver, 7L→Relics"""
+    """Award resources based on word length: 3L→Wood, 4L→Bronze, 5L→Iron, 6L→Diamond, 7L→Relics"""
     uid = str(user_id)
     user = get_user(uid)
     if not user:
@@ -323,7 +313,7 @@ def add_resources_from_word_length(user_id, word_length: int, username: str = ''
     
     # Initialize resources if not present
     if 'resources' not in user or not isinstance(user.get('resources'), dict):
-        user['resources'] = {'wood': 0, 'bronze': 0, 'iron': 0, 'silver': 0, 'relics': 0}
+        user['resources'] = {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0}
     
     resources_awarded = {}
     
@@ -338,8 +328,8 @@ def add_resources_from_word_length(user_id, word_length: int, username: str = ''
         user['resources']['iron'] = user['resources'].get('iron', 0) + 1
         resources_awarded['iron'] = 1
     elif word_length == 6:
-        user['resources']['silver'] = user['resources'].get('silver', 0) + 1
-        resources_awarded['silver'] = 1  # Different from the 'silver' currency
+        user['resources']['diamond'] = user['resources'].get('diamond', 0) + 1
+        resources_awarded['diamond'] = 1  # Different from the 'bitcoin' currency
     elif word_length >= 7:
         user['resources']['relics'] = user['resources'].get('relics', 0) + 1
         resources_awarded['relics'] = 1
@@ -743,11 +733,6 @@ def grant_free_shields_to_all():
         return 0
 
 
-def give_shields_to_all():
-    """Deprecated: Use reset_all_shields() instead. This now resets shields."""
-    return reset_all_shields()
-
-
 # ── Unclaimed items ────────────────────────────────────────────────────────
 
 def _crate_xp(item_type: str) -> int:
@@ -911,7 +896,7 @@ def get_profile(user_id) -> dict | None:
         'xp':              xp,
         'xp_progress':     xp_prog,
         'xp_needed':       100,
-        'silver':          user.get('silver', 0),
+        'bitcoin':          user.get('bitcoin', 0),
         'all_time_points': user.get('all_time_points', 0),
         'weekly_points':   user.get('weekly_points', 0),
         'total_words':     user.get('total_words', 0),

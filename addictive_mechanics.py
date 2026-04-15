@@ -62,7 +62,7 @@ def handle_daily_login(user_id: str) -> dict:
     if streak_info["broken"]:
         new_streak = 1
         bonus = 50  # Starter bonus
-        message = f"🔥 *Streak Broken!* Starting fresh at **Day 1**. Earned *50 Silver*."
+        message = f"🔥 *Streak Broken!* Starting fresh at **Day 1**. Earned *50 Bitcoin*."
     else:
         new_streak = streak_info["streak"] + 1
         
@@ -72,20 +72,20 @@ def handle_daily_login(user_id: str) -> dict:
         # Milestone bonuses
         if new_streak == 7:
             bonus += 500
-            message = f"🔥 *DAY 7 MILESTONE!* Streak: **7 DAYS**. Earned *{bonus} Silver* + Super Crate!"
+            message = f"🔥 *DAY 7 MILESTONE!* Streak: **7 DAYS**. Earned *{bonus} Bitcoin* + Super Crate!"
             # TODO: Add super crate
         elif new_streak == 30:
             bonus += 2000
-            message = f"👑 *DAY 30 LEGEND!* Streak: **30 DAYS**. Earned *{bonus} Silver* + Legendary Item!"
+            message = f"👑 *DAY 30 LEGEND!* Streak: **30 DAYS**. Earned *{bonus} Bitcoin* + Legendary Item!"
         else:
-            message = f"🔥 *Day {new_streak}* Streak! Earned *{bonus} Silver*."
+            message = f"🔥 *Day {new_streak}* Streak! Earned *{bonus} Bitcoin*."
     
     # Update user streak in buffs JSONB
     buffs = user.get("buffs", {})
     buffs["login_streak"] = new_streak
     buffs["last_login"] = datetime.utcnow().isoformat()
     user["buffs"] = buffs
-    user["silver"] = user.get("silver", 0) + bonus
+    user["bitcoin"] = user.get("bitcoin", 0) + bonus
     save_user(user_id, user)
     
     return {
@@ -183,7 +183,7 @@ WEEKLY_CHALLENGES = {
     },
     "rich_player": {
         "name": "💰 Banker",
-        "desc": "Accumulate 50,000 Silver",
+        "desc": "Accumulate 50,000 Bitcoin",
         "reward": 2000,
         "icon": "💰"
     },
@@ -228,7 +228,7 @@ def get_weekly_challenges(user_id: str) -> list:
             progress = user.get("level", 1)
             total = 25
         elif key == "rich_player":
-            progress = user.get("silver", 0)
+            progress = user.get("bitcoin", 0)
             total = 50000
         elif key == "leaderboard":
             # Check leaderboard rank
@@ -273,7 +273,7 @@ def format_challenge_display(challenge: dict) -> str:
     if challenge["completed"]:
         return f"✅ *{name}* — *{reward} points claimed*"
     else:
-        return f"{icon} *{name}*\n├─ {desc}\n├─ Progress: [ {bar} ] {progress}/{total}\n└─ Reward: *{reward} silver*"
+        return f"{icon} *{name}*\n├─ {desc}\n├─ Progress: [ {bar} ] {progress}/{total}\n└─ Reward: *{reward} bitcoin*"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -288,7 +288,7 @@ RARE_ITEMS = {
 }
 
 
-def check_rare_drop() -> dict or None:
+def check_rare_drop() -> dict | None:
     """
     Random chance to drop a rare item.
     Returns item or None.
@@ -311,7 +311,7 @@ def format_rare_drop_notification(item: dict) -> str:
         f"🎉 *ULTRA RARE DROP!*\n\n"
         f"You've found: *{item['name']}*\n"
         f"Rarity: **{item['rarity_pct']:.2f}%** (1 in {int(1/item['rarity_pct']*100)})\n"
-        f"Value: *{item['value']} Silver*\n\n"
+        f"Value: *{item['value']} Bitcoin*\n\n"
         f"😲 *LEGENDARY!*"
     )
 
@@ -327,7 +327,7 @@ def get_limited_offer() -> dict:
     offers = [
         {
             "name": "⚡ Speed Boost Hour",
-            "desc": "50% more Silver for next 1 hour",
+            "desc": "50% more Bitcoin for next 1 hour",
             "bonus": 0.5,
             "duration": 60,
             "emoji": "⚡"
@@ -369,7 +369,7 @@ def notification_level_up(player_name: str, new_level: int) -> str:
 def notification_new_record(player_name: str, record: str, value: int) -> str:
     """New personal record."""
     icons = {
-        "mostsilver": "💰",
+        "mostbitcoin": "💰",
         "highestcombo": "🔥",
         "mostxp": "⭐",
     }

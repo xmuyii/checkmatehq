@@ -11,6 +11,19 @@ Game loop: simple asyncio.sleep ticks, force_stop flag.
 from dotenv import load_dotenv
 load_dotenv()
 
+# ── Fix Unicode/Emoji support on Windows –────────────────────────────────
+import sys
+import os
+# This adds the folder containing main.py to Python's search list
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+#print(f"Current Directory: {os.getcwd()}")
+#print(f"Files found: {os.listdir('.')}")
+if sys.platform == "win32":
+    import io
+    # Reconfigure stdout to use UTF-8
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 import asyncio
 import random
 from datetime import datetime, timedelta
@@ -34,6 +47,9 @@ game_events = {
     "challenges": []       # {"player": name, "challenge": "Climber", "reward": 500, "time": timestamp}
 }
 
+from save_system import (
+    save_game, reset_game, load_game, reset_player_progress, restore_to_checkpoint, list_saves, list_checkpoints, format_reset_status, format_checkpoint_display
+)
 def add_event(event_type: str, event_data: dict):
     """Add event to tracking queue with timestamp."""
     if event_type in game_events:
@@ -68,12 +84,18 @@ try:
         get_awakening_hook, SHOP_CATALOG
     )
     ATTACK_DECISION_SCREEN = "⚔️ Choose your target carefully."
-    print("✅ Immersive systems loaded (Deep psychological narratives)")
+    try:
+        print("✅G - I S loaded")
+    except UnicodeEncodeError:
+        print("[OK] G - I S loaded")
 except Exception as e:
-    print(f"⚠️  Immersive systems failed ({e}), using standard narratives")
+    try:
+        print(f"⚠️  Immersive systems failves")
+    except UnicodeEncodeError:
+        print(f"[WARN] Immersive systems failves")
     ASSASSIN_PROFILE = {}
     BURNED_BASE_IMAGERY = "🔥 Your base has been raided. Rebuild or perish."
-    OBELISK_GATEWAY = "🌌 Welcome to the dimensional gateway.\n\nYou stand before the Obelisk...\nWill you enter the 9 sectors?"
+    OBELISK_GATEWAY = "🌌 ENTER into the interdimensional gateway.\n\n...\nThere are 64 sectors. Which of them will you rule over?"
     ATTACK_DECISION_SCREEN = "⚔️ Choose your target carefully."
     SECTOR_CONSCIOUSNESS = {}
     # Stub functions for missing immersive functions
@@ -81,7 +103,7 @@ except Exception as e:
     def format_victory_ascension(w, l, xp, r): return f"🏆 {w} defeated {l}!"
     def format_defeat_devastation(l, w): return f"💀 {l} was defeated by {w}."
     def consciousness_split_awareness(ps, bs, pn): return "You are split between locations."
-    def format_shop_menu(s): return f"💰 You have {s} silver."
+    def format_shop_menu(s): return f"💰 You have {s} bitcoin."
     def get_awakening_hook(ht, **ctx): return "The game awaits."
     SECTOR_SELECTION_FLOW = "Select a sector."
     SHOP_CATALOG = {}
@@ -138,31 +160,6 @@ try:
 except Exception as e:
     print(f"⚠️  Build system failed ({e})")
 
-# ── Training System (Unit Production) ──────────────────────────────────────
-try:
-    from training_system import UNITS
-    print("✅ Training system loaded (UNITS)")
-except Exception as e:
-    print(f"⚠️  Training system failed ({e}), unit training may be broken")
-    UNITS = {}
-
-# ── Research System (Tech Tree & Unlocks) ──────────────────────────────────
-try:
-    from research_system import (
-        RESEARCH_TYPES, get_available_research, get_research_by_tier,
-        format_research_info, can_research, start_research,
-        check_research_complete, apply_research_unlocks
-    )
-    print("✅ Research system loaded")
-except Exception as e:
-    print(f"⚠️  Research system failed ({e})")
-    RESEARCH_TYPES = {}
-    def get_available_research(level): return {}
-    def can_research(user, rid): return False, "System not loaded"
-    def start_research(uid, user, rid, db): return False, "System not loaded"
-    def check_research_complete(uid, user): return []
-    def apply_research_unlocks(user, rid): return user
-
 # ── Weapon System (Combat & Sabotage) ────────────────────────────────────────
 try:
     from weapon_system import (
@@ -184,15 +181,6 @@ try:
 except Exception as e:
     print(f"⚠️  Prestige system failed ({e})")
 
-# ── Save/Load/Reset System ───────────────────────────────────────────────────
-try:
-    from save_system import (
-        save_game, load_game, reset_game, list_saves, format_reset_status
-    )
-    print("✅ Save/Load system loaded")
-except Exception as e:
-    print(f"⚠️  Save/Load system failed ({e})")
-
 # ── Attack System ──────────────────────────────────────────────────────────
 try:
     from attack_system import (
@@ -207,15 +195,14 @@ except Exception as e:
 try:
     from supabase_db import (
         get_user, register_user, add_points, get_weekly_leaderboard,
-        get_alltime_leaderboard, add_silver, set_sector, upgrade_backpack,
-        get_inventory, get_profile, add_xp, use_xp, use_silver,
+        get_alltime_leaderboard, add_bitcoin, set_sector, upgrade_backpack,
+        get_inventory, get_profile, add_xp, use_xp, use_bitcoin,
         remove_inventory_item, load_sectors, save_user, calculate_level,
         check_level_up, add_unclaimed_item, get_unclaimed_items,
         claim_item, remove_unclaimed_item, award_powerful_locked_item,
         add_inventory_item, activate_shield, is_shielded, get_sector_display,
         add_resources_from_word_length, update_streak_and_award_food,
-        reset_all_streaks, add_randomized_gift, give_automatic_shield, give_shields_to_all,
-        deactivate_shield, disrupt_shield, restore_shield_after_attack, grant_free_teleports_to_all,
+        reset_all_streaks, add_randomized_gift, give_automatic_shield, deactivate_shield, disrupt_shield, restore_shield_after_attack, grant_free_teleports_to_all,
         grant_free_shields_to_all,
     )
     print("✅ Using Supabase database")
@@ -223,8 +210,8 @@ except Exception as e:
     print(f"⚠️  Supabase failed ({e}), using JSON database")
     from database import (
         get_user, register_user, add_points, get_weekly_leaderboard,
-        get_alltime_leaderboard, add_silver, set_sector, upgrade_backpack,
-        get_inventory, get_profile, add_xp, use_xp, use_silver,
+        get_alltime_leaderboard, add_bitcoin, set_sector, upgrade_backpack,
+        get_inventory, get_profile, add_xp, use_xp, use_bitcoin,
         remove_inventory_item, load_sectors, save_user, calculate_level,
         check_level_up, add_unclaimed_item, get_unclaimed_items,
         claim_item, remove_unclaimed_item, award_powerful_locked_item,
@@ -267,7 +254,6 @@ class GameEngine:
         self.crates_dropping  = 0
         self.crate_claimers   = []
         self.crate_msg_id     = None
-        self.is_fake_crate    = False  # Track if current crate is fake (steals resources)
 
 active_games: dict[int, GameEngine] = {}
 
@@ -283,19 +269,61 @@ def get_engine(chat_id: int) -> GameEngine:
 
 # Load dictionary from local file for fast validation (no Supabase calls)
 DICTIONARY = set()
+DICTIONARY_LOADED = False
 
 def load_dictionary():
     """Load all valid words into memory for O(1) lookups."""
-    global DICTIONARY
+    global DICTIONARY, DICTIONARY_LOADED
     try:
-        with open('SupaDB1.txt', 'r', encoding='utf-8') as f:
-            # Skip header line
-            lines = f.readlines()[1:]
-            DICTIONARY = {word.strip().lower() for word in lines if word.strip()}
-        print(f"[OK] Dictionary loaded: {len(DICTIONARY)} words from SupaDB1.txt")
+        # Try primary dict file
+        dict_files = ['SupaDB1.txt', 'dictionary.txt', 'words.txt']
+        
+        loaded = False
+        for dict_file in dict_files:
+            full_path = os.path.abspath(dict_file)
+            print(f"[DICT] Checking: {full_path}")
+            if not os.path.exists(dict_file):
+                print(f"[DICT] File not found: {dict_file}")
+                continue
+            
+            print(f"[DICT] Found {dict_file}, loading...")
+            with open(dict_file, 'r', encoding='utf-8') as f:
+                # Skip header line if present
+                lines = f.readlines()
+                print(f"[DICT] Read {len(lines)} total lines")
+                if lines and (lines[0].strip().lower() in ['word', 'word_id', 'id']):
+                    print(f"[DICT] Skipping header: '{lines[0].strip()}'")
+                    lines = lines[1:]
+                
+                # Sample first 5 words for verification
+                if len(lines) > 0:
+                    print(f"[DICT] Sample words: {[w.strip() for w in lines[:5]]}")
+                
+                DICTIONARY = {word.strip().lower() for word in lines if word.strip()}
+            
+            if DICTIONARY:
+                print(f"✅ [OK] Dictionary loaded: {len(DICTIONARY)} words from {dict_file}")
+                print(f"[DICT] Sample check: 'aah' in DICTIONARY = {'aah' in DICTIONARY}")
+                print(f"[DICT] Sample check: 'players' in DICTIONARY = {'players' in DICTIONARY}")
+                loaded = True
+                break
+        
+        if not loaded:
+            print(f"❌ [ERROR] No dictionary file found. Word validation will FAIL!")
+            print(f"[ERROR] Checked: {', '.join(dict_files)}")
+            print(f"[ERROR] Current working directory: {os.getcwd()}")
+            DICTIONARY = set()
+        
+        DICTIONARY_LOADED = True
+        return DICTIONARY_LOADED
+    
     except Exception as e:
-        print(f"[ERROR] Failed to load dictionary: {e}")
+        print(f"❌ [ERROR] Failed to load dictionary: {e}")
+        import traceback
+        traceback.print_exc()
         DICTIONARY = set()
+        DICTIONARY_LOADED = False
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -317,7 +345,26 @@ async def fetch_words() -> tuple[str, str]:
 
 def word_in_dict(word: str) -> bool:
     """Check if word exists in local dictionary (fast, no network calls)."""
-    return word.lower() in DICTIONARY
+    if not word:
+        return False
+    
+    word_lower = word.lower().strip()
+    
+    # Primary check
+    if word_lower in DICTIONARY:
+        return True
+    
+    # If dictionary is empty, try to reload it
+    if len(DICTIONARY) == 0 and not DICTIONARY_LOADED:
+        print(f"[WARN] DICTIONARY is empty, attempting to reload...")
+        load_dictionary()
+        return word_lower in DICTIONARY
+    
+    # Debug output for first few failures
+    if len(DICTIONARY) == 0:
+        print(f"[ERROR] DICTIONARY is EMPTY! word_in_dict('{word_lower}') returning False")
+    
+    return False
 
 def can_spell(word: str, pool: str) -> bool:
     avail = list(pool)
@@ -325,6 +372,13 @@ def can_spell(word: str, pool: str) -> bool:
         if ch in avail: avail.remove(ch)
         else: return False
     return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  INITIALIZE DICTIONARY ON MODULE LOAD
+# ═══════════════════════════════════════════════════════════════════════════
+print("[INIT] Loading dictionary at module startup...")
+load_dictionary()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -377,16 +431,19 @@ async def game_loop(chat_id: int):
                         break
                     if eng.crates_dropping > 0 and elapsed == 50 and not crate_dropped:
                         crate_dropped = True
-                        # Randomly decide if this is a fake crate (30% chance)
-                        eng.is_fake_crate = random.random() < 0.3
-                        crate_msg = "⚡ *CRATE DROP!*   🐵" if eng.is_fake_crate else "⚡ *CRATE DROP!*"
+                        # 10% chance for monkey trap decoy
+                        is_monkey_trap = random.random() < 0.50
+                        crate_message = "⚡ *CRATE DROP!  🐵*" if is_monkey_trap else "⚡ *CRATE DROP!*"
                         m = await bot.send_message(
                             chat_id,
-                            crate_msg,
+                            crate_message,
                             parse_mode="Markdown"
                         )
                         eng.crate_msg_id   = m.message_id
                         eng.crate_claimers = []
+                        # Store trap flag for later handling
+                        if not hasattr(eng, 'current_crate_is_trap'):
+                            eng.current_crate_is_trap = is_monkey_trap
                     if eng.crates_dropping == 0 and elapsed == 60:
                         await bot.send_message(
                             chat_id,
@@ -408,26 +465,9 @@ async def game_loop(chat_id: int):
                     # Crate bonus notification
                     if eng.crates_dropping > 0 and eng.crate_claimers:
                         try:
-                            if eng.is_fake_crate:
-                                # Fake crate steals from players
-                                for cl in eng.crate_claimers:
-                                    user = get_user(str(cl['user_id']))
-                                    if user:
-                                        # Steal 100 silver
-                                        user['silver'] = max(0, user.get('silver', 0) - 100)
-                                        # Steal 100 points from their score
-                                        if str(cl['user_id']) in eng.scores:
-                                            eng.scores[str(cl['user_id'])]['pts'] = max(0, eng.scores[str(cl['user_id'])]['pts'] - 100)
-                                        # Clean up before saving
-                                        user.pop('xp_in_level', None)
-                                        user.pop('building_cooldowns', None)
-                                        save_user(str(cl['user_id']), user)
-                                result += f"🐵 *FAKE CRATE! {len(eng.crate_claimers)} PLAYERS LOST 100 SILVER + 100 POINTS!*\n\n"
-                            else:
-                                # Real crate gives rewards
-                                for cl in eng.crate_claimers:
-                                    add_unclaimed_item(str(cl['user_id']), "super_crate", 1)
-                                result += f"🎁 *{len(eng.crate_claimers)} LUCKY PLAYERS CLAIMED MID-ROUND CRATES!*\n\n"
+                            for cl in eng.crate_claimers:
+                                add_unclaimed_item(str(cl['user_id']), "super_crate", 1)
+                            result += f"🎁 *{len(eng.crate_claimers)} LUCKY PLAYERS CLAIMED MID-ROUND CRATES!*\n\n"
                         except Exception as e:
                             print(f"[ERROR] Crate handling: {e}")
                     
@@ -461,7 +501,7 @@ async def game_loop(chat_id: int):
                                     f"✨ *Bonus items awaiting.*\""
                                 )
                                 add_unclaimed_item(uid, "super_crate", 1)
-                                k = "xp_multiplier" if random.random() < 0.5 else "silver_multiplier"
+                                k = "xp_multiplier" if random.random() < 0.5 else "bitcoin_multiplier"
                                 add_unclaimed_item(uid, k, 1, xp_reward=0, multiplier_value=2)
                                 if lvl % 5 == 0:
                                     iname, idesc = award_powerful_locked_item(uid)
@@ -531,7 +571,6 @@ def _help_text() -> str:
         "`!tutorial` — Complete game walkthrough (DM only)\n"
         "`!fusion` — Start a word game round (group only)\n"
         "`!help` — This message\n\n"
-        
         "*PLAYER COMMANDS* _(DM only)_\n"
         "`!profile` — Your stats, base, resources, shield status\n"
         "`!base` — Full base details, military, traps\n"
@@ -541,54 +580,19 @@ def _help_text() -> str:
         "`!changename [Name]` — Change your username\n"
         "`!setup_base [Name]` — Create your first base\n"
         "`!changebasename [Name]` — Rename your base (1-time)\n"
+        "`!lab` — Research lab: upgrade your army\n"
         "`!activateshield` — Activate shield (24h cooldown)\n"
         "`!deactivateshield` — Deactivate shield\n"
         "`!disruptor @user` — Break enemy shield for 1 attack\n\n"
-        
-        "*⚔️ MILITARY & TRAINING*\n"
-        "`!train` — Train military units for your army\n"
-        "  Available units: Pawns, Footmen, Archers, Lancers, Castellans\n"
-        "  Cost: Wood, Bronze, Iron, Silver\n"
-        "  Example: Train 10 footmen to strengthen your forces\n\n"
-        
-        "*🏗️ BUILDING & STRUCTURES*\n"
-        "`!build` — Manage your base structures\n"
-        "  Available buildings: Training Grounds, Science Lab, Barracks, Treasury, Trap Workshop, Farm\n"
-        "  Each building: Unlocks new capabilities, increases resource capacity\n"
-        "  Level up buildings to unlock special bonuses\n"
-        "  Example: Build a Science Lab to research new technologies\n\n"
-        
-        "*🔬 SCIENCE & RESEARCH*\n"
-        "`!research` or `/science` — Access Science Laboratory\n"
-        "  Research technologies to unlock:\n"
-        "    📦 New items (potions, artifacts, upgrades)\n"
-        "    ⚔️ New weapons (special attack types)\n"
-        "    ✨ New abilities (passive & active powers)\n"
-        "    🏗️ Base sections (new buildings, expansions)\n"
-        "  Tiers: Basic (Lvl 1+) → Advanced (Lvl 3+) → Elite (Lvl 5+)\n"
-        "  Research takes time - check back when ready!\n\n"
-        
-        "*🔫 WEAPON SYSTEM*\n"
-        "`!weapon_help` — View all available weapons\n"
-        "  *Group Chat Usage:* Type emoji + victim name to attack\n"
-        "  Example: `🔫 Alice_Smith` attacks Alice with machine gun\n"
-        "  *Offensive Weapons:* Deal damage, steal resources, disable abilities\n"
-        "  *Defensive Weapons:* Shield, reflect damage, counter-attack\n"
-        "  Each weapon costs silver and has limited charges\n"
-        "  Unlock new weapons through science research\n"
-        "  Recharge weapons with silver in your inventory\n\n"
-        
-        "*🌌 IMMERSIVE EXPERIENCE* _(DM only)_\n"
-        "`!obelisk` — Enter the Obelisk: gateway to consciousness\n"
-        "`!sectors` — Explore all 9 sectors and their consciousness\n\n"
-        
         "*GAME COMMANDS* _(group)_\n"
         "`!fusion` — Start new game round\n"
         "`!words` — Show current word pair\n"
         "`!forcerestart` — End the round\n"
         "`!weekly` — Weekly leaderboard\n"
         "`!alltime` — All-time leaderboard\n\n"
-        
+        "*🌌 IMMERSIVE EXPERIENCE* _(DM only)_\n"
+        "`!obelisk` — Enter the Obelisk: gateway to consciousness\n"
+        "`!sectors` — Explore all 9 sectors and their consciousness\n\n"
         "*INVITE FRIENDS*\n"
         "Enjoy the game? Invite others! https://t.me/checkmateHQ"
     )
@@ -735,72 +739,6 @@ async def cmd_alltime(message: types.Message):
     await message.answer(text, parse_mode="Markdown")
 
 
-@dp.message(_cmd("mystats"))
-async def cmd_mystats(message: types.Message):
-    """Display personalized stats card for the current round/session."""
-    user_id = str(message.from_user.id)
-    user = get_user(user_id)
-    
-    if not user:
-        await message.answer(_unreg(), parse_mode="Markdown")
-        return
-    
-    # Get user's permanent prestige/level info
-    prestige = user.get("prestige", 0)
-    level = user.get("level", 1)
-    username = user.get("username", "Unknown")
-    
-    # Round-based stats
-    weekly_points = user.get("points", 0) or user.get("weekly_points", 0)
-    silver_earned = user.get("silver", 0)
-    war_points = user.get("war_points", 0)
-    total_words = user.get("total_words", 0)
-    xp = user.get("xp", 0)
-    
-    # Get prestige tier info
-    from prestige_system import get_prestige_tier
-    prestige_tier = get_prestige_tier(prestige)
-    
-    # Build aesthetic card
-    card = f"""<b>╔═════════════════════════════╗
-║  ⚔️ YOUR STATS CARD ⚔️     ║
-╚═════════════════════════════╝</b>
-
-👤  <b>{username}</b>
-
-<b>🎖️  RANK & PRESTIGE</b>
-   Level: <b>{level}</b>
-   {prestige_tier['name']}
-   
-<b>💎  RESOURCE STATS</b>
-   Silver: <b>{silver_earned:,}</b>
-   War Points: <b>{war_points:,}</b>
-   Weekly Points: <b>{weekly_points:,}</b>
-   
-<b>📊  PROGRESSION</b>
-   Total XP: <b>{xp:,}</b>
-   Words Used: <b>{total_words:,}</b>
-   
-<b>🎯  MULTIPLIERS (Prestige {prestige})</b>
-   XP: ×{prestige_tier['xp_multiplier']}
-   Silver: ×{prestige_tier['silver_multiplier']}
-   Resources: ×{prestige_tier['resource_multiplier']}
-   Training: ×{prestige_tier['troop_training_speed']}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
-    
-    if level >= 1000:
-        card += f"\n✨ <b>READY TO PRESTIGE!</b>\n"
-        card += f"Use `/prestige` to ascend to the next tier.\n"
-    else:
-        progress = int((level / 1000) * 100)
-        card += f"\n◈ Level {level}/1000 ({progress}%)\n"
-    
-    card += "═══════════════════════════════"
-    
-    await message.answer(card, parse_mode="HTML")
-
-
 @dp.message(_cmd("help"))
 async def cmd_help(message: types.Message):
     await message.answer(_help_text(), parse_mode="Markdown")
@@ -818,7 +756,7 @@ async def cmd_obelisk(message: types.Message):
             await message.answer(OBELISK_GATEWAY)
             await asyncio.sleep(1)
         
-        msg = "🌌 Welcome to the Obelisk\n\nYou stand before a gateway to 9 cosmic sectors.\n\nType !sectors to view them.\nType !teleport [1-9] to enter."
+        msg = "🌌 Welcome to the Obelisk\n\nYou stand before a gateway to cosmic sectors.\n\nType !sectors to view them.\nType !teleport [1-9] to enter."
         await message.answer(msg, parse_mode="Markdown")
         
     except Exception as e:
@@ -827,47 +765,47 @@ async def cmd_obelisk(message: types.Message):
 
 @dp.message(_cmd("sectors"))
 async def cmd_sectors(message: types.Message):
-    """Explore all 9 sectors and their consciousness."""
+    """Explore all sectors and their consciousness."""
     if message.chat.type != "private":
         await message.answer("🗺️ *Sectors guide must be studied alone...* DM me `!sectors`", parse_mode="Markdown")
         return
     
     try:
         msg = """
-🗺️ <b>THE 9 SECTORS OF CONSCIOUSNESS</b> 🗺️
+🗺️ **THE SECTORS OF CONSCIOUSNESS** 🗺️
 
 From the raw deserts to the cosmic void, each sector has its own SOUL:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 """
-        await message.answer(msg, parse_mode="HTML")
+        await message.answer(msg, parse_mode="Markdown")
         
         # Show each sector's details
         for sector_num in range(1, 10):
             sector = SECTOR_CONSCIOUSNESS[sector_num]
             sector_msg = f"""
-<b>{sector['name']}</b>
+**{sector['name']}**
 
-🧠 <i>Consciousness:</i> {sector['consciousness']}
+🧠 *Consciousness:* {sector['consciousness']}
 
-💫 <i>What you feel:</i> {sector['feeling']}
+💫 *What you feel:* {sector['feeling']}
 
 {sector['color']}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
-            await message.answer(sector_msg, parse_mode="HTML")
+            await message.answer(sector_msg, parse_mode="Markdown")
             await asyncio.sleep(0.3)  # Brief pause between sectors
         
         final_msg = """
 Each sector tests DIFFERENT aspects of your consciousness.
 
-Will you master all 9 realms?
+Will you master all realms?
 
 The Obelisk awaits your decision. 🌌
 """
-        await message.answer(final_msg, parse_mode="HTML")
+        await message.answer(final_msg, parse_mode="Markdown")
         
     except Exception as e:
         await message.answer(f"❌ Sectors error: {e}", parse_mode="Markdown")
@@ -887,7 +825,7 @@ async def cmd_tutorial(message: types.Message):
 
 🎮 *How to Play the Word Game*
 1️⃣ `!fusion` starts a round in the group
-2️⃣ Two random 7-letter words appear (e.g., PLAYING + FOREIGN)
+2️⃣ Two random words appear (e.g., PLAYING + FOREIGN)
 3️⃣ Type ANY valid English word using ONLY those letters
 4️⃣ Points = word length − 2 (4-letter word = 2 pts)
 5️⃣ Highest scorers get bonus crates! (Top 3 = prizes)
@@ -913,7 +851,6 @@ async def cmd_tutorial(message: types.Message):
 
 👤 *Change Your Name*
 Command: `!changename [NewName]`
-• One-time change only (then you're stuck with it)
 • GameMaster loves mockery: "Running from your past? Noted."
 • Shows in leaderboards and scores
 
@@ -923,7 +860,7 @@ Shows:
 • Your level & XP progress
 • Resources: wood, bronze, iron, diamond, relics
 • Food reserves
-• Silver balance (premium currency)
+• Bitcoin balance (premium currency)
 • Shield status
 • Sector location
 
@@ -1158,7 +1095,7 @@ Good luck, warrior. The GameMaster is watching. 👀
 
 @dp.message(_cmd("shop"))
 async def cmd_shop(message: types.Message):
-    """Buy resources with silver from the vault."""
+    """Buy resources with bitcoin from the vault."""
     if message.chat.type != "private":
         await message.answer(_dm_only("!shop"), parse_mode="Markdown")
         return
@@ -1174,7 +1111,7 @@ async def cmd_shop(message: types.Message):
         parts = message.text.split()
         if len(parts) < 2:
             # Show menu if no args
-            menu = format_shop_menu(user.get("silver", 0))
+            menu = format_shop_menu(user.get("bitcoin", 0))
             await message.answer(menu, parse_mode="Markdown")
             return
         
@@ -1197,40 +1134,31 @@ async def cmd_shop(message: types.Message):
         # Calculate cost
         resource_data = SHOP_CATALOG[resource]
         total_cost = int(quantity * resource_data["price_per_unit"])
-        player_silver = user.get("silver", 0)
+        player_bitcoin = user.get("bitcoin", 0)
         
-        if total_cost > player_silver:
-            deficit = total_cost - player_silver
+        if total_cost > player_bitcoin:
+            deficit = total_cost - player_bitcoin
             await message.answer(
-                f"❌ Insufficient silver!\n\n"
-                f"Cost: {total_cost:,} silver\n"
-                f"You have: {player_silver:,} silver\n"
-                f"Needed: {deficit:,} more silver",
+                f"❌ Insufficient bitcoin!\n\n"
+                f"Cost: {total_cost:,} bitcoin\n"
+                f"You have: {player_bitcoin:,} bitcoin\n"
+                f"Needed: {deficit:,} more bitcoin",
                 parse_mode="Markdown"
             )
             return
         
-        # Deduct silver and add resource to base_resources
-        user["silver"] = player_silver - total_cost
-        
-        # Store in base_resources correctly
-        if "base_resources" not in user:
-            user["base_resources"] = {"resources": {}}
-        if "resources" not in user["base_resources"]:
-            user["base_resources"]["resources"] = {}
-        
-        resources_dict = user["base_resources"]["resources"]
-        resources_dict[resource] = resources_dict.get(resource, 0) + quantity
-        
+        # Deduct bitcoin and add resource
+        user["bitcoin"] = player_bitcoin - total_cost
+        user[resource] = user.get(resource, 0) + quantity
         save_user(str(user_id), user)
         
         msg = f"""
 ✅ **PURCHASE COMPLETE**
 
 {resource_data['name']} × {quantity:,}
-Cost: {total_cost:,} silver
+Cost: {total_cost:,} bitcoin
 
-Your Balance: {user['silver']:,} silver
+Your Balance: {user['bitcoin']:,} bitcoin
 
 🏬 *More power flows your way.*
 *Will you use it wisely?*
@@ -1256,7 +1184,7 @@ async def cmd_weapons(message: types.Message):
             return
         
         level = user.get("level", 1)
-        silver = user.get("silver", 0)
+        bitcoin = user.get("bitcoin", 0)
         
         # Get available weapons
         available = get_available_weapons(level)
@@ -1266,14 +1194,14 @@ async def cmd_weapons(message: types.Message):
             return
         
         # Build message
-        txt = f"🔫 <b>WEAPONS SHOP</b> (Lv{level})\n\n"
-        txt += f"Your silver: <b>{silver:,}</b>\n\n"
+        txt = f"🔫 **WEAPONS SHOP** (Lv{level})\n\n"
+        txt += f"Your bitcoin: **{bitcoin:,}**\n\n"
         
         # Build keyboard with weapon buttons
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(
-                    text=f"{'✅' if silver >= WEAPONS[wid]['cost'].get('silver', 0) else '❌'} {WEAPONS[wid]['name']} ({WEAPONS[wid]['cost'].get('silver', 0)} 💰)",
+                    text=f"{'✅' if bitcoin >= WEAPONS[wid]['cost'].get('bitcoin', 0) else '❌'} {WEAPONS[wid]['name']} ({WEAPONS[wid]['cost'].get('bitcoin', 0)} 💰)",
                     callback_data=f"weapon_{wid}"
                 )] for wid in sorted(available)
             ]
@@ -1284,7 +1212,7 @@ async def cmd_weapons(message: types.Message):
             InlineKeyboardButton(text="📦 Your Inventory", callback_data="show_weapons_inv")
         ])
         
-        await message.answer(txt, reply_markup=keyboard, parse_mode="HTML")
+        await message.answer(txt, reply_markup=keyboard, parse_mode="Markdown")
         
     except Exception as e:
         await message.answer(f"❌ Error: {e}", parse_mode="Markdown")
@@ -1308,16 +1236,16 @@ async def on_weapon_purchase(callback: types.CallbackQuery):
             return
         
         # Check if can buy
-        can_buy, error = can_buy_weapon(weapon_id, user.get("level", 1), user.get("silver", 0))
+        can_buy, error = can_buy_weapon(weapon_id, user.get("level", 1), user.get("bitcoin", 0))
         if not can_buy:
             await callback.answer(f"❌ {error}", show_alert=True)
             return
         
         # Process purchase
         weapon = WEAPONS[weapon_id]
-        cost = weapon["cost"].get("silver", 0)
+        cost = weapon["cost"].get("bitcoin", 0)
         
-        user["silver"] -= cost
+        user["bitcoin"] -= cost
         if "weapons" not in user:
             user["weapons"] = {}
         
@@ -1325,9 +1253,9 @@ async def on_weapon_purchase(callback: types.CallbackQuery):
         save_user(u_id, user)
         
         # Notify user
-        msg = f"✅ <b>PURCHASED!</b>\n\n{weapon['name']}\n\nCharges: {weapon['charges']} | Rarity: {weapon['rarity'].upper()}\n\nYour silver: {user['silver']:,}"
+        msg = f"✅ **PURCHASED!**\n\n{weapon['name']}\n\nCharges: {weapon['charges']} | Rarity: {weapon['rarity'].upper()}\n\nYour bitcoin: {user['bitcoin']:,}"
         await callback.answer(msg, show_alert=True)
-        await callback.message.edit_text(msg + "\n\nType /weapons for more", parse_mode="HTML")
+        await callback.message.edit_text(msg + "\n\nType `/weapons` for more", parse_mode="Markdown")
         
     except Exception as e:
         await callback.answer(f"❌ Error: {e}", show_alert=True)
@@ -1375,9 +1303,9 @@ async def on_show_weapons_inventory(callback: types.CallbackQuery):
 
 @dp.message(_cmd("use_weapon"))
 async def cmd_use_weapon(message: types.Message):
-    """Show instructions for using weapons in group chat."""
+    """Launch weapon with inline keyboard target selection."""
     if message.chat.type != "private":
-        await message.answer("🎯 Use `/use_weapon` in private only", parse_mode="Markdown")
+        await message.answer("🎯 Use weapons in private only", parse_mode="Markdown")
         return
     
     try:
@@ -1389,12 +1317,13 @@ async def cmd_use_weapon(message: types.Message):
         
         weapons = user.get('weapons', {})
         if not weapons:
-            await message.answer("❌ You have no weapons to use. Buy from /weapons", parse_mode="Markdown")
+            await message.answer("❌ You have no weapons to use. Buy from `/weapons`", parse_mode="Markdown")
             return
         
-        # Show TEXT instruction instead of buttons
-        txt = "<b>🔫 HOW TO USE WEAPONS IN GROUP</b>\n\n"
-        txt += "Your available weapons:\n\n"
+        # Show weapons with charges
+        txt = "🎯 **SELECT WEAPON TO LAUNCH**\n\n"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[])
         
         for weapon_id, weapon_data in weapons.items():
             if weapon_id not in WEAPONS:
@@ -1409,19 +1338,20 @@ async def cmd_use_weapon(message: types.Message):
             if charges <= 0:
                 continue
             
-            emoji = weapon['name'][0]  # Get emoji
-            txt += f"{emoji} <b>{weapon['name']}</b> ({charges} charges)\n"
+            txt += f"✅ {weapon['name']} ({charges} charges)\n"
+            
+            keyboard.inline_keyboard.append([
+                InlineKeyboardButton(
+                    text=f"🎯 {weapon['name'].split()[-1]} ({charges})",
+                    callback_data=f"use_weapon_{weapon_id}"
+                )
+            ])
         
-        txt += "\n<b>📌 TO USE WEAPONS IN GROUP CHAT:</b>\n\n"
-        txt += "1. Go to the group chat\n"
-        txt += "2. Type: <code>emoji username</code>\n\n"
-        txt += "<b>Examples:</b>\n"
-        txt += "🔫 Alice_Smith\n"
-        txt += "⚡ Bob_Johnson\n"
-        txt += "💥 Carol_Williams\n\n"
-        txt += "<i>Replace emoji with your weapon emoji and username with exact player name</i>"
+        if not keyboard.inline_keyboard:
+            await message.answer("❌ All your weapons are out of charges!", parse_mode="Markdown")
+            return
         
-        await message.answer(txt, parse_mode="HTML")
+        await message.answer(txt, reply_markup=keyboard, parse_mode="Markdown")
         
     except Exception as e:
         await message.answer(f"❌ Error: {e}", parse_mode="Markdown")
@@ -1451,7 +1381,7 @@ async def on_select_target(callback: types.CallbackQuery):
             return
         
         weapon = WEAPONS[weapon_id]
-        txt = f"🔫 <b>{weapon['name']}</b>\n\n"
+        txt = f"🔫 **{weapon['name']}**\n\n"
         txt += f"Select target to attack:\n\n"
         
         keyboard = InlineKeyboardMarkup(inline_keyboard=[])
@@ -1465,7 +1395,7 @@ async def on_select_target(callback: types.CallbackQuery):
             ])
         
         await callback.answer()
-        await callback.message.edit_text(txt, reply_markup=keyboard, parse_mode="HTML")
+        await callback.message.edit_text(txt, reply_markup=keyboard, parse_mode="Markdown")
         
     except Exception as e:
         await callback.answer(f"❌ Error: {e}", show_alert=True)
@@ -1503,7 +1433,7 @@ async def on_confirm_attack(callback: types.CallbackQuery):
             return
         
         # Execute weapon effect
-        result_msg = f"💥 <b>WEAPON ACTIVATED!</b>\n\n"
+        result_msg = f"💥 **WEAPON ACTIVATED!**\n\n"
         result_msg += f"Attacker: {attacker['username']} (Lv{attacker['level']})\n"
         result_msg += f"Weapon: {weapon['name']}\n"
         result_msg += f"Target: {target['username']} (Lv{target['level']})\n\n"
@@ -1512,13 +1442,13 @@ async def on_confirm_attack(callback: types.CallbackQuery):
         effect = weapon.get('effect', '')
         
         if 'damage' in effect:
-            damage = weapon.get('damage_silver', 100)
-            target['silver'] = max(0, target.get('silver', 0) - damage)
-            result_msg += f"💰 Target loses {damage} silver!\n"
+            damage = weapon.get('damage_bitcoin', 100)
+            target['bitcoin'] = max(0, target.get('bitcoin', 0) - damage)
+            result_msg += f"💰 Target loses {damage} bitcoin!\n"
         
         if 'drain' in effect or 'steal' in effect:
             steal_amt = weapon.get('steal_amount', 100)
-            resource = weapon.get('resource_type', 'silver')
+            resource = weapon.get('resource_type', 'bitcoin')
             base_res = target.get('base_resources', {}).get('resources', {})
             stolen = min(steal_amt, base_res.get(resource, 0))
             base_res[resource] = base_res.get(resource, 0) - stolen
@@ -1528,9 +1458,9 @@ async def on_confirm_attack(callback: types.CallbackQuery):
             result_msg += f"🌪️ Target loses {stolen} {resource}!\n"
         
         if 'turret' in weapon['name'].lower() or 'cannon' in weapon['name'].lower():
-            result_msg += f"\n⚡ <b>BLAST!</b> The target's defenses shatter!\n"
+            result_msg += f"\n⚡ **BLAST!** The target's defenses shatter!\n"
         elif 'gun' in weapon['name'].lower():
-            result_msg += f"\n🔫 <b>BANG BANG!</b> Shots fired!\n"
+            result_msg += f"\n🔫 **BANG BANG!** Shots fired!\n"
         
         # Deduct charge
         if weapon_id in attacker.get('weapons', {}):
@@ -1547,18 +1477,18 @@ async def on_confirm_attack(callback: types.CallbackQuery):
         result_msg += f"\n📊 Charges remaining: {charges - 1}"
         
         # Also notify target
-        target_notification = f"⚠️ <b>UNDER ATTACK!</b>\n\n"
+        target_notification = f"⚠️ **UNDER ATTACK!**\n\n"
         target_notification += f"Attacker: {attacker['username']} (Lv{attacker['level']})\n"
         target_notification += f"Weapon: {weapon['name']}\n"
         target_notification += f"Effect: {weapon.get('description', 'Unknown')}"
         
         try:
-            await bot.send_message(int(target_id), target_notification, parse_mode="HTML")
+            await bot.send_message(int(target_id), target_notification, parse_mode="Markdown")
         except:
             pass  # Target may not have DM enabled
         
         await callback.answer(result_msg, show_alert=True)
-        await callback.message.edit_text(result_msg, parse_mode="HTML")
+        await callback.message.edit_text(result_msg, parse_mode="Markdown")
         
     except Exception as e:
         await callback.answer(f"❌ Error: {e}", show_alert=True)
@@ -1567,56 +1497,6 @@ async def on_confirm_attack(callback: types.CallbackQuery):
 @dp.message(_cmd("upgrade"))
 async def cmd_upgrade(message: types.Message):
     await message.answer("🃏 *GameMaster:* \"*Queen's Satchel!* Nice try. Not ready yet.\n\nWhen it arrives: unlocks 20 inventory slots for 900 Naira.\n\nUntil then? Manage your pathetic 5 slots like an adult. Stop asking.\"", parse_mode="Markdown")
-
-
-@dp.message(_cmd("weapon_help"))
-async def cmd_weapon_help(message: types.Message):
-    """Show how to use weapons in group chat (emoji-based system)."""
-    txt = "🎯 <b>WEAPON SYSTEM - GROUP CHAT ACTIVATION</b>\n\n"
-    txt += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    txt += "<b>📍 HOW TO USE WEAPONS:</b>\n\n"
-    txt += "In the group chat, type the emoji followed by victim's username:\n"
-    txt += "<code>emoji username</code>\n\n"
-    txt += "<b>Examples:</b>\n"
-    txt += "🔫 Alice_Smith\n"
-    txt += "⚡ Bob_Johnson\n"
-    txt += "💥 Carol_Williams\n\n"
-    txt += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    txt += "<b>YOUR AVAILABLE WEAPONS:</b>\n\n"
-    
-    u_id = str(message.from_user.id)
-    user = get_user(u_id)
-    
-    if not user or not user.get('weapons'):
-        txt += "<i>You have no weapons yet!</i>\n"
-        txt += "Buy weapons with /weapons\n\n"
-    else:
-        for weapon_id, weapon_data in user.get('weapons', {}).items():
-            if weapon_id not in WEAPONS:
-                continue
-            weapon = WEAPONS[weapon_id]
-            name = weapon.get('name', 'Unknown')
-            if isinstance(weapon_data, dict):
-                charges = weapon_data.get('charges_remaining', 0)
-            else:
-                charges = weapon_data
-            emoji = name[0] if name else '❓'
-            txt += f"{name} ({charges} charges)\n"
-    
-    txt += "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-    txt += "<b>REQUIREMENTS:</b>\n"
-    txt += "• Must own the weapon\n"
-    txt += "• Must have charges remaining\n"
-    txt += "• Can only target players in the group\n"
-    txt += "• Target must use exact username\n\n"
-    txt += "<b>EFFECTS:</b>\n"
-    txt += "• Damage to silver/resources\n"
-    txt += "• XP stealing\n"
-    txt += "• Notifications to target\n"
-    txt += "• Group announcement\n\n"
-    txt += "⚔️ <i>Unleash chaos!</i>"
-    
-    await message.answer(txt, parse_mode="HTML")
 
 
 @dp.message(_cmd("challenges"))
@@ -1645,7 +1525,7 @@ async def cmd_challenges(message: types.Message):
     
     msg += (
         f"{divider()}\n"
-        f"💎 *TOTAL POTENTIAL REWARD:* {total_reward} Silver\n"
+        f"💎 *TOTAL POTENTIAL REWARD:* {total_reward} Bitcoin\n"
         f"\n🃏 *GameMaster:* \"Complete these challenges and watch yourself feel *accomplished*. "
         f"That's what you're really chasing—not the rewards. Admit it.\"\n"
         f"{divider()}"
@@ -1661,7 +1541,7 @@ async def cmd_profile(message: types.Message):
     u_id = str(message.from_user.id)
     profile = get_profile(u_id)
     if not profile:
-        await message.answer("🃏 *GameMaster:* \"No profile? Join the group first! Send a message in *The 64* and you'll be registered.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"No profile? You haven't even *started* the tutorial? What are you doing here, fool? DM me, run `!start`, and actually play the game.\"", parse_mode="Markdown"); return
     
     xp_pct = (profile['xp_progress'] / profile['xp_needed'] * 100) if profile['xp_needed'] > 0 else 0
     xp_bar = progress_bar(profile['xp_progress'], profile['xp_needed'], width=15)
@@ -1714,16 +1594,11 @@ async def cmd_profile(message: types.Message):
         f"{divider()}\n\n"
         f"👤 *{profile['username']}* — *LEVEL {profile['level']}*\n\n"
         f"⭐ XP Progress:\n{xp_bar}\n"
-        f"💰 Silver: *{profile['silver']}*\n"
+        f"💰 Bitcoin: *{profile['bitcoin']}*\n"
         f"📍 Current Sector: _{profile.get('sector_display','Not Assigned')}_\n"
         f"🏰 Base Sector: _{get_sector_display(base_sector)}_\n"
         f"🛡️ Shield: {shield_status_str}\n\n"
         f"{divider()}\n\n"
-        f"📊 *PRESTIGE TIER*\n"
-        f"├─ Tier: *{PRESTIGE_BONUSES[user.get('prestige', 0)]['name']}*\n"
-        f"├─ XP Multiplier: {PRESTIGE_BONUSES[user.get('prestige', 0)]['xp_multiplier']}x\n"
-        f"├─ Silver Multiplier: {PRESTIGE_BONUSES[user.get('prestige', 0)]['silver_multiplier']}x\n"
-        f"└─ Resource Multiplier: {PRESTIGE_BONUSES[user.get('prestige', 0)]['resource_multiplier']}x\n\n"
         f"📊 *BATTLE RECORDS*\n"
         f"├─ This Week: *{profile['weekly_points']}* pts\n"
         f"└─ All-Time: *{profile['all_time_points']}* pts\n\n"
@@ -1753,7 +1628,7 @@ async def cmd_prestige(message: types.Message):
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("🃏 *GameMaster:* \"Join the group first! Send a message in *The 64* and you'll be registered automatically.\"", parse_mode="Markdown")
+        await message.answer("Register first with `/start`", parse_mode="Markdown")
         return
     
     level = user.get("level", 1)
@@ -1770,10 +1645,6 @@ async def cmd_prestige(message: types.Message):
         await message.answer(f"❌ {result['message']}", parse_mode="Markdown")
         return
     
-    # Clean up fields before saving
-    user.pop('xp_in_level', None)
-    user.pop('building_cooldowns', None)
-    
     # Save updated user
     save_user(u_id, user)
     
@@ -1781,7 +1652,7 @@ async def cmd_prestige(message: types.Message):
     confirmation = format_prestige_confirmation(
         result["new_prestige"],
         result["bonus_xp"],
-        result["bonus_silver"]
+        result["bonus_bitcoin"]
     )
     
     await message.answer(confirmation, parse_mode="Markdown")
@@ -1804,150 +1675,6 @@ async def callback_prestige_info(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  SAVE/LOAD/RESET COMMANDS
-# ═══════════════════════════════════════════════════════════════════════════
-
-@dp.message(_cmd("save"))
-async def cmd_save(message: types.Message):
-    """Save current game state."""
-    try:
-        if message.chat.type != "private":
-            await message.answer(_dm_only("!save"), parse_mode="Markdown"); return
-        
-        u_id = str(message.from_user.id)
-        user = get_user(u_id)
-        if not user:
-            await message.answer("🃏 *GameMaster:* Join the group first!", parse_mode="Markdown"); return
-        
-        # Parse slot number
-        args = message.text.strip().split()
-        slot = 1  # Default slot
-        if len(args) > 1:
-            try:
-                slot = int(args[1])
-                if not 1 <= slot <= 5:
-                    await message.answer("❌ Invalid slot! Use 1-5.", parse_mode="Markdown")
-                    return
-            except ValueError:
-                await message.answer("❌ Usage: `/save [slot]` (1-5)", parse_mode="Markdown")
-                return
-        
-        # Save game
-        success, msg = save_game(user, slot)
-        if success:
-            save_user(u_id, user)
-            print(f"[SAVE] User {u_id} saved to slot {slot}")
-        
-        await message.answer(msg, parse_mode="Markdown")
-    except Exception as e:
-        print(f"[ERROR] cmd_save: {e}")
-        import traceback; traceback.print_exc()
-        await message.answer("❌ Error saving game. Try again.", parse_mode="Markdown")
-
-
-@dp.message(_cmd("load"))
-async def cmd_load(message: types.Message):
-    """Load game from saved slot."""
-    try:
-        if message.chat.type != "private":
-            await message.answer(_dm_only("!load"), parse_mode="Markdown"); return
-        
-        u_id = str(message.from_user.id)
-        user = get_user(u_id)
-        if not user:
-            await message.answer("🃏 *GameMaster:* Join the group first!", parse_mode="Markdown"); return
-        
-        # Parse slot number
-        args = message.text.strip().split()
-        if len(args) < 2:
-            await message.answer(list_saves(user), parse_mode="Markdown")
-            return
-        
-        try:
-            slot = int(args[1])
-            if not 1 <= slot <= 5:
-                await message.answer("❌ Invalid slot! Use 1-5.", parse_mode="Markdown")
-                return
-        except ValueError:
-            await message.answer("❌ Usage: `/load [slot]` (1-5)", parse_mode="Markdown")
-            return
-        
-        # Load game
-        success, msg, restored_user = load_game(user, slot)
-        if success:
-            save_user(u_id, restored_user)
-            print(f"[LOAD] User {u_id} loaded from slot {slot}")
-        else:
-            print(f"[LOAD FAILED] User {u_id} slot {slot}: {msg}")
-        
-        await message.answer(msg, parse_mode="Markdown")
-    except Exception as e:
-        print(f"[ERROR] cmd_load: {e}")
-        import traceback; traceback.print_exc()
-        await message.answer("❌ Error loading game. Try again.", parse_mode="Markdown")
-
-
-@dp.message(_cmd("restores"))
-async def cmd_restores(message: types.Message):
-    """List all saved game slots."""
-    try:
-        if message.chat.type != "private":
-            await message.answer(_dm_only("!restores"), parse_mode="Markdown"); return
-        
-        u_id = str(message.from_user.id)
-        user = get_user(u_id)
-        if not user:
-            await message.answer("🃏 *GameMaster:* Join the group first!", parse_mode="Markdown"); return
-        
-        saves_list = list_saves(user)
-        print(f"[RESTORES] User {u_id} requested saves list")
-        await message.answer(saves_list, parse_mode="Markdown")
-    except Exception as e:
-        print(f"[ERROR] cmd_restores: {e}")
-        import traceback; traceback.print_exc()
-        await message.answer("❌ Error loading saves. Try again.", parse_mode="Markdown")
-
-
-@dp.message(_cmd("reset"))
-async def cmd_reset(message: types.Message):
-    """Reset game (with daily limit)."""
-    try:
-        if message.chat.type != "private":
-            await message.answer(_dm_only("!reset"), parse_mode="Markdown"); return
-        
-        u_id = str(message.from_user.id)
-        user = get_user(u_id)
-        if not user:
-            await message.answer("🃏 *GameMaster:* Join the group first!", parse_mode="Markdown"); return
-        
-        # Check for 'confirm' argument
-        args = message.text.strip().split()
-        
-        if len(args) < 2 or args[1].lower() != "confirm":
-            # Show reset status instead
-            status_msg = format_reset_status(user)
-            print(f"[RESET] User {u_id} checking reset status")
-            await message.answer(status_msg, parse_mode="Markdown")
-            return
-        
-        # Execute reset
-        success, msg, reset_user = reset_game(user)
-        if success:
-            save_user(u_id, reset_user)
-            print(f"[RESET] User {u_id} executed reset confirmed")
-        else:
-            print(f"[RESET FAILED] User {u_id}: {msg}")
-            await message.answer(msg, parse_mode="Markdown")
-            return
-        
-        await message.answer(msg, parse_mode="Markdown")
-    except Exception as e:
-        print(f"[ERROR] cmd_reset: {e}")
-        import traceback; traceback.print_exc()
-        await message.answer("❌ Error during reset. Try again.", parse_mode="Markdown")
-
-
 @dp.callback_query(lambda q: q.data == "train_menu")
 async def callback_train_menu(callback: types.CallbackQuery):
     """Show training unit menu with inline buttons."""
@@ -1961,37 +1688,6 @@ async def callback_train_menu(callback: types.CallbackQuery):
              InlineKeyboardButton(text="🏰 Rooks (10 iron + 2 diamond)", callback_data="train_rook")],
             [InlineKeyboardButton(text="👑 Queens (20 iron + 5 diamond)", callback_data="train_queen"),
              InlineKeyboardButton(text="⚔️ Kings (15 diamond + 1 relic)", callback_data="train_king")],
-        ]),
-        parse_mode="Markdown"
-    )
-    await callback.answer()
-
-
-@dp.callback_query(lambda q: q.data == "build_menu")
-async def callback_build_menu(callback: types.CallbackQuery):
-    """Show building menu with inline buttons."""
-    u_id = str(callback.from_user.id)
-    user = get_user(u_id)
-    if not user:
-        await callback.answer("Not registered", show_alert=True)
-        return
-    
-    xp = user.get("xp", 0)
-    base_level = max(1, 1 + (xp // 1000))
-    
-    msg = f"🏰 *BUILDING MENU*\n\n"
-    msg += f"Base Level: {base_level}\n\n"
-    msg += "Select option:\n"
-    
-    await callback.message.edit_text(
-        msg,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏗️ Training Grounds", callback_data="build_training"),
-             InlineKeyboardButton(text="🔬 Science Lab", callback_data="build_science")],
-            [InlineKeyboardButton(text="🏠 Barracks", callback_data="build_barracks"),
-             InlineKeyboardButton(text="💰 Treasury", callback_data="build_treasury")],
-            [InlineKeyboardButton(text="🔴 Trap Workshop", callback_data="build_traps"),
-             InlineKeyboardButton(text="🌾 Farm", callback_data="build_farm")]
         ]),
         parse_mode="Markdown"
     )
@@ -2205,7 +1901,7 @@ async def callback_build_trap(callback: types.CallbackQuery):
     cost = trap.get("cost", {})
     
     msg = f"{trap['name']}\n\n"
-    msg += f"Effect: {trap.get('description', 'N/A')}\n\n"
+    msg += f"Effect: {trap['effect']}\n\n"
     msg += f"Cost: " + " + ".join([f"{amt} {res.upper()}" for res, amt in cost.items()])
     msg += f"\n\nBuild?"
     
@@ -2264,6 +1960,70 @@ async def callback_trap_confirm(callback: types.CallbackQuery):
 
 
 
+@dp.message(_cmd("myaccount"))
+async def cmd_myaccount(message: types.Message):
+    """Display account management panel with save/load/reset options."""
+    if message.chat.type != "private":
+        await message.answer(_dm_only("!myaccount"), parse_mode="Markdown")
+        return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer("❌ *Register first!*\nPlay a round with `!fusion` to get started.", parse_mode="Markdown")
+        return
+    
+    username = user.get('username', 'Player')
+    level = user.get('level', 1)
+    xp = user.get('xp', 0)
+    
+    # Count saves
+    saves = list_saves(u_id)
+    save_count = len(saves)
+    
+    # Build interface
+    txt = f"""
+🎮 *ACCOUNT MANAGEMENT - {username.upper()}*
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 *PROFILE*
+├─ Level: **{level}**
+├─ XP: **{xp}**
+└─ Saves: **{save_count}**
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💾 *GAME STATE MANAGEMENT*
+
+**SAVE GAME**
+Use: `/save [1-5]`
+└─ Creates a backup of your current progress
+└─ Max 5 slots available
+
+**LOAD GAME**
+Use: `/load [1-5]`
+└─ Restore your game from a saved slot
+└─ Returns you to that exact point
+
+**RESET GAME**
+Use: `/reset soft` or `/reset hard`
+├─ **soft**: Reset battle stats only
+├─ **hard**: Complete restart (dangerous!)
+└─ **weekly**: Reset weekly points
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ *CAUTION*
+├─ Hard reset deletes all progress!
+├─ Backups are permanent unless deleted
+└─ You can have up to 5 manual saves
+
+*Type a command above to get started!*
+"""
+    
+    await message.answer(txt.strip(), parse_mode="Markdown")
+
+
 @dp.message(_cmd("weapons_inventory"))
 async def cmd_weapons_inventory(message: types.Message):
     """Display all weapons currently owned by player."""
@@ -2277,9 +2037,9 @@ async def cmd_weapons_inventory(message: types.Message):
     
     weapons = user.get('weapons', {})
     if not weapons:
-        await message.answer("🃏 *GameMaster:* \"No weapons. You fight like a peasant. Buy some from !weapons\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"No weapons. You fight like a peasant. Buy some from `!weapons`\"", parse_mode="Markdown"); return
     
-    txt = "⚔️ <b>YOUR WEAPONS ARSENAL</b>\n━━━━━━━━━━━━━━━━━━━━\n\n"
+    txt = "⚔️ *YOUR WEAPONS ARSENAL*\n━━━━━━━━━━━━━━━━━━━━\n\n"
     
     for weapon_id, weapon_data in weapons.items():
         if weapon_id not in WEAPONS:
@@ -2293,10 +2053,10 @@ async def cmd_weapons_inventory(message: types.Message):
         else:
             charges_left = weapon_data
         
-        txt += f"{wname}\n├─ Charges: <b>{charges_left}</b>\n└─ {weapon.get('rarity', 'common').upper()}\n\n"
+        txt += f"{wname}\n├─ Charges: **{charges_left}**\n└─ {weapon.get('rarity', 'common').upper()}\n\n"
     
-    txt += "━━━━━━━━━━━━━━━━━━━━\nBuy more: !weapons"
-    await message.answer(txt, parse_mode="HTML")
+    txt += "━━━━━━━━━━━━━━━━━━━━\nBuy more: `!weapons`"
+    await message.answer(txt, parse_mode="Markdown")
 
 
 @dp.message(_cmd("inventory"))
@@ -2325,7 +2085,7 @@ async def cmd_inventory(message: types.Message):
         elif itype == "teleport":                     lbl, cb = "🌀 TELEPORT",                 f"teleport_{iid_str}"
         elif "multiplier" in itype:
             mult = item.get('multiplier_value', 2)
-            kind = "XP" if "xp" in itype else "SILVER"
+            kind = "XP" if "xp" in itype else "BITCOIN"
             lbl, cb = f"⚡ {kind} MULTIPLIER x{mult}", f"use_{iid_str}"
         elif "locked_" in itype:                      lbl, cb = "🔒 LEGENDARY [TOO POWERFUL]", f"info_{iid_str}"
         else:                                         lbl, cb = f"❓ {itype.upper()}",          f"use_{iid_str}"
@@ -2367,7 +2127,7 @@ async def cmd_claims(message: types.Message):
     }
     item_labels = {
         "xp_multiplier":     lambda m: f"⚡ XP MULTIPLIER x{m}",
-        "silver_multiplier": lambda m: f"💎 SILVER MULTIPLIER x{m}",
+        "bitcoin_multiplier": lambda m: f"💎 BITCOIN MULTIPLIER x{m}",
         "super_crate":  lambda _: "🎁 SUPER CRATE",
         "wood_crate":   lambda _: "🪵 WOOD CRATE",
         "bronze_crate": lambda _: "🥉 BRONZE CRATE",
@@ -2431,13 +2191,13 @@ async def cmd_battle_items(message: types.Message):
         await message.answer("🃏 *GameMaster:* \"Not registered.\"", parse_mode="Markdown"); return
     
     player_level = user.get("level", 1)
-    player_silver = user.get("silver", 0)
+    player_bitcoin = user.get("bitcoin", 0)
     inventory = get_inventory(u_id) or {}
     
     # Define all battle items
     battle_items = {
         "common": [
-            {"id": "7day_shield", "name": "🛡️ 7-Day Shield", "price": 500, "level": 1, "desc": "Protect your base for 7 days"},
+            {"id": "7day", "name": "🛡️ 7-Day Shield", "price": 500, "level": 1, "desc": "Protect your base for 7 days"},
             {"id": "name_shield", "name": "🔐 Name Shield (24h)", "price": 800, "level": 5, "desc": "Hide your username • Block targeting • Anonymize on leaderboard"},
             {"id": "rank_disguise", "name": "🎭 Rank Disguise (24h)", "price": 300, "level": 3, "desc": "Hide your true rank for 24 hours"},
             {"id": "coin_explosion", "name": "🧨 Coin Explosion", "price": 400, "level": 5, "desc": "Double coins on next win"},
@@ -2461,7 +2221,7 @@ async def cmd_battle_items(message: types.Message):
     }
     
     txt = f"{divider()}\n⚔️ *BATTLE ITEMS SHOP* ⚔️\n{divider()}\n"
-    txt += f"💰 Your Silver: *{player_silver}*\n"
+    txt += f"💰 Your Bitcoin: *{player_bitcoin}*\n"
     txt += f"🎖️ Your Level: *{player_level}*\n\n"
     
     # Count items by category
@@ -2471,7 +2231,7 @@ async def cmd_battle_items(message: types.Message):
         
         for item in items:
             count = inventory.get(item["id"], 0)
-            affordable = player_silver >= item["price"]
+            affordable = player_bitcoin >= item["price"]
             level_ok = player_level >= item["level"]
             
             # Build status line
@@ -2480,7 +2240,7 @@ async def cmd_battle_items(message: types.Message):
             elif not level_ok:
                 status = f"🔒 Level {item['level']} needed"
             elif not affordable:
-                status = f"❌ Need {item['price'] - player_silver} more silver"
+                status = f"❌ Need {item['price'] - player_bitcoin} more bitcoin"
             else:
                 status = f"✅ Buy (${item['price']})"
             
@@ -2551,7 +2311,7 @@ async def cmd_buy(message: types.Message):
     
     item = all_items[item_id]
     player_level = user.get("level", 1)
-    player_silver = user.get("silver", 0)
+    player_bitcoin = user.get("bitcoin", 0)
     
     # Check level requirement
     if player_level < item["level"]:
@@ -2563,19 +2323,19 @@ async def cmd_buy(message: types.Message):
         )
         return
     
-    # Check silver
-    if player_silver < item["price"]:
-        needed = item["price"] - player_silver
+    # Check bitcoin
+    if player_bitcoin < item["price"]:
+        needed = item["price"] - player_bitcoin
         await message.answer(
             f"💰 *{item['name']}* costs **${item['price']}**\n"
-            f"Your silver: {player_silver}\n"
-            f"❌ You need **${needed} more silver**",
+            f"Your bitcoin: {player_bitcoin}\n"
+            f"❌ You need **${needed} more bitcoin**",
             parse_mode="Markdown"
         )
         return
     
     # Purchase successful
-    user["silver"] = player_silver - item["price"]
+    user["bitcoin"] = player_bitcoin - item["price"]
     
     # Apply special item effects
     from datetime import datetime, timedelta
@@ -2597,7 +2357,7 @@ async def cmd_buy(message: types.Message):
     msg = f"✅ *PURCHASE SUCCESSFUL*\n\n" \
           f"🛍️ You bought: {item['name']}\n" \
           f"💰 Cost: ${item['price']}\n" \
-          f"💾 Remaining silver: {user['silver']}\n\n"
+          f"💾 Remaining bitcoin: {user['bitcoin']}\n\n"
     
     if activation_msg:
         msg += activation_msg
@@ -3195,7 +2955,7 @@ async def cmd_build(message: types.Message):
         # Show menu
         current_buildings = user.get("buildings", {})
         menu = format_buildings_menu(base_level, current_buildings)
-        await message.answer(menu, parse_mode="HTML")
+        await message.answer(menu, parse_mode="Markdown")
         return
     
     building_name = args[1].lower().replace(" ", "_").replace("-", "_")
@@ -3209,23 +2969,6 @@ async def cmd_build(message: types.Message):
     # Get current buildings
     buildings = user.get("buildings", {})
     current_level = buildings.get(building_name, 0)
-    
-    # Check if building is on cooldown
-    building_cooldowns = user.get("building_cooldowns", {})
-    if building_name in building_cooldowns:
-        import time
-        cooldown_until = building_cooldowns[building_name]
-        remaining = cooldown_until - int(time.time())
-        if remaining > 0:
-            # Still on cooldown
-            await message.answer(
-                f"❌ Building still on cooldown!\nRemaining: {remaining}s",
-                parse_mode="Markdown"
-            )
-            return
-        else:
-            # Cooldown expired, remove it
-            del building_cooldowns[building_name]
     
     # Calculate cost for next level
     cost = calculate_building_cost(building_name, current_level + 1)
@@ -3255,39 +2998,24 @@ async def cmd_build(message: types.Message):
     for resource, amount in cost.items():
         resources[resource] = resources.get(resource, 0) - amount
     
-    # Set new building level and add cooldown
-    new_level = current_level + 1
-    buildings[building_name] = new_level
-    
-    # Add building cooldown (prevent spam)
-    import time
-    if "building_cooldowns" not in user:
-        user["building_cooldowns"] = {}
-    cooldown_duration = 30 * new_level  # Longer cooldown for higher levels (30s, 60s, 90s, etc)
-    user["building_cooldowns"][building_name] = int(time.time()) + cooldown_duration
+    buildings[building_name] = current_level + 1
     
     base_res["resources"] = resources
     user["buildings"] = buildings
     user["base_resources"] = base_res
     
-    # Clean up problematic fields before saving (they'll be popped in save_user anyway, but let's be explicit)
-    user.pop('xp_in_level', None)
     save_user(u_id, user)
     
     building_info = BUILDING_TYPES.get(building_name, {})
-    next_cost = calculate_building_cost(building_name, new_level + 1)
-    next_cost_str = ", ".join([f"{v}{k[0].upper()}" for k, v in next_cost.items()])
     
-    # Use Markdown instead of HTML to avoid formatting issues
-    msg = (
-        f"✅ LEVEL {new_level} BUILT!\n\n"
+    await message.answer(
+        f"✅ **CONSTRUCTION COMPLETE!**\n\n"
         f"{building_info.get('name', building_name)}\n"
-        f"Current Level: *{new_level}*\n\n"
+        f"Level: {buildings[building_name]}\n\n"
         f"*Bonus:* {building_info.get('description', 'N/A')}\n\n"
-        f"*Next Upgrade Cost:* {next_cost_str}\n"
-        f"🕐 Building cooldown: {cooldown_duration}s"
+        f"🃏 *GameMaster:* \"Your infrastructure grows stronger. The game notices.\"",
+        parse_mode="Markdown"
     )
-    await message.answer(msg, parse_mode="Markdown")
 
 
 @dp.message(_cmd("scout"))
@@ -3300,7 +3028,7 @@ async def cmd_scout(message: types.Message):
     u_id = str(message.from_user.id)
     scout_user = get_user(u_id)
     if not scout_user:
-        await message.answer("🃏 *GM:* \"You're not registered. Join the group in *The 64* first!\"", parse_mode="Markdown")
+        await message.answer("🃏 *GM:* \"You're not registered. Try `!start` first.\"", parse_mode="Markdown")
         return
     
     # Parse command: !scout @username or !scout user_id
@@ -3308,7 +3036,7 @@ async def cmd_scout(message: types.Message):
     if len(args) < 2:
         await message.answer(
             "🛰️ *SCOUT COMMAND*\n\n"
-            "Cost: 100 Silver\n"
+            "Cost: 100 Bitcoin\n"
             "Success Rate: 70% (30% honeypot)\n\n"
             "Usage: `!scout @username` or `!scout <name>`\n\n"
             "_Reveals enemy army and traps if successful._\n"
@@ -3334,14 +3062,14 @@ async def cmd_scout(message: types.Message):
         await message.answer(f"🔍 *GM:* \"Scout query failed: {str(e)[:50]}\"", parse_mode="Markdown")
         return
     
-    # Check silver cost
+    # Check bitcoin cost
     scout_cost = 100
-    scout_silver = scout_user.get("silver", 0)
-    if scout_silver < scout_cost:
+    scout_bitcoin = scout_user.get("bitcoin", 0)
+    if scout_bitcoin < scout_cost:
         await message.answer(
-            f"❌ Insufficient silver!\n"
-            f"Cost: {scout_cost} silver\n"
-            f"You have: {scout_silver} silver",
+            f"❌ Insufficient bitcoin!\n"
+            f"Cost: {scout_cost} bitcoin\n"
+            f"You have: {scout_bitcoin} bitcoin",
             parse_mode="Markdown"
         )
         return
@@ -3372,8 +3100,8 @@ async def cmd_scout(message: types.Message):
         except:
             pass
     
-    # Deduct silver
-    scout_user["silver"] = scout_silver - scout_cost
+    # Deduct bitcoin
+    scout_user["bitcoin"] = scout_bitcoin - scout_cost
     save_user(u_id, scout_user)
     
     # 70% success chance
@@ -3390,15 +3118,15 @@ async def cmd_scout(message: types.Message):
         traps = target.get("traps", {})
         
         report = f"""
-╔════════════════════════════════════════════════════╗
-║          📸  SCOUT REPORT  📸                     ║
-╠════════════════════════════════════════════════════╣
-║                                                    ║
+╔═════════════════════════════════════════════════╗
+║          📸  SCOUT REPORT  📸                  ║
+╠═════════════════════════════════════════════════╣
+║                                                 ║
 ║  Target: **{target_display_name}**                
 ║  📍 Sector: {target_sector}                        
 ║  Level: {target.get('level', '?')}                
-║  Silver: {target.get('silver', 0):,}              
-║                                                    ║
+║  Bitcoin: {target.get('bitcoin', 0):,}              
+║                                                 ║
 ║  🎖️ MILITARY:                                      
 """
         if military:
@@ -3407,7 +3135,7 @@ async def cmd_scout(message: types.Message):
         else:
             report += "║    (No troops)\n"
         
-        report += f"""║                                                    ║
+        report += f"""║                           ║
 ║  🕳️ TRAPS:                                        
 """
         if traps:
@@ -3424,18 +3152,18 @@ async def cmd_scout(message: types.Message):
     else:
         # Failed - honeypot triggered
         report = f"""
-╔════════════════════════════════════════════════════╗
-║          ❌  SCOUT HONEYPOT  ❌                   ║
-╠════════════════════════════════════════════════════╣
-║                                                    ║
-║  Your scout was detected!                          ║
-║                                                    ║
-║  {target_display_name} now knows you spied on them.║
-║  They've set mousetraps and firewalls.             ║
-║                                                    ║
-║  🚨 WARNING: They may retaliate!                  ║
-║                                                    ║
-╚════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════╗
+║          ❌  SCOUT HONEYPOT  ❌                  ║
+╠═══════════════════════════════════════════════════╣
+║                                                   ║
+║  Your scout was detected!                         ║
+║                                                   ║
+║  {target_display_name} now knows you spied on them║
+║  They've set mousetraps and firewalls.            ║
+║                                                   ║
+║  🚨 WARNING: They may retaliate!                 ║
+║                                                   ║
+╚═══════════════════════════════════════════════════╝
 """
     
     await message.answer(report, parse_mode="Markdown")
@@ -3451,7 +3179,7 @@ async def cmd_revenge(message: types.Message):
     u_id = str(message.from_user.id)
     player = get_user(u_id)
     if not player:
-        await message.answer("🃏 *GM:* \"You're not registered. Join the group first!\"", parse_mode="Markdown")
+        await message.answer("🃏 *GM:* \"You're not registered. Try `!start` first.\"", parse_mode="Markdown")
         return
     
     # Check if player has active revenge debt
@@ -3499,7 +3227,7 @@ async def cmd_attack(message: types.Message):
     u_id = str(message.from_user.id)
     attacker = get_user(u_id)
     if not attacker:
-        await message.answer("🃏 *GM:* \"You're not registered. Join the group first!\"", parse_mode="Markdown")
+        await message.answer("🃏 *GM:* \"You're not registered. Try `!start` first.\"", parse_mode="Markdown")
         return
     
     # Check if attacker has troops
@@ -3581,7 +3309,7 @@ async def cmd_attack(message: types.Message):
             f"⚔️ *GM:* \"You stand in SECTOR {attacker_sector}, but {target_display_name} inhabits SECTOR {target_sector}.\"\n\n"
             f"📍 *Cross-sector attacks are forbidden.*\n\n"
             f"_You must use !teleport to move to their sector, or find them in the lands you walk._\n\n"
-            f"Cost: {30 if target_sector != attacker_sector else 0} Silver to teleport",
+            f"Cost: {500 if target_sector != attacker_sector else 0} Bitcoin to teleport",
             parse_mode="Markdown"
         )
         return
@@ -3593,7 +3321,7 @@ async def cmd_attack(message: types.Message):
     # Show pre-attack options
     options_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🕵️ Scout First (75💰)", callback_data=f"scout_before_attack_{u_id}_{target_id}"),
+            InlineKeyboardButton(text="🕵️ Scout First (100💰)", callback_data=f"scout_before_attack_{u_id}_{target_id}"),
             InlineKeyboardButton(text="⚔️ Attack Now", callback_data=f"direct_attack_{u_id}_{target_id}"),
         ]
     ])
@@ -3603,7 +3331,7 @@ async def cmd_attack(message: types.Message):
         f"Target: **{target_display_name}**\n\n"
         f"*OPTIONS:*\n"
         f"🕵️ *Scout First* - Send scout rat (5 min) to see their base stats\n"
-        f"   Cost: 75 Silver | Intel: Military, resources, level, shield\n"
+        f"   Cost: 100 Bitcoin | Intel: Military, resources, level, shield\n"
         f"   Risk: 30% chance scout lies, mousetraps, firewall\n\n"
         f"⚔️ *Attack Now* - Assault blindly without intel",
         reply_markup=options_kb,
@@ -3887,7 +3615,7 @@ async def cb_defense_mousetraps(callback: types.CallbackQuery):
 
 @dp.message(_cmd("traps"))
 async def cmd_set_traps(message: types.Message):
-    """Show all available traps and allow setting them."""
+    """Set number of mousetraps."""
     if message.chat.type != "private":
         return
     
@@ -3897,52 +3625,19 @@ async def cmd_set_traps(message: types.Message):
         await message.answer("❌ Account not found.", parse_mode="Markdown")
         return
     
-    # Parse command: /traps [trap_type] [count]
+    # Parse number
     args = message.text.strip().split()
-    
     if len(args) < 2:
-        # Show menu of all traps
-        from trap_system import TRAP_TYPES, get_max_traps
-        base_level = max(1, 1 + (user.get("xp", 0) // 1000))
-        max_traps = get_max_traps(base_level)
-        
-        txt = f"<b>🪤 TRAP WORKSHOP</b>\n\n"
-        txt += f"Base Level: {base_level} · Max per type: {max_traps}\n\n"
-        txt += "<b>Available Traps:</b>\n\n"
-        
-        current_traps = user.get("traps", {})
-        
-        for trap_id, trap_info in TRAP_TYPES.items():
-            current_count = current_traps.get(trap_id, 0) if isinstance(current_traps, dict) else 0
-            can_use = trap_info["min_level"] <= base_level
-            status = "✅" if can_use else "🔒"
-            cost_str = ", ".join([f"{v}{k[0].upper()}" for k, v in trap_info["cost"].items()])
-            txt += f"{status} <b>{trap_info['name']}</b>\n"
-            txt += f"   {trap_info['description']}\n"
-            txt += f"   Cost: {cost_str} | Current: {current_count}\n"
-            txt += f"   Capacity: {trap_info['capacity']} | Cooldown: {trap_info['cooldown']}s\n\n"
-        
-        txt += f"<b>Usage:</b> `/traps [trap_type] [count]`\n"
-        txt += f"<b>Example:</b> `/traps spike_pit 3`\n"
-        txt += f"<b>Trap types:</b> {', '.join(TRAP_TYPES.keys())}"
-        
-        await message.answer(txt, parse_mode="HTML")
-        return
-    
-    trap_type = args[1].lower()
-    from trap_system import TRAP_TYPES
-    
-    if trap_type not in TRAP_TYPES:
-        available = ", ".join(TRAP_TYPES.keys())
-        await message.answer(f"❌ Unknown trap type. Available: {available}", parse_mode="Markdown")
-        return
-    
-    if len(args) < 3:
-        await message.answer(f"❌ Specify count. Example: `/traps {trap_type} 5`", parse_mode="Markdown")
+        await message.answer(
+            "🪤 *SET MOUSETRAPS*\n\n"
+            "Usage: `/traps [number]`\n"
+            "Example: `/traps 5`",
+            parse_mode="Markdown"
+        )
         return
     
     try:
-        trap_count = int(args[2])
+        trap_count = int(args[1])
         if trap_count < 0 or trap_count > 100:
             await message.answer("❌ Trap count must be 0-100.", parse_mode="Markdown")
             return
@@ -3950,29 +3645,16 @@ async def cmd_set_traps(message: types.Message):
         await message.answer("❌ Invalid number.", parse_mode="Markdown")
         return
     
-    # Set trap
-    from trap_system import TRAP_TYPES, get_max_traps
-    trap_info = TRAP_TYPES[trap_type]
-    base_level = max(1, 1 + (user.get("xp", 0) // 1000))
-    
-    if trap_info["min_level"] > base_level:
-        await message.answer(f"❌ You need level {trap_info['min_level']} to use {trap_info['name']}. (Your level: {base_level})", parse_mode="Markdown")
-        return
-    
-    # Initialize traps dict if needed
-    if "traps" not in user or not isinstance(user["traps"], dict):
-        user["traps"] = {}
-    
-    user["traps"][trap_type] = trap_count
-    save_user(u_id, user)
+    # Set traps
+    set_mousetraps(u_id, trap_count)
     
     await message.answer(
-        f"✅ <b>TRAP SET</b>\n\n"
-        f"{trap_info['name']} × {trap_count}\n"
-        f"Damage: {trap_info['damage_range'][0]}-{trap_info['damage_range'][1]}\n"
-        f"Capacity: {trap_info['capacity']}\n\n"
-        f"Your base is now defended with {trap_type.upper()}!",
-        parse_mode="HTML"
+        f"🪤 *TRAPS SET*: {trap_count}\n\n"
+        f"✅ {trap_count} mousetraps are now active on your base.\n"
+        f"Incoming scouts have a 30% chance of being caught.\n"
+        f"(Scouts have 70% chance to escape)\n\n"
+        f"Traps reset after catching a scout.",
+        parse_mode="Markdown"
     )
 
 
@@ -4188,6 +3870,60 @@ async def _execute_attack(attacker_id: str, target_id: str, target_display_name:
             f"🏆 {target_display_name} repelled {attacker.get('username', 'Unknown')}'s attack!\n"
             f"💀 Attacker lost {sum(result.get('attacker_losses', {}).values())} troops"
         )
+
+
+@dp.my_chat_member()
+async def handle_new_member(event: types.ChatMemberUpdated):
+    """Auto-register new members and existing members to leaderboard when they join a group."""
+    # Only process when someone joins a group
+    if event.new_chat_member.status not in ["member", "restricted"]:
+        return
+    
+    # Skip if the member is a bot
+    if event.new_chat_member.user.is_bot:
+        return
+    
+    user_id = str(event.new_chat_member.user.id)
+    username = event.new_chat_member.user.first_name or event.new_chat_member.user.username or "Player"
+    
+    try:
+        # Check if user exists
+        existing_user = get_user(user_id)
+        
+        if not existing_user:
+            # New member - register them so they appear on leaderboard
+            register_user(user_id, username)
+            print(f"[NEW MEMBER] Registered {username} ({user_id}) to leaderboard")
+        else:
+            # Existing member - just ensure they're registered
+            if not existing_user.get('username'):
+                save_user(user_id, {**existing_user, 'username': username})
+                print(f"[MEMBER] Updated username for {user_id}: {username}")
+    except Exception as e:
+        print(f"[ERROR] Failed to register new member {user_id}: {e}")
+
+
+@dp.message(_cmd("tutorial", "start"))
+async def cmd_tutorial(message: types.Message, state: FSMContext):
+    if message.chat.type != "private":
+        await message.answer(_dm_only("!tutorial"), parse_mode="Markdown"); return
+    from initiation import Trial
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    cmd  = message.text.strip().lstrip("/!").lower().split("@")[0]
+    if user and user.get("completed_tutorial") and cmd == "tutorial":
+        await message.answer("🃏 *GameMaster:* \"You've already been through the trials. Try `!fusion` in the group.\"", parse_mode="Markdown"); return
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⚔️ I'm ready to enter", callback_data="trial_yes")],
+        [InlineKeyboardButton(text="🚪 I'm just lost",       callback_data="trial_no")],
+    ])
+    await message.answer(
+        "🃏 *GameMaster:* \"Well, well, well. Look what crawled into my domain.\"\n\n"
+        "\"You show up unannounced, uninvited, probably unprepared. I don't care who you are.\"\n\n"
+        "\"Are you here to join *The 64*? Or just wandering in by accident?\"",
+        parse_mode="Markdown", reply_markup=markup
+    )
+    await state.set_state(Trial.awaiting_username)
 
 
 @dp.message(_cmd("open"))
@@ -4696,7 +4432,7 @@ async def cb_claim(query: types.CallbackQuery):
         }
         item_labels = {
             "xp_multiplier":     lambda m: f"⚡ XP MULTIPLIER x{m}",
-            "silver_multiplier": lambda m: f"💎 SILVER MULTIPLIER x{m}",
+            "bitcoin_multiplier": lambda m: f"💎 BITCOIN MULTIPLIER x{m}",
             "super_crate":  lambda _: "🎁 SUPER CRATE",
             "wood_crate":   lambda _: "🪵 WOOD CRATE",
             "bronze_crate": lambda _: "🥉 BRONZE CRATE",
@@ -4787,7 +4523,7 @@ async def cb_discard_claim(callback: types.CallbackQuery):
         }
         item_labels = {
             "xp_multiplier":     lambda m: f"⚡ XP MULTIPLIER x{m}",
-            "silver_multiplier": lambda m: f"💎 SILVER MULTIPLIER x{m}",
+            "bitcoin_multiplier": lambda m: f"💎 BITCOIN MULTIPLIER x{m}",
             "super_crate":  lambda _: "🎁 SUPER CRATE",
             "wood_crate":   lambda _: "🪵 WOOD CRATE",
             "bronze_crate": lambda _: "🥉 BRONZE CRATE",
@@ -4900,7 +4636,7 @@ async def cb_activate_multiply(callback: types.CallbackQuery):
             await callback.answer("❌ Item not found or not a multiplier.", show_alert=True)
             return
         
-        kind = "XP" if "xp" in item.get('type', '').lower() else "SILVER"
+        kind = "XP" if "xp" in item.get('type', '').lower() else "BITCOIN"
         
         # Activate the multiplier (store in buffs JSONB)
         user = get_user(u_id)
@@ -5066,7 +4802,7 @@ async def cb_discard(callback: types.CallbackQuery):
                 elif itype == "teleport":                     lbl, cb = "🌀 TELEPORT",                 f"teleport_{iid_str}"
                 elif "multiplier" in itype:
                     mult = itm.get('multiplier_value', 2)
-                    kind = "XP" if "xp" in itype else "SILVER"
+                    kind = "XP" if "xp" in itype else "BITCOIN"
                     lbl, cb = f"⚡ {kind} MULTIPLIER x{mult}", f"use_{iid_str}"
                 elif "locked_" in itype:                      lbl, cb = "🔒 LEGENDARY [TOO POWERFUL]", f"info_{iid_str}"
                 else:                                         lbl, cb = f"❓ {itype.upper()}",          f"use_{iid_str}"
@@ -5142,412 +4878,6 @@ async def cb_locked(callback: types.CallbackQuery):
     await callback.answer("Sectors 10-64 unlock as you level up!", show_alert=True)
 
 
-# ======================== BUILDING SYSTEM HANDLERS ========================
-
-BUILDING_INFO = {
-    "training": {
-        "name": "🎖️ Training Grounds",
-        "description": "Train military units to boost your army",
-        "cost": 500,
-        "cost_type": "silver",
-        "time": 3600,  # 1 hour
-        "max_level": 3,
-        "benefits": "Train pawns, knights, bishops, rooks, queens, kings",
-    },
-    "science": {
-        "name": "🔬 Science Laboratory",
-        "description": "Research new technologies and unlock abilities",
-        "cost": 800,
-        "cost_type": "silver",
-        "time": 7200,  # 2 hours
-        "max_level": 5,
-        "benefits": "Unlock new items, abilities, and base sections",
-    },
-    "barracks": {
-        "name": "🏰 Barracks",
-        "description": "House and train your military forces",
-        "cost": 600,
-        "cost_type": "silver",
-        "time": 4800,  # 1.3 hours
-        "max_level": 4,
-        "benefits": "Increase unit capacity, reduce training time",
-    },
-    "treasury": {
-        "name": "💰 Treasury",
-        "description": "Store resources and manage trade",
-        "cost": 700,
-        "cost_type": "silver",
-        "time": 5400,  # 1.5 hours
-        "max_level": 3,
-        "benefits": "Increase resource storage, trade better prices",
-    },
-    "traps": {
-        "name": "⚠️ Trap Workshop",
-        "description": "Craft defensive devices to protect your base",
-        "cost": 650,
-        "cost_type": "silver",
-        "time": 5000,  # 1.4 hours
-        "max_level": 4,
-        "benefits": "Craft lethal traps, deter invaders",
-    },
-    "farm": {
-        "name": "🌾 Farm",
-        "description": "Grow food to support your population",
-        "cost": 400,
-        "cost_type": "silver",
-        "time": 2400,  # 40 mins
-        "max_level": 5,
-        "benefits": "Generate food income, feed units",
-    },
-}
-
-
-@dp.callback_query(F.data.startswith("build_"))
-async def cb_building_selection(callback: types.CallbackQuery):
-    """Handle building type selection from build menu."""
-    building_type = callback.data.replace("build_", "")
-    
-    # Special case: science lab goes to science menu
-    if building_type == "science":
-        await cb_science_menu(callback)
-        return
-    
-    if building_type not in BUILDING_INFO:
-        await callback.answer("❌ Unknown building type.", show_alert=True)
-        return
-    
-    building = BUILDING_INFO[building_type]
-    user_id = callback.from_user.id
-    
-    # Get user resources (use supabase_db functions)
-    user = get_user(str(user_id))
-    if not user:
-        await callback.answer("❌ User profile not found.", show_alert=True)
-        return
-    
-    user_silver = user.get("silver", 0)
-    building_cost = building["cost"]
-    
-    # Check if already building this
-    buildings = user.get("buildings", {})
-    if building_type in buildings and buildings[building_type].get("status") == "building":
-        await callback.answer(
-            f"⏳ Already building {building['name']}\nCompletion: <timestamp>",
-            show_alert=True
-        )
-        return
-    
-    # Check if already built to max level
-    current_level = buildings.get(building_type, {}).get("level", 0)
-    if current_level >= building["max_level"]:
-        await callback.answer(
-            f"✅ {building['name']} is at max level {building['max_level']}",
-            show_alert=True
-        )
-        return
-    
-    # Show building info
-    text = f"""
-<b>{building['name']}</b>
-
-📝 <b>Description:</b> {building['description']}
-
-💡 <b>Benefits:</b> {building['benefits']}
-
-💰 <b>Cost:</b> {building['cost']} {building['cost_type']}
-⏱️ <b>Build Time:</b> {building['time']}s ({building['time']//60}m)
-📊 <b>Max Level:</b> {building['max_level']}
-🏗️ <b>Current Level:</b> {current_level}/{building['max_level']}
-
-💸 <b>Your Silver:</b> {user_silver}
-    """
-    
-    can_afford = user_silver >= building_cost
-    if can_afford:
-        text += f"\n✅ You can afford this building!"
-    else:
-        text += f"\n❌ You need {building_cost - user_silver} more silver"
-    
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="✅ Build Now" if can_afford else "❌ Can't Afford",
-                    callback_data=f"confirm_build_{building_type}" if can_afford else "skip"
-                )
-            ],
-            [InlineKeyboardButton(text="« Back to Buildings", callback_data="build_menu")]
-        ]
-    )
-    
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
-
-
-@dp.callback_query(F.data.startswith("confirm_build_"))
-async def cb_confirm_build(callback: types.CallbackQuery):
-    """Confirm and start building."""
-    building_type = callback.data.replace("confirm_build_", "")
-    
-    if building_type not in BUILDING_INFO:
-        await callback.answer("❌ Unknown building.", show_alert=True)
-        return
-    
-    building = BUILDING_INFO[building_type]
-    user_id = callback.from_user.id
-    
-    # Get user
-    user = get_user(str(user_id))
-    if not user:
-        await callback.answer("❌ User not found.", show_alert=True)
-        return
-    
-    user_silver = user.get("silver", 0)
-    
-    # Verify still have resources
-    if user_silver < building["cost"]:
-        await callback.answer(f"❌ Insufficient silver! Need {building['cost']}", show_alert=True)
-        return
-    
-    # Deduct cost
-    new_silver = user_silver - building["cost"]
-    
-    # Get current level
-    buildings = user.get("buildings", {})
-    current_level = buildings.get(building_type, {}).get("level", 0)
-    new_level = current_level + 1
-    
-    # Calculate completion timestamp
-    import time
-    completion_time = int(time.time()) + building["time"]
-    
-    # Update building status
-    if building_type not in buildings:
-        buildings[building_type] = {}
-    
-    buildings[building_type].update({
-        "level": new_level,
-        "status": "building",
-        "started_at": int(time.time()),
-        "completes_at": completion_time
-    })
-    
-    # Update user
-    user["silver"] = new_silver
-    user["buildings"] = buildings
-    save_user(user_id, user)
-    
-    # Format completion time
-    from datetime import datetime, timedelta
-    completion_dt = datetime.fromtimestamp(completion_time)
-    completion_str = completion_dt.strftime("%H:%M:%S")
-    time_remaining = timedelta(seconds=building["time"])
-    
-    # Notify user
-    confirmation_msg = f"""
-✅ <b>Building Started!</b>
-
-<b>{building['name']}</b> construction in progress...
-
-🏗️ <b>Level:</b> {new_level}/{building['max_level']}
-⏱️ <b>Completion:</b> {completion_str} ({time_remaining})
-
-💸 <b>Resources Used:</b> {building['cost']} {building['cost_type']}
-💰 <b>Remaining Silver:</b> {new_silver}
-    """
-    
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="🏗️ View Buildings", callback_data="build_menu")],
-        ]
-    )
-    
-    await callback.message.edit_text(confirmation_msg, parse_mode="HTML", reply_markup=kb)
-    
-    # Also send notification in private
-    try:
-        await callback.bot.send_message(
-            int(user_id),
-            f"🏗️ {building['name']} construction started!\nLevel: {new_level}/{building['max_level']}\nCompletion: {completion_str}"
-        )
-    except:
-        pass
-
-
-# ======================== SCIENCE LAB SYSTEM ============================
-
-@dp.callback_query(F.data == "science_menu")
-async def cb_science_menu(callback: types.CallbackQuery):
-    """Show research options from science lab."""
-    user_id = callback.from_user.id
-    user = get_user(str(user_id))
-    
-    if not user:
-        await callback.answer("❌ User not found.", show_alert=True)
-        return
-    
-    user_level = user.get("level", 1)
-    available = get_available_research(user_level)
-    
-    if not available:
-        await callback.answer(f"❌ No research available at level {user_level}", show_alert=True)
-        return
-    
-    # Check for active research
-    research_progress = user.get("research_progress", {})
-    active_research = None
-    for rid, progress in research_progress.items():
-        if progress.get("status") == "in_progress":
-            active_research = rid
-            break
-    
-    text = f"<b>🔬 SCIENCE LABORATORY</b>\n\n"
-    text += f"Your Level: {user_level}\n\n"
-    
-    if active_research:
-        active_data = research_progress[active_research]
-        import time
-        time_remaining = max(0, active_data.get("completes_at", 0) - int(time.time()))
-        text += f"⏳ <b>Current Research:</b> {RESEARCH_TYPES[active_research]['name']}\n"
-        text += f"⏱️ Time remaining: {time_remaining}s\n\n"
-    
-    text += "<b>Available Research:</b>\n"
-    
-    # Group by tier and filter out completed research
-    tier_groups = {}
-    completed = user.get("research_completed", [])
-    
-    for rid, research in available.items():
-        tier = research.get("tier", 1)
-        if tier not in tier_groups:
-            tier_groups[tier] = []
-        status_indicator = "✅" if rid in completed else "🔍"
-        tier_groups[tier].append((rid, research, status_indicator))
-    
-    kb_buttons = []
-    for tier in sorted(tier_groups.keys()):
-        text += f"\n<b>Tier {tier}:</b>\n"
-        tier_research = tier_groups[tier]
-        
-        for rid, research, status_ind in tier_research:
-            text += f"{status_ind} {research['name']} ({research['time']}s)\n"
-            
-            # Add button ONLY if NOT completed
-            if rid not in completed and not active_research:
-                kb_buttons.append(
-                    InlineKeyboardButton(
-                        text=f"{research['name'][:20]}...",
-                        callback_data=f"research_view_{rid}"
-                    )
-                )
-    
-    if not kb_buttons:
-        kb_buttons = [InlineKeyboardButton(text="« Back", callback_data="science_menu")]
-    else:
-        kb_buttons.append(InlineKeyboardButton(text="« Back", callback_data="build_menu"))
-    
-    # Arrange buttons in rows
-    kb_rows = []
-    for i in range(0, len(kb_buttons), 2):
-        if i + 1 < len(kb_buttons):
-            kb_rows.append(kb_buttons[i:i+2])
-        else:
-            kb_rows.append([kb_buttons[i]])
-    
-    kb = InlineKeyboardMarkup(inline_keyboard=kb_rows)
-    
-    try:
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
-    except:
-        await callback.message.reply(text, parse_mode="HTML", reply_markup=kb)
-    
-    await callback.answer()
-
-
-@dp.callback_query(F.data.startswith("research_view_"))
-async def cb_research_view(callback: types.CallbackQuery):
-    """Show detailed research info and start option."""
-    research_id = callback.data.replace("research_view_", "")
-    
-    if research_id not in RESEARCH_TYPES:
-        await callback.answer("❌ Unknown research.", show_alert=True)
-        return
-    
-    user_id = str(callback.from_user.id)
-    user = get_user(user_id)
-    if not user:
-        await callback.answer("❌ User not found.", show_alert=True)
-        return
-    
-    research = RESEARCH_TYPES[research_id]
-    
-    # Check if can research
-    can_do, reason = can_research(user, research_id)
-    
-    text = format_research_info(research_id)
-    text += f"\n\n<b>Status:</b> {reason}"
-    
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="✅ Start Research" if can_do else "❌ " + reason,
-                    callback_data=f"research_start_{research_id}" if can_do else "skip"
-                )
-            ],
-            [InlineKeyboardButton(text="« Back to Labs", callback_data="science_menu")]
-        ]
-    )
-    
-    try:
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
-    except:
-        await callback.message.reply(text, parse_mode="HTML", reply_markup=kb)
-    
-    await callback.answer()
-
-
-@dp.callback_query(F.data.startswith("research_start_"))
-async def cb_research_start(callback: types.CallbackQuery):
-    """Start a research project."""
-    research_id = callback.data.replace("research_start_", "")
-    
-    if research_id not in RESEARCH_TYPES:
-        await callback.answer("❌ Unknown research.", show_alert=True)
-        return
-    
-    user_id = str(callback.from_user.id)
-    user = get_user(user_id)
-    if not user:
-        await callback.answer("❌ User not found.", show_alert=True)
-        return
-    
-    # Start research
-    import supabase_db as db_module
-    success, message = start_research(user_id, user, research_id, db_module)
-    
-    if success:
-        research = RESEARCH_TYPES[research_id]
-        confirmation = f"""
-✅ <b>Research Started!</b>
-
-<b>{research['name']}</b> is now underway...
-
-⏱️ Duration: {research['time']}s ({research['time']//60}m)
-
-📚 Check back when complete to claim your unlocks!
-        """
-        
-        kb = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="🔬 Back to Labs", callback_data="science_menu")],
-            ]
-        )
-        
-        await callback.message.edit_text(confirmation, parse_mode="HTML", reply_markup=kb)
-    else:
-        await callback.answer(f"❌ {message}", show_alert=True)
-
-
 @dp.callback_query(F.data.startswith("train_"))
 async def cb_train_unit(callback: types.CallbackQuery):
     """Handle unit training selection."""
@@ -5560,28 +4890,28 @@ async def cb_train_unit(callback: types.CallbackQuery):
             await callback.answer("❌ User not found.", show_alert=True)
             return
         
-        # Use UNITS from training_system (consolidated training definitions)
-        if not UNITS:
-            await callback.answer("❌ Training system not loaded.", show_alert=True)
-            return
+        # Unit definitions with costs
+        units = {
+            "pawn": {"name": "👹 Pawns", "cost": {"wood": 5}},
+            "knight": {"name": "🗡️ Knights", "cost": {"wood": 15, "bronze": 5}},
+            "bishop": {"name": "⚜️ Bishops", "cost": {"bronze": 10, "iron": 3}},
+            "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "diamond": 2}},
+            "queen": {"name": "👑 Queens", "cost": {"iron": 20, "diamond": 5}},
+            "king": {"name": "⚔️ Kings", "cost": {"diamond": 15, "relics": 1}}
+        }
         
-        if unit_key not in UNITS:
+        if unit_key not in units:
             await callback.answer("❌ Unknown unit.", show_alert=True)
             return
         
-        unit = UNITS[unit_key]
-        # Convert costs dict to cost string (only show non-zero costs)
-        cost_items = [(amt, res.upper()) for res, amt in unit['costs'].items() if amt > 0]
-        cost_str = " + ".join([f"{amt} {res}" for amt, res in cost_items]) if cost_items else "Free"
+        unit = units[unit_key]
+        cost_str = " + ".join([f"{amt} {res.upper()}" for res, amt in unit['cost'].items()])
         
         # Show quantity selector
         await callback.message.edit_text(
-            f"🎯 <b>{unit['name']}</b> Training\n\n"
-            f"<i>{unit.get('description', 'Elite military unit')}</i>\n\n"
-            f"Cost per unit: {cost_str}\n"
-            f"Training time: {unit.get('train_time', 30)}s\n"
-            f"Min level: {unit.get('min_level', 1)}\n\n"
-            f"How many do you want to train?",
+            f"🎯 *{unit['name']}* Training\n\n"
+            f"Cost per unit: {cost_str}\n\n"
+            f"How many {unit['name'].lower()} do you want to train?",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="5", callback_data=f"train_confirm_{unit_key}_5"),
                  InlineKeyboardButton(text="10", callback_data=f"train_confirm_{unit_key}_10"),
@@ -5589,7 +4919,7 @@ async def cb_train_unit(callback: types.CallbackQuery):
                 [InlineKeyboardButton(text="50", callback_data=f"train_confirm_{unit_key}_50"),
                  InlineKeyboardButton(text="100", callback_data=f"train_confirm_{unit_key}_100")]
             ]),
-            parse_mode="HTML"
+            parse_mode="Markdown"
         )
         await callback.answer()
     except Exception as e:
@@ -5616,23 +4946,26 @@ async def cb_train_confirm(callback: types.CallbackQuery):
             await callback.answer("❌ User not found.", show_alert=True)
             return
         
-        # Unit costs - use UNITS from training_system (consolidated)
-        if not UNITS:
-            await callback.answer("❌ Training system not loaded.", show_alert=True)
-            return
+        # Unit costs
+        units = {
+            "pawn": {"name": "👹 Pawns", "cost": {"wood": 5}},
+            "knight": {"name": "🗡️ Knights", "cost": {"wood": 15, "bronze": 5}},
+            "bishop": {"name": "⚜️ Bishops", "cost": {"bronze": 10, "iron": 3}},
+            "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "diamond": 2}},
+            "queen": {"name": "👑 Queens", "cost": {"iron": 20, "diamond": 5}},
+            "king": {"name": "⚔️ Kings", "cost": {"diamond": 15, "relics": 1}}
+        }
         
-        if unit_key not in UNITS:
+        if unit_key not in units:
             await callback.answer("❌ Unknown unit.", show_alert=True)
             return
         
-        unit = UNITS[unit_key]
+        unit = units[unit_key]
         base_res = user.get('base_resources', {})
         resources = base_res.get('resources', {})
         
-        # Check if enough resources (only check non-zero costs)
-        for res_type, cost_per_unit in unit['costs'].items():
-            if cost_per_unit == 0:
-                continue  # Skip free resources
+        # Check if enough resources
+        for res_type, cost_per_unit in unit['cost'].items():
             total_cost = cost_per_unit * quantity
             available = resources.get(res_type, 0) if res_type != 'food' else base_res.get('food', 0)
             if available < total_cost:
@@ -5643,9 +4976,7 @@ async def cb_train_confirm(callback: types.CallbackQuery):
                 return
         
         # Deduct resources
-        for res_type, cost_per_unit in unit['costs'].items():
-            if cost_per_unit == 0:
-                continue
+        for res_type, cost_per_unit in unit['cost'].items():
             total_cost = cost_per_unit * quantity
             resources[res_type] = resources.get(res_type, 0) - total_cost
         
@@ -5660,10 +4991,10 @@ async def cb_train_confirm(callback: types.CallbackQuery):
         save_user(u_id, user)
         
         await callback.message.edit_text(
-            f"✅ <b>TRAINING COMPLETE!</b>\n\n"
+            f"✅ *TRAINING COMPLETE!*\n\n"
             f"🎖️ +{quantity} {unit['name'].lower()}\n\n"
             f"Your army grows stronger. The weak tremble.",
-            parse_mode="HTML"
+            parse_mode="Markdown"
         )
         await callback.answer()
     except Exception as e:
@@ -5941,7 +5272,7 @@ async def on_reaction(event: types.MessageReactionUpdated):
             and eng.crates_dropping > 0
             and uid not in [c['user_id'] for c in eng.crate_claimers]
             and len(eng.crate_claimers) < 3):
-        eng.crate_claimers.append({'user_id': uid, 'is_fake': eng.is_fake_crate})
+        eng.crate_claimers.append({'user_id': uid})
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -6160,19 +5491,19 @@ async def _do_open_crate(message: types.Message, user_id: str, item_id: int):
         from supabase_db import _crate_xp
         xp = _crate_xp(ctype)
 
-    # Silver reward by tier
-    silver = 0
-    if 'wood'   in ctype: silver = random.randint(2, 8)
-    elif 'bronze' in ctype: silver = random.randint(5, 15)
-    elif 'iron'   in ctype: silver = random.randint(10, 30)
-    elif 'super'  in ctype: silver = random.randint(15, 50)
+    # Bitcoin reward by tier
+    bitcoin = 0
+    if 'wood'   in ctype: bitcoin = random.randint(2, 8)
+    elif 'bronze' in ctype: bitcoin = random.randint(5, 15)
+    elif 'iron'   in ctype: bitcoin = random.randint(10, 30)
+    elif 'super'  in ctype: bitcoin = random.randint(15, 50)
 
     add_xp(user_id, xp)
-    if silver: add_silver(user_id, silver)
+    if bitcoin: add_bitcoin(user_id, bitcoin)
     remove_inventory_item(user_id, item_id)
 
     msg = f"✨ *CRATE OPENED!*\n📦 {cname}\n+{xp} XP"
-    if silver: msg += f"\n+{silver} Silver"
+    if bitcoin: msg += f"\n+{bitcoin} Bitcoin"
     await message.answer(msg, parse_mode="Markdown")
 
 
@@ -6194,7 +5525,7 @@ async def _do_use_item(message: types.Message, user_id: str, item_id: int):
         await message.answer("🃏 *GameMaster:* \"You can't use that. Upgrade backpack first.\"", parse_mode="Markdown"); return
     elif "multiplier" in itype:
         mult = item.get('multiplier_value', 2)
-        kind = "XP" if "xp" in itype else "SILVER"
+        kind = "XP" if "xp" in itype else "BITCOIN"
         # Ask user to select multiplier strength (2x to 10x)
         await message.answer(
             f"⚡ *{kind} MULTIPLIER*\n\n"
@@ -6213,33 +5544,6 @@ async def _do_use_item(message: types.Message, user_id: str, item_id: int):
             ]),
             parse_mode="Markdown"
         ); return
-    elif itype == "scout" or "scout" in itype:
-        # Delete the scout item from inventory
-        from supabase_db import supabase, DB_TABLE
-        try:
-            supabase.table("inventory").delete().eq("id", item_id).execute()
-            print(f"[USE_ITEM] Scout item {item_id} deleted for user {user_id}")
-        except Exception as e:
-            print(f"[USE_ITEM] Error deleting scout item: {e}")
-        await message.answer("🃏 *GameMaster:* \"Type `!scout [player_name]` to spy on an opponent's base resources.\"", parse_mode="Markdown"); return
-    elif itype == "eternal_shard" or "eternal" in itype:
-        # Delete the eternal shard from inventory
-        from supabase_db import supabase, DB_TABLE
-        try:
-            supabase.table("inventory").delete().eq("id", item_id).execute()
-            print(f"[USE_ITEM] Eternal shard {item_id} deleted for user {user_id}")
-        except Exception as e:
-            print(f"[USE_ITEM] Error deleting eternal shard: {e}")
-        await message.answer("🃏 *GameMaster:* \"Eternal Shards are used in FORGING to create legendary items.\"", parse_mode="Markdown"); return
-    elif itype == "mythic_shard" or "mythic" in itype:
-        # Delete the mythic shard from inventory
-        from supabase_db import supabase, DB_TABLE
-        try:
-            supabase.table("inventory").delete().eq("id", item_id).execute()
-            print(f"[USE_ITEM] Mythic shard {item_id} deleted for user {user_id}")
-        except Exception as e:
-            print(f"[USE_ITEM] Error deleting mythic shard: {e}")
-        await message.answer("🃏 *GameMaster:* \"Mythic Shards are rare! Use them in FORGING to create godlike items.\"", parse_mode="Markdown"); return
     else:
         await message.answer("🃏 *GameMaster:* \"Unknown item.\"", parse_mode="Markdown"); return
 
@@ -6295,297 +5599,14 @@ async def _do_claim_all(target, user_id: str, edit: bool = False, is_command: bo
         await target.answer(txt, parse_mode="Markdown")
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  EMOJI WEAPON SYSTEM  (Group Chat Activation)
-# ═══════════════════════════════════════════════════════════════════════════
 
-def build_emoji_weapon_map():
-    """Extract emoji → weapon_id mapping from WEAPONS."""
-    emoji_map = {}
-    for weapon_id, weapon_data in WEAPONS.items():
-        name = weapon_data.get('name', '')
-        if name and len(name) > 0:
-            emoji = name[0]  # First character is emoji
-            emoji_map[emoji] = weapon_id
-    return emoji_map
 
-EMOJI_WEAPONS = build_emoji_weapon_map()  # {🔫: machine_gun_turret, etc}
 
-@dp.message(F.chat.type.in_({"group","supergroup"}), F.text)
-async def on_emoji_weapon_activation(message: types.Message):
-    """Detect emoji + victim name pattern: 🔫 username"""
-    if not message.text or message.from_user.is_bot:
-        return
-    
-    text = message.text.strip()
-    u_id = str(message.from_user.id)
-    user = get_user(u_id)
-    
-    if not user:
-        return  # Not registered
-    
-    # Parse pattern: emoji + victim name (e.g. "🔫 John_Doe")
-    parts = text.split(maxsplit=1)
-    if len(parts) < 2:
-        return  # Not a weapon activation
-    
-    emoji = parts[0]
-    victim_name = parts[1].strip()
-    
-    # Check if emoji maps to a weapon
-    if emoji not in EMOJI_WEAPONS:
-        return  # Not a weapon emoji
-    
-    weapon_id = EMOJI_WEAPONS[emoji]
-    weapon = WEAPONS[weapon_id]
-    
-    # Check if attacker has this weapon with charges
-    weapons = user.get('weapons', {})
-    if weapon_id not in weapons:
-        return  # Don't have weapon
-    
-    weapon_data = weapons[weapon_id]
-    if isinstance(weapon_data, dict):
-        charges = weapon_data.get('charges_remaining', 0)
-    else:
-        charges = weapon_data
-    
-    if charges <= 0:
-        return  # Out of charges
-    
-    # Find victim by username
-    from supabase_db import supabase, DB_TABLE
-    try:
-        resp = supabase.table(DB_TABLE).select("user_id, username, level, silver, base_resources, total_words").eq("username", victim_name).execute()
-        if not resp.data:
-            return  # Victim not found
-        
-        target = resp.data[0]
-        target_id = str(target['user_id'])
-        
-        if target_id == u_id:
-            return  # Can't attack self
-        
-        # Check weapon trigger conditions (prevent instant activation)
-        trigger_condition = weapon.get('trigger_condition')
-        can_activate = True
-        reason = ""
-        
-        if trigger_condition == 'words_spoken':
-            # Only fire if victim has spoken enough words
-            min_words = weapon.get('trigger_threshold', 100)
-            victim_words = target.get('total_words', 0)
-            if victim_words < min_words:
-                can_activate = False
-                reason = f"Victim needs to speak {min_words} words first ({victim_words}/{min_words})"
-        
-        if trigger_condition == 'base_level':
-            # Only fire if victim reaches certain level
-            min_level = weapon.get('trigger_threshold', 5)
-            victim_level = target.get('level', 1)
-            if victim_level < min_level:
-                can_activate = False
-                reason = f"Victim needs to be level {min_level} ({victim_level}/{min_level})"
-        
-        if not can_activate:
-            # Weapon condition not met - don't fire
-            await message.reply(f"⚠️ Weapon not ready: {reason}")
-            return
-        
-        # Execute weapon effect
-        attacker = user
-        attacker_copy = attacker.copy()
-        target_copy = target.copy()
-        
-        effect_result = f"💥 **WEAPON STRIKE!**\n"
-        effect_result += f"⚔️ {attacker['username']} activated {weapon['name']}\n"
-        effect_result += f"🎯 Target: **{victim_name}** (Lv{target['level']})\n\n"
-        
-        # Apply effects based on weapon type
-        effect = weapon.get('effect', '')
-        
-        if 'score_and_silver_damage' in effect:
-            damage = weapon.get('damage_silver', 100)
-            target_copy['silver'] = max(0, target_copy.get('silver', 0) - damage)
-            effect_result += f"💰 Target lost {damage} silver!\n"
-        
-        elif 'steal_xp' in effect:
-            steal_pct = weapon.get('steal_percentage', 1.0)
-            xp_stolen = int((target_copy.get('xp', 0) * steal_pct) // 100)
-            xp_stolen = max(0, min(xp_stolen, 1000))  # Cap at 1000 XP
-            target_copy['xp'] = max(0, target_copy.get('xp', 0) - xp_stolen)
-            attacker_copy['xp'] = attacker_copy.get('xp', 0) + xp_stolen
-            effect_result += f"🔋 Stole {xp_stolen} XP from target!\n"
-        
-        elif 'steal_silver' in effect:
-            steal_pct = weapon.get('steal_percentage', 1.0)
-            silver_stolen = int((target_copy.get('silver', 0) * steal_pct) // 10)
-            silver_stolen = max(0, min(silver_stolen, 500))
-            target_copy['silver'] = max(0, target_copy.get('silver', 0) - silver_stolen)
-            attacker_copy['silver'] = attacker_copy.get('silver', 0) + silver_stolen
-            effect_result += f"💰 Stole {silver_stolen} silver!\n"
-        
-        elif 'steal_resource_type' in effect:
-            res_type = weapon.get('resource_type', 'wood')
-            steal_amt = weapon.get('steal_amount', 100)
-            base_res = target_copy.get('base_resources', {}).get('resources', {})
-            stolen = min(steal_amt, base_res.get(res_type, 0))
-            base_res[res_type] = base_res.get(res_type, 0) - stolen
-            if 'base_resources' not in target_copy:
-                target_copy['base_resources'] = {}
-            target_copy['base_resources']['resources'] = base_res
-            attacker_base = attacker_copy.get('base_resources', {})
-            if 'resources' not in attacker_base:
-                attacker_base['resources'] = {}
-            attacker_base['resources'][res_type] = attacker_base['resources'].get(res_type, 0) + stolen
-            attacker_copy['base_resources'] = attacker_base
-            effect_result += f"🌪️ Stole {stolen} {res_type.upper()} from target's base!\n"
-        
-        elif 'disable_words' in effect:
-            disabled_count = weapon.get('disabled_word_count', 3)
-            effect_result += f"💫 Target's next {disabled_count} words disabled!\n"
-        
-        # ═══════════════════════════════════════════════════════════════════
-        # DEFENSIVE WEAPONS (Shield/Counter effects)
-        # ═══════════════════════════════════════════════════════════════════
-        elif weapon.get('category') == 'defensive':
-            # Defensive weapons: user activates for self-protection
-            # These apply status effects rather than damage
-            
-            if 'block_damage' in effect:
-                # Shield Barrier: Blocks next incoming attack (100% reduction)
-                import time
-                defense_status = {
-                    'type': 'shield_barrier',
-                    'active': True,
-                    'blocks_remaining': 1,
-                    'activated_at': int(time.time()),
-                    'duration': 3600  # 1 hour
-                }
-                if 'defense_status' not in attacker_copy:
-                    attacker_copy['defense_status'] = {}
-                attacker_copy['defense_status']['shield_barrier'] = defense_status
-                effect_result = f"🛡️ **SHIELD ACTIVATED!**\n\n"
-                effect_result += f"⚔️ {attacker['username']} raised {weapon['name']}\n"
-                effect_result += f"🔒 Next incoming attack will be BLOCKED!\n"
-                effect_result += f"⏱️ Duration: 1 hour or until hit\n"
-            
-            elif 'reflect_damage' in effect:
-                # Reflective Armor: Reflects 75% of incoming damage back to attacker
-                import time
-                defense_status = {
-                    'type': 'reflective_armor',
-                    'active': True,
-                    'damage_reflection': weapon.get('reflect_percentage', 0.75),
-                    'activated_at': int(time.time()),
-                    'duration': 3600
-                }
-                if 'defense_status' not in attacker_copy:
-                    attacker_copy['defense_status'] = {}
-                attacker_copy['defense_status']['reflective'] = defense_status
-                effect_result = f"🪞 **MIRROR SHIELD CAST!**\n\n"
-                effect_result += f"⚔️ {attacker['username']} activated {weapon['name']}\n"
-                effect_result += f"🔄 Next attack damage will be REFLECTED (75%)\n"
-                effect_result += f"⏱️ Duration: 1 hour\n"
-            
-            elif 'counter_attack' in effect:
-                # Counter Striker: Auto-counterattack on next hit (80% damage back)
-                import time
-                defense_status = {
-                    'type': 'counter_striker',
-                    'active': True,
-                    'counter_damage_pct': weapon.get('counter_percentage', 0.80),
-                    'counters_remaining': 3,  # Can counter 3 attacks
-                    'activated_at': int(time.time()),
-                    'duration': 3600
-                }
-                if 'defense_status' not in attacker_copy:
-                    attacker_copy['defense_status'] = {}
-                attacker_copy['defense_status']['counter'] = defense_status
-                effect_result = f"⚡ **COUNTER-STRIKE PREPARED!**\n\n"
-                effect_result += f"⚔️ {attacker['username']} readied {weapon['name']}\n"
-                effect_result += f"🔪 Next 3 incoming attacks trigger COUNTERATTACK (80%)\n"
-                effect_result += f"⏱️ Duration: 1 hour\n"
-            
-            elif 'damage_absorb' in effect:
-                # Fortified Keep: Absorbs up to 500 damage before breaking
-                import time
-                defense_status = {
-                    'type': 'fortified_keep',
-                    'active': True,
-                    'absorption_pool': weapon.get('absorption_amount', 500),
-                    'activated_at': int(time.time()),
-                    'duration': 3600
-                }
-                if 'defense_status' not in attacker_copy:
-                    attacker_copy['defense_status'] = {}
-                attacker_copy['defense_status']['fortified'] = defense_status
-                effect_result = f"🏰 **FORTIFIED KEEP RAISED!**\n\n"
-                effect_result += f"⚔️ {attacker['username']} deployed {weapon['name']}\n"
-                effect_result += f"🛡️ Next {weapon.get('absorption_amount', 500)} damage ABSORBED\n"
-                effect_result += f"⏱️ Duration: 1 hour or until depleted\n"
-            
-            elif 'protect_resources' in effect:
-                # Resource Shield: Protects resources from being stolen (24h)
-                import time
-                defense_status = {
-                    'type': 'resource_shield',
-                    'active': True,
-                    'protection_duration': weapon.get('protection_duration', 86400),  # 24 hours
-                    'activated_at': int(time.time()),
-                }
-                if 'defense_status' not in attacker_copy:
-                    attacker_copy['defense_status'] = {}
-                attacker_copy['defense_status']['resource_protect'] = defense_status
-                effect_result = f"💰 **RESOURCE SHIELD ACTIVE!**\n\n"
-                effect_result += f"⚔️ {attacker['username']} cast {weapon['name']}\n"
-                effect_result += f"🔐 All your resources are PROTECTED from theft\n"
-                effect_result += f"⏱️ Duration: 24 hours\n"
-        
-        # Deduct charge
-        attacker_copy['weapons'][weapon_id] = {
-            "charges_remaining": max(0, charges - 1),
-            "cooldown_until": 0,
-            "last_used": None
-        }
-        
-        # Save both users
-        save_user(u_id, attacker_copy)
-        save_user(target_id, target_copy)
-        
-        effect_result += f"\n✅ Weapon activated successfully!"
-        effect_result += f"\n🔄 Charges remaining: {charges - 1}/{weapon.get('charges', 1)}"
-        
-        # Broadcast to group
-        try:
-            await message.answer(effect_result, parse_mode="Markdown")
-        except:
-            pass
-        
-        # Notify victim in DM (only for offensive weapons)
-        if weapon.get('category') != 'defensive':
-            try:
-                victim_msg = f"⚠️ **YOU WERE ATTACKED!**\n\n"
-                victim_msg += f"Weapon: {weapon['name']}\n"
-                victim_msg += f"Attacker: {attacker['username']} (Lv{attacker['level']})\n"
-                victim_msg += f"Effect: {weapon.get('description', 'N/A')}"
-                await bot.send_message(int(target_id), victim_msg, parse_mode="Markdown")
-            except:
-                pass
-        else:
-            # For defensive weapons, notify the user themselves
-            try:
-                defense_msg = f"✅ **DEFENSE ACTIVATED!**\n\n"
-                defense_msg += f"{weapon['name']} is now protecting you!\n"
-                defense_msg += f"Check your profile to see active defenses."
-                await bot.send_message(int(u_id), defense_msg, parse_mode="Markdown")
-            except:
-                pass
-        
-        print(f"[WEAPON] {attacker['username']} used {weapon['name']} (type: {weapon.get('category', 'offensive')})")
-        
-    except Exception as e:
-        print(f"[EMOJI_WEAPON_ERROR] {e}")
+"""
+Clean on_group_message handler for main.py
+This file contains a working version of the word validation handler.
+Copy the function below into main.py to replace the corrupted version.
+"""
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  WORD-GUESS CATCH-ALL  ←── MUST BE THE LAST @dp.message HANDLER
@@ -6593,128 +5614,107 @@ async def on_emoji_weapon_activation(message: types.Message):
 
 @dp.message(F.chat.type.in_({"group","supergroup"}))
 async def on_group_message(message: types.Message):
-    if not message.text: return
-    text = message.text.strip()
-    u_id = str(message.from_user.id)
-    print(f"[MSG] '{text}' from {u_id}")
+    """Catch-all handler for word guesses during active fusion rounds."""
+    try:
+        if not message.text: 
+            return
+        
+        text = message.text.strip()
+        u_id = str(message.from_user.id)
+        print(f"[MSG] '{text}' from {u_id}")
 
-    # Commands not matched above — silently ignore
-    if text.startswith("!") or text.startswith("/"): 
-        print(f"[SKIP] Command detected"); return
+        # Commands not matched above — skip silently
+        if text.startswith("!") or text.startswith("/"): 
+            print(f"[SKIP] Command detected")
+            return
 
-    eng  = get_engine(message.chat.id)
-    user = get_user(u_id)
-    
-    # Auto-register new players on first message
-    if not user:
-        username = message.from_user.first_name or message.from_user.username or f"Player{u_id[:4]}"
-        register_user(u_id, username)
+        # Get game engine and user
+        eng = get_engine(message.chat.id)
         user = get_user(u_id)
-        print(f"[AUTO-REGISTER] Registered {username}")
-        return  # Skip this message, let them start fresh
-    
-    print(f"[USER] {user.get('username') if user else 'NOT_REGISTERED'}, eng.active={eng.active}")
+        print(f"[USER] {user.get('username') if user else 'NOT_REGISTERED'}, eng.active={eng.active}")
 
-    if eng.active:
-        eng.msg_count += 1
+        # Must be registered
+        if not user:
+            if random.random() < 0.25:
+                await message.reply(_unreg(), parse_mode="Markdown")
+            print(f"[SKIP] User not registered")
+            return
+
+        # Check if round is active
+        if not eng.active:
+            print(f"[SKIP] Round not active")
+            return
+
+        # Prevent spam
         if eng.msg_count >= 4:
             eng.msg_count = 0
             await message.answer(f"📌 *Still playing:* `{eng.word1}` + `{eng.word2}`", parse_mode="Markdown")
+            return
 
-    if not eng.active:
-        g = text.lower()
-        if len(g) >= 3 and eng.letters and can_spell(g, eng.letters):
-            await message.reply("🛑 *GameMaster:* \"Round is OVER. Type `!fusion` to start a new one.\"", parse_mode="Markdown")
-        print(f"[SKIP] Round not active"); return
+        # Validate word format
+        guess = text.lower().strip()
+        if len(guess) < 3: 
+            print(f"[SKIP] Too short: {len(guess)} chars")
+            return
+        
+        # Check if already used
+        if guess in eng.used_words:
+            print(f"[SKIP] Already used this round")
+            update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
+            await message.reply(f"❌ `{guess.upper()}` was already guessed!", parse_mode="Markdown")
+            return
+        
+        # Check if can spell from letters
+        if not can_spell(guess, eng.letters):
+            print(f"[SKIP] Can't spell from available letters")
+            await message.reply(f"❌ Can't spell `{guess.upper()}` from: `{eng.letters.upper()}`", parse_mode="Markdown")
+            return
 
-    guess = text.lower()
-    print(f"[GUESS] Processing: '{guess}'")
-    if len(guess) < 3: 
-        print(f"[SKIP] Too short"); return
-    if guess in eng.used_words:
-        print(f"[SKIP] Already used - resetting streak")
-        # Reset streak when using same word twice
-        update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
-        await message.reply(f"❌ `{guess.upper()}` was already guessed this round!"); return
-    if not can_spell(guess, eng.letters): 
-        print(f"[SKIP] Can't spell from {eng.letters}"); return
+        # ════════════════════════════════════════════════════════════════════
+        # WORD VALIDATION
+        # ════════════════════════════════════════════════════════════════════
+        
+        # Ensure dictionary is loaded
+        if len(DICTIONARY) == 0:
+            print(f"[WARN] DICTIONARY empty, reloading...")
+            load_dictionary()
+            print(f"[WARN] Reloaded: {len(DICTIONARY)} words")
+        
+        is_valid = word_in_dict(guess)
+        print(f"[CHECK] '{guess}' valid={is_valid} (dict size: {len(DICTIONARY)})")
+        
+        if not is_valid:
+            print(f"[INVALID] '{guess}' not in dictionary")
+            update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
+            await message.reply(f"❌ `{guess.upper()}` is not a valid word.", parse_mode="Markdown")
+            return
 
-    print(f"[CHECK] Checking dict for '{guess}'...")
-    if word_in_dict(guess):
-        print(f"[VALID] `{guess}` found in dictionary")
-        pts     = max(len(guess) - 2, 1)
-        db_name = user.get("username", message.from_user.first_name)
+        # ════════════════════════════════════════════════════════════════════
+        # VALID WORD - Award points and process
+        # ════════════════════════════════════════════════════════════════════
+        
+        print(f"[VALID] `{guess}` found in dictionary - processing...")
+        
         eng.used_words.append(guess)
+        eng.msg_count += 1
+        
+        # Calculate base points
+        pts = max(len(guess) - 2, 1)
+        db_name = user.get("username", message.from_user.first_name)
         word_len = len(guess)
         
-        # Track consecutive 7-letter words for challenge
-        buffs = user.get('buffs', {})
-        if word_len == 7:
-            consecutive_seven = buffs.get('consecutive_seven_letter', 0) + 1
-        else:
-            consecutive_seven = 0  # Reset if word is not 7 letters
-        buffs['consecutive_seven_letter'] = consecutive_seven
-        user['buffs'] = buffs
-
-        # ═══════════════════════════════════════════════════════════════════
-        #  ADDICTIVE MECHANICS: Trigger on word win
-        # ═══════════════════════════════════════════════════════════════════
-        
-        # Daily Login Streak (award bonus silver on first win of day)
+        # Addictive Mechanics
         login_result = handle_daily_login(u_id)
         if login_result["success"]:
             daily_bonus = login_result["bonus"]
-            pts += daily_bonus // 5  # Convert silver bonus to points bonus
-            print(f"[STREAK] {db_name}: Day {login_result['streak']}, +{login_result['bonus']} bonus silver")
+            pts += daily_bonus // 5
+            print(f"[STREAK] {db_name}: Day {login_result['streak']}, +{login_result['bonus']} bonus")
         
-        # Combo Multiplier (increment on each win)
         combo = increment_combo(u_id)
         combo_mult = combo["multiplier"]
-        if combo["milestone_message"]:
-            print(f"[COMBO] {combo['milestone_message']}")
-        
-        # Rare Drop Check (dopamine hit!)
-        rare_item = check_rare_drop()
-        rare_message = ""
-        if rare_item:
-            add_unclaimed_item(u_id, rare_item["key"], 1)
-            rare_message = f"\n\n🎉 {format_rare_drop_notification(rare_item)}"
-            print(f"[RARE] {db_name} got {rare_item['name']}!")
-
-        # Check weekly challenges
-        challenges = get_weekly_challenges(u_id)
-        weekly_bonus = 0
-        challenge_message = ""
-        completed_challenges = []  # Track which challenges to mark as done
-        for challenge in challenges:
-            if not challenge["completed"] and challenge["progress"] == challenge["total"]:
-                weekly_bonus += challenge["reward"]
-                challenge_message += f"\n✅ CHALLENGE COMPLETE: {challenge['name']} +{challenge['reward']} pts!"
-                completed_challenges.append(challenge["key"])  # Mark this key as completed
-                # Log challenge completion for announcements
-                add_event("challenges", {
-                    "player": db_name,
-                    "challenge": challenge["name"],
-                    "reward": challenge["reward"]
-                })
-        
-        # Apply combo multiplier to points
         pts = int(pts * combo_mult)
-
-        # Check for active XP/SILVER multiplier (stored in buffs JSONB)
-        buffs = user.get('buffs', {})
-        mult_active = buffs.get('multiplier_active', 1)
-        mult_count = buffs.get('multiplier_count', 0)
-        mult_type = buffs.get('multiplier_type', 'xp').lower()
         
-        xp_mult = mult_active if mult_type == 'xp' and mult_count > 0 else 1
-        xp_to_award = pts * xp_mult if mult_count > 0 else pts
-        # Show multiplier as "XP x2" format with bold emphasis
-        mult_note = f" **XP x{xp_mult}**" if (mult_count > 0 and xp_mult > 1) else ""
-        combo_note = f" 🔥x{combo_mult}" if combo_mult > 1.0 else ""
-
-        # SIMPLE RESOURCE SYSTEM - Add 1 resource based on word length
-        # Resources start from 4-letter words
+        # Resources
         resources_awarded = {}
         if word_len == 4:
             resources_awarded = {'wood': 1}
@@ -6726,160 +5726,113 @@ async def on_group_message(message: types.Message):
             resources_awarded = {'diamond': 1}
         elif word_len >= 8:
             resources_awarded = {'relics': 1}
-        # 3-letter words give no resources, just XP
         
-        print(f"[RESOURCES] {db_name}: +{resources_awarded} (word_len={word_len})")
-        
-        # Calculate streak and food reward
+        # Streak/food
         streak_info = update_streak_and_award_food(u_id, correct=True, username=db_name)
-        print(f"[STREAK] Streak: {streak_info.get('streak')}, Food awarded: {streak_info.get('food_awarded')}, Status: {streak_info.get('status')}")
         
-        # Build feedback message FIRST (no database calls needed)
-        fb = f"✅ `{guess.upper()}` +{pts} pts  ⭐ +{xp_to_award} XP{mult_note}{combo_note}"
+        # Rare items
+        rare_item = check_rare_drop()
+        rare_message = ""
+        if rare_item:
+            add_unclaimed_item(u_id, rare_item["key"], 1)
+            rare_message = f"\n\n🎉 {format_rare_drop_notification(rare_item)}"
         
-        # Add resource rewards to feedback with format: +amount ResourceName emoji
-        resource_info = {
-            "wood": ("Wood", "🪵"),
-            "bronze": ("Bronze", "🧱"),
-            "iron": ("Iron", "⛓️"),
-            "diamond": ("Diamond", "💎"),
-            "relics": ("Relics", "🏺")
-        }
+        # Build feedback message
+        fb = f"✅ `{guess.upper()}` +{pts} pts  ⭐ +{pts} XP"
+        
+        if combo_mult > 1.0:
+            fb += f" 🔥x{combo_mult}"
+        
+        # Add resources
         for resource, amount in resources_awarded.items():
-            if amount > 0:
-                res_name, emoji = resource_info.get(resource, ("Unknown", "📦"))
-                fb += f" +{amount} {res_name} {emoji}"
+            emoji_map = {"wood": "🪵", "bronze": "🧱", "iron": "⛓️", "diamond": "💎", "relics": "🏺"}
+            emoji = emoji_map.get(resource, "📦")
+            fb += f" +{amount} {emoji}"
         
-        # Add food reward from streak if any
-        if streak_info["food_awarded"] > 0:
-            fb += f" +{streak_info['food_awarded']} Food 🌽"
-            print(f"[FOOD] Food awarded: {streak_info['food_awarded']}, Total streak: {streak_info['streak']}")
-        else:
-            print(f"[FOOD] No food this round - Streak: {streak_info['streak']}, Food awarded: {streak_info['food_awarded']}")
+        # Add food
+        if streak_info.get("food_awarded", 0) > 0:
+            fb += f" +{streak_info['food_awarded']} 🌽"
         
-        # Add combo message
-        if combo["milestone_message"]:
+        # Add combo milestone
+        if combo.get("milestone_message"):
             fb += f"\n\n{combo['milestone_message']}"
         
-        # Add rare drop and challenges
-        fb += rare_message + challenge_message
+        # Add rare drop
+        fb += rare_message
         
-        # Send feedback immediately (doesn't require database)
-        print(f"[DEBUG] Final feedback: {fb}")
+        # Send feedback
         await message.reply(fb, parse_mode="Markdown")
+        print(f"[SENT] Feedback to {db_name}")
         
-        # NOW do database saves (in background, won't block feedback)
-        # Wrap in try-catch so timeouts don't affect user experience
+        # Save to database (background)
         try:
-            # Streak/food was already updated by update_streak_and_award_food() above
-            # Now just need to add resources to the saved base_resources
-            # Get fresh user data (which now has streak/food from update_streak_and_award_food)
             user_fresh = get_user(u_id)
-            if not user_fresh:
-                print(f"[DB ERROR] User {u_id} not found after save")
-                return
-            
-            print(f"[DEBUG] User fresh before update: base_resources={user_fresh.get('base_resources', {})}")
-            
-            # Initialize base_resources structure if needed
-            if not user_fresh.get('base_resources'):
-                user_fresh['base_resources'] = {
-                    'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
-                    'food': 0,
-                    'current_streak': 0
-                }
-            
-            base_res = user_fresh.get('base_resources', {})
-            if not isinstance(base_res, dict):
-                base_res = {'resources': {}, 'food': 0, 'current_streak': 0}
-            
-            # Make sure resources dict exists
-            if 'resources' not in base_res:
-                base_res['resources'] = {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0}
-            
-            # IMPORTANT: Get existing resources and ADD new ones (not replace)
-            resources_dict = base_res.get('resources', {})
-            print(f"[DEBUG] Existing resources before merge: {resources_dict}")
-            
-            for res_type, amount in resources_awarded.items():
-                old_amount = resources_dict.get(res_type, 0)
-                new_amount = old_amount + amount
-                resources_dict[res_type] = new_amount
-                print(f"[DEBUG] {res_type}: {old_amount} -> {new_amount}")
-            
-            # Ensure ALL resource types exist
-            for res_type in ['wood', 'bronze', 'iron', 'diamond', 'relics']:
-                if res_type not in resources_dict:
-                    resources_dict[res_type] = 0
-            
-            # Update resources in base_resources
-            base_res['resources'] = resources_dict
-            
-            # Mark completed challenges
-            if completed_challenges:
-                if 'challenges' not in user_fresh:
-                    user_fresh['challenges'] = {}
-                for challenge_key in completed_challenges:
-                    user_fresh['challenges'][challenge_key] = True
-                print(f"[CHALLENGES] Marked as completed: {completed_challenges}")
-            
-            # Save updated base_resources to database
-            user_fresh['base_resources'] = base_res
-            # Clean up problematic fields before saving
-            user_fresh.pop('xp_in_level', None)
-            user_fresh.pop('building_cooldowns', None)
-            save_user(u_id, user_fresh)
-            print(f"[DB] Resources saved: {resources_awarded}")
-            print(f"[DB] Total resources now: {resources_dict}")
-            print(f"[DB] Food in base_resources: {base_res.get('food', 0)} | Streak in base_resources: {base_res.get('current_streak', 0)}")
-            
-            # Handle multiplier deduction
-            if mult_count > 0:
-                buffs['multiplier_count'] = mult_count - 1
-                if buffs['multiplier_count'] <= 0:
-                    buffs.pop('multiplier_active', None)
-                    buffs.pop('multiplier_count', None)
-                    buffs.pop('multiplier_type', None)
-                user['buffs'] = buffs
-                # Clean up before saving
-                user.pop('xp_in_level', None)
-                user.pop('building_cooldowns', None)
-                save_user(u_id, user)
-                print(f"[MULTIPLIER] Decreased count: {mult_count} -> {buffs.get('multiplier_count', 0)}")
-            
-            # Award points and XP
-            add_points(u_id, pts, db_name)
-            add_xp(u_id, xp_to_award)
-            print(f"[DB] Points & XP saved for {db_name}")
+            if user_fresh:
+                # Initialize base_resources if needed
+                if 'base_resources' not in user_fresh:
+                    user_fresh['base_resources'] = {'resources': {}, 'food': 0, 'current_streak': 0}
+                
+                base_res = user_fresh['base_resources']
+                if 'resources' not in base_res:
+                    base_res['resources'] = {}
+                
+                # Add resources
+                res_dict = base_res['resources']
+                for res_type, amount in resources_awarded.items():
+                    res_dict[res_type] = res_dict.get(res_type, 0) + amount
+                
+                # Save
+                user_fresh['base_resources'] = base_res
+                save_user(u_id, user_fresh)
+                add_points(u_id, pts, db_name)
+                add_xp(u_id, pts)
+                print(f"[DB] Saved for {db_name}")
         except Exception as e:
-            print(f"[DB ERROR] Failed to save data: {e}")
-            import traceback
-            traceback.print_exc()
-            # Don't crash - user already got feedback, data will retry on next action
+            print(f"[DB ERROR] {e}")
         
-        # Check level up (also in try-catch)
-        try:
-            old_lvl, new_lvl = check_level_up(u_id)
-            if old_lvl and new_lvl:
-                print(f"[LEVEL UP] {db_name}: {old_lvl} → {new_lvl}")
-                # Log level-up event for announcements
-                add_event("level_ups", {
-                    "player": db_name,
-                    "old_level": old_lvl,
-                    "new_level": new_lvl
-                })
-        except Exception as e:
-            print(f"[LEVEL ERROR] {e}")
-        
-        # Update scores for end-of-round display
+        # Update scores
         if u_id not in eng.scores:
-            eng.scores[u_id] = {"pts": 0, "name": db_name, "user_id": u_id, "leveled_up": False}
+            eng.scores[u_id] = {"pts": 0, "name": db_name, "user_id": u_id}
         eng.scores[u_id]["pts"] += pts
-    else:
-        # Word not in dictionary - reset streak and log
-        print(f"[INVALID] '{guess}' NOT in dictionary - no points, resetting streak")
-        update_streak_and_award_food(u_id, correct=False, username=user.get("username", "") if user else "")
-        # No action needed, just silently skip invalid words
+    
+    except Exception as e:
+        print(f"[HANDLER ERROR] {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            await message.reply("⚠️ Error processing word. Try again.", parse_mode="Markdown")
+        except:
+            pass
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -6958,10 +5911,10 @@ async def sheets_sync_background_task(bot: Bot, chat_id: int):
                     update_google_sheet(leaderboard)
                     
                     # Format and send update to group
-                    top_5 = leaderboard[:5]
-                    msg = "📊 *LEADERBOARD AUTO-SYNC*\n\n"
+                    top_10 = leaderboard[:10]
+                    msg = "📊 *LEADERBOARD*\n\n"
                     msg += "🏆 Top 5 Players:\n"
-                    for idx, player in enumerate(top_5, 1):
+                    for idx, player in enumerate(top_10, 1):
                         username = player.get("username", "Unknown")
                         points = player.get("points", 0)
                         msg += f"{idx}. {username} - {points:,} pts\n"
@@ -7127,6 +6080,238 @@ async def mining_task(bot: Bot, chat_id: int):
             print(f"[MINING_TASK ERROR] {e}")
             await asyncio.sleep(10)
 
+@dp.message(_cmd("save"))
+async def cmd_save(message: types.Message):
+    if message.chat.type != "private":
+        await message.answer("🃏 *GM:* \"Save your progress in private, not here.\"", parse_mode="Markdown")
+        return
+
+    u_id = str(message.from_user.id)
+    user = get_user(u_id) # Fetch the user from Supabase/DB
+    
+    if not user:
+        await message.answer("❌ Register first by playing a round!")
+        return
+
+    # Parse the slot number (e.g., /save 1)
+    parts = message.text.split()
+    slot = 1 # Default slot
+    if len(parts) > 1:
+        try:
+            slot = int(parts[1])
+        except ValueError:
+            await message.answer("❌ Slot must be a number (1-5).")
+            return
+
+    # Call the function from save_system.py
+    success, result_msg = save_game(u_id, user, slot=slot)
+    
+    if success:
+        # IMPORTANT: You must save the updated user object back to the DB 
+        # because save_game modifies the 'game_saves' dictionary inside the user object.
+        save_user(u_id, user) 
+        await message.answer(f"✅ {result_msg}", parse_mode="Markdown")
+    else:
+        # This is where your "error saving game" message comes from if save_game returns False
+        await message.answer(f"❌ {result_msg}", parse_mode="Markdown")
+
+@dp.message(_cmd("load"))
+async def cmd_load(message: types.Message):
+    if message.chat.type != "private":
+        await message.answer("🃏 *GM:* \"You can not do that here!\"", parse_mode="Markdown")
+        return
+
+    u_id = str(message.from_user.id)
+    user = get_user(u_id) # Fetch the user from Supabase/DB
+    
+    if not user:
+        await message.answer("❌ Register first by playing a round!")
+        return
+
+    # Parse the slot number (e.g., /load 1)
+    parts = message.text.split()
+    slot = 1 # Default slot
+    if len(parts) > 1:
+        try:
+            slot = int(parts[1])
+            if slot < 1 or slot > 5:
+                await message.answer("❌ Slot must be between 1-5.", parse_mode="Markdown")
+                return
+        except ValueError:
+            await message.answer("❌ Slot must be a number (1-5).", parse_mode="Markdown")
+            return
+
+    # Call the function from save_system.py (returns 3 values)
+    success, restored_state, result_msg = load_game(user, slot=slot)
+    
+    if success:
+        # Update the user data if restore was successful
+        if restored_state:
+            save_user(u_id, restored_state)
+        await message.answer(f"✅ {result_msg}", parse_mode="Markdown")
+    else:
+        await message.answer(f"❌ {result_msg}", parse_mode="Markdown")
+
+
+@dp.message(_cmd("reset"))
+async def cmd_reset(message: types.Message):
+    if message.chat.type != "private":
+        await message.answer("🃏 *GM:* \"You can not do that here!\"", parse_mode="Markdown")
+        return
+
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    
+    if not user:
+        await message.answer("❌ Register first by playing a round!")
+        return
+
+    # Parse the reset level (e.g., /reset soft)
+    parts = message.text.split()
+    reset_level = "hard"  # Default level
+    if len(parts) > 1:
+        reset_level = parts[1].lower()
+        if reset_level not in ["soft", "hard", "weekly"]:
+            await message.answer(
+                "❌ *Invalid reset level!*\n\n"
+                "Use one of:\n"
+                "• `/reset soft` — Reset battle stats only\n"
+                "• `/reset hard` — Complete restart (careful!)\n"
+                "• `/reset weekly` — Reset weekly points",
+                parse_mode="Markdown"
+            )
+            return
+
+    # Confirm dangerous resets
+    if reset_level == "hard":
+        await message.answer(
+            "⚠️ *WARNING: HARD RESET*\n\n"
+            "This will completely restart your progress!\n"
+            "All achievements, levels, and items will be lost.\n\n"
+            "Type: `/confirm_reset hard`\n\n"
+            "Or cancel by ignoring this message.",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Perform the reset
+    success, new_state, result_msg = reset_game(user, reset_level)
+    
+    if success:
+        if new_state:
+            save_user(u_id, new_state)
+        await message.answer(f"✅ {result_msg}", parse_mode="Markdown")
+    else:
+        await message.answer(f"❌ {result_msg}", parse_mode="Markdown")
+
+
+@dp.message(_cmd("confirm_reset"))
+async def cmd_confirm_reset(message: types.Message):
+    if message.chat.type != "private":
+        await message.answer("🃏 *GM:* \"You can not do that here!\"", parse_mode="Markdown")
+        return
+
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    
+    if not user:
+        await message.answer("❌ Register first by playing a round!")
+        return
+
+    # Parse the reset level
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.answer("❌ Specify reset level: `/confirm_reset hard`", parse_mode="Markdown")
+        return
+    
+    reset_level = parts[1].lower()
+    if reset_level != "hard":
+        await message.answer("❌ Only hard reset requires confirmation.", parse_mode="Markdown")
+        return
+
+    # Perform the hard reset
+    success, new_state, result_msg = reset_game(user, "hard")
+    
+    if success:
+        if new_state:
+            save_user(u_id, new_state)
+        await message.answer(
+            f"💀 *HARD RESET COMPLETE*\n\n"
+            f"Your account has been completely reset.\n"
+            f"Type `!start` to begin a new adventure.",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(f"❌ Reset failed: {result_msg}", parse_mode="Markdown")
+
+
+@dp.message(_cmd("saves"))
+async def cmd_saves(message: types.Message):
+    """Display all saved game slots."""
+    if message.chat.type != "private":
+        await message.answer(_dm_only("!saves"), parse_mode="Markdown")
+        return
+    
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    
+    if not user:
+        await message.answer("❌ Register first by playing a round!")
+        return
+    
+    # Get all save checkpoints
+    checkpoints = list_checkpoints(u_id)
+    
+    if not checkpoints:
+        await message.answer(
+            "💾 *YOUR SAVED GAMES*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "No saves yet.\n\n"
+            "Create one with: `/save [1-5]`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Group saves by slot
+    saves_by_slot = {}
+    for cp in checkpoints:
+        reason = cp.get('reason', 'unknown')
+        if reason.startswith('slot_'):
+            slot_num = reason.replace('slot_', '')
+            if slot_num not in saves_by_slot:
+                saves_by_slot[slot_num] = cp
+    
+    # Build display with friendly timestamp formatting
+    from datetime import datetime
+    txt = "💾 *YOUR SAVED GAMES*\n━━━━━━━━━━━━━━━━━━━━\n\n"
+    
+    if saves_by_slot:
+        for slot_num in sorted(saves_by_slot.keys(), key=lambda x: int(x)):
+            cp = saves_by_slot[slot_num]
+            timestamp_str = cp.get('timestamp', 'unknown')
+            
+            # Format timestamp to be more readable
+            # Input: "2026-04-15_14-59-01"
+            # Output: "Apr 15, 2026 at 2:59 PM"
+            try:
+                dt = datetime.strptime(timestamp_str, "%Y-%m-%d_%H-%M-%S")
+                # Use format that works on Windows (%-I not supported)
+                formatted_time = dt.strftime("%b %d, %Y at %I:%M %p").lstrip('0').replace(' 0', ' ')
+            except:
+                formatted_time = timestamp_str
+            
+            txt += f"**Slot {slot_num}:** `{formatted_time}`\n"
+    else:
+        txt += "No saved slots found.\n"
+    
+    txt += f"\n━━━━━━━━━━━━━━━━━━━━\n"
+    txt += f"*Available slots:* 1-5\n"
+    txt += f"*Load:* `/load [slot]`\n"
+    txt += f"*Save:* `/save [slot]`"
+    
+    await message.answer(txt, parse_mode="Markdown")
+
+    
 
 async def _finalize_mining(u_id: str, sector_id: int, troop_count: int):
     """Finalize mining operation and award resources."""
@@ -7180,7 +6365,11 @@ async def main():
     print("Bot starting...")
     
     # Load dictionary for word validation
+    print(f"[STARTUP] DICTIONARY size before load_dictionary(): {len(DICTIONARY)}")
     load_dictionary()
+    print(f"[STARTUP] DICTIONARY size after load_dictionary(): {len(DICTIONARY)}")
+    if len(DICTIONARY) == 0:
+        print("[ERROR] ⚠️  DICTIONARY IS EMPTY! Word validation will FAIL!")
     
     # Try to delete webhook with timeout, but don't crash if network is down
     try:
@@ -7202,10 +6391,7 @@ async def main():
 
     print("[INFO] Connecting to Telegram polling...")
     
-    # Reset all shields (remove permanent shields, set to UNPROTECTED)
-    give_shields_to_all()
-    print("[OK] All shields reset to UNPROTECTED status (permanent shields removed)")
-    
+ 
     # Grant 3 free teleports to all players
     grant_free_teleports_to_all()
     print("[OK] Granted 3 free teleports to all players")

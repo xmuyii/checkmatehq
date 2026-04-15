@@ -1,258 +1,270 @@
-# -*- coding: utf-8 -*-
 """
-save_system.py — Save/Load/Reset Game Progression
-==================================================
-Players can save their current game, load from previous saves, or reset with limits.
-
-Features:
-- 5 save slots per player
-- Full game state snapshots (Level, XP, Bitcoin, Buildings, Military, Resources, etc.)
-- Keep prestige tier and unlocked weapons on reset
-- Once-per-day reset limit
-- Automatic save management (cleanup of old saves beyond 5 slots)
+Save System - Wrapper for Game State Management
+================================================
+This module provides game save/load/reset functionality.
+It wraps game_state.py to provide the interface expected by main.py.
 """
 
-from typing import Dict, List, Tuple
-from datetime import datetime, timedelta
 import json
+import os
+from datetime import datetime
+from typing import Dict, Any, Tuple, List
+from game_state import (
+    save_game_state,
+    load_game_state,
+    restore_to_checkpoint,
+    reset_player_progress,
+    BACKUP_DIR,
+)
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  SAVE STRUCTURE
+#  PUBLIC API - Aliases and wrappers for game_state functions
 # ═══════════════════════════════════════════════════════════════════════════
 
-SAVE_FIELDS = [
-    'level', 'xp', 'bitcoin',  # Core progression
-    'buildings', 'military', 'inventory',  # Game state
-    'base_resources', 'buffs',  # Resources and buffs
-    'all_time_points', 'weekly_points',  # Points
-    'total_words', 'weapons',  # Stats and unlocked weapons
-]
+def save_game(user_id: str, user_data: dict, reason: str = "manual", slot: int = None) -> Tuple[bool, str]:
+    """
+    Save complete game state for a player.
+    
+    Args:
+        user_id: Player's Telegram user ID
+        user_data: Complete user profile data
+        reason: Why state is being saved (for logging)
+        slot: Optional save slot (1-5) for manual saves
+    
+    Returns:
+        (success: bool, message: str)
+    """
+    # If slot is provided, use it as the reason
+    if slot is not None:
+        reason = f"slot_{slot}"
+    
+    success, msg = save_game_state(user_id, user_data, reason)
+    
+    # Format message
+    if slot:
+        return (success, f"Game saved to slot {slot}" if success else f"Failed to save to slot {slot}: {msg}")
+    else:
+        return (success, msg)
 
-RESET_KEEP_FIELDS = [
-    'prestige',  # Keep prestige tier
-    'username', 'base_name',  # Identity
-]
+def load_game(user_id_or_dict, slot: int = None) -> Tuple[bool, dict, str]:
+    """
+    Load game state for a player.
+    Can load most recent backup or specific slot.
+    
+    Args:
+        user_id_or_dict: Player's Telegram user ID (string) or user dict
+        slot: Optional save slot to load from (1-5)
+    
+    Returns:
+        (success: bool, state: dict, message: str)
+    """
+    # Handle both user_id string and user dict
+    if isinstance(user_id_or_dict, dict):
+        # Prioritize 'user_id' (Telegram ID) over 'id' (database row ID)
+        user_id = str(user_id_or_dict.get('user_id', user_id_or_dict.get('id', '')))
+    else:
+        user_id = str(user_id_or_dict)
+    
+    success, state, msg = load_game_state(user_id, slot=slot)
+    
+    # Format message
+    if slot and success:
+        return (success, state, f"Game loaded from slot {slot}")
+    else:
+        return (success, state, msg)
+
+def reset_game(user_id_or_dict, reset_level: str = "hard", slot: int = None) -> Tuple[bool, dict, str]:
+    """
+    Reset player progress to a specific level.
+    
+    Args:
+        user_id_or_dict: Player's Telegram user ID (string) or user dict
+        reset_level: "soft", "hard", or "weekly"
+        slot: Optional save slot parameter (for compatibility)
+    
+    Returns:
+        (success: bool, new_state: dict, message: str)
+    """
+    # Handle both user_id string and user dict
+    if isinstance(user_id_or_dict, dict):
+        # Prioritize 'user_id' (Telegram ID) over 'id' (database row ID)
+        user_id = str(user_id_or_dict.get('user_id', user_id_or_dict.get('id', '')))
+    else:
+        user_id = str(user_id_or_dict)
+    
+    return reset_player_progress(user_id, reset_level)
+
+def restore_game(user_id_or_dict, checkpoint_name: str = "") -> Tuple[bool, dict, str]:
+    """
+    Restore to a specific checkpoint or most recent backup.
+    
+    Args:
+        user_id_or_dict: Player's Telegram user ID (string) or user dict
+        checkpoint_name: Specific checkpoint to restore to (optional)
+    
+    Returns:
+        (success: bool, state: dict, message: str)
+    """
+    # Handle both user_id string and user dict
+    if isinstance(user_id_or_dict, dict):
+        # Prioritize 'user_id' (Telegram ID) over 'id' (database row ID)
+        user_id = str(user_id_or_dict.get('user_id', user_id_or_dict.get('id', '')))
+    else:
+        user_id = str(user_id_or_dict)
+    
+    return restore_to_checkpoint(user_id, checkpoint_name)
+
+def list_saves(user_id: str) -> List[str]:
+    """
+    List all available backups for a player.
+    
+    Args:
+        user_id: Player's Telegram user ID
+    
+    Returns:
+        List of backup file paths
+    """
+    if not os.path.exists(BACKUP_DIR):
+        return []
+    
+    saves = []
+    for filename in os.listdir(BACKUP_DIR):
+        if filename.startswith(f"user_{user_id}_") and filename.endswith(".json"):
+            saves.append(os.path.join(BACKUP_DIR, filename))
+    
+    return sorted(saves, reverse=True)  # Most recent first
+
+def list_checkpoints(user_id: str) -> List[Dict[str, Any]]:
+    """
+    List all checkpoints for a player with metadata.
+    
+    Args:
+        user_id: Player's Telegram user ID
+    
+    Returns:
+        List of checkpoint info dicts
+    """
+    saves = list_saves(user_id)
+    checkpoints = []
+    
+    for save_file in saves:
+        try:
+            filename = os.path.basename(save_file)
+            # Parse filename: user_{id}_{YYYY-MM-DD}_{HH-MM-SS}_{reason}.json
+            filename_no_ext = filename.replace(".json", "")
+            
+            # Strip the prefix: user_{user_id}_
+            prefix = f"user_{user_id}_"
+            if not filename_no_ext.startswith(prefix):
+                continue
+            
+            rest = filename_no_ext[len(prefix):]
+            
+            # rest is now: YYYY-MM-DD_HH-MM-SS_reason
+            # Split on underscore with maxsplit=2 to separate date, time, and reason
+            parts = rest.split("_", 2)
+            
+            if len(parts) >= 3:
+                # parts[0] = YYYY-MM-DD
+                # parts[1] = HH-MM-SS
+                # parts[2] = reason (may contain underscores like "slot_1")
+                timestamp = f"{parts[0]}_{parts[1]}"
+                reason = parts[2]
+                
+                checkpoint_info = {
+                    "file": save_file,
+                    "reason": reason,
+                    "timestamp": timestamp,
+                    "file_size": os.path.getsize(save_file)
+                }
+                checkpoints.append(checkpoint_info)
+        except Exception as e:
+            print(f"[ERROR] Failed to parse checkpoint {save_file}: {e}")
+    
+    return checkpoints
+
+def format_reset_status(user_id: str, reset_level: str, success: bool, message: str) -> str:
+    """
+    Format a reset operation status message for display.
+    
+    Args:
+        user_id: Player's Telegram user ID
+        reset_level: Reset level used
+        success: Whether reset succeeded
+        message: Status message from reset operation
+    
+    Returns:
+        Formatted status string
+    """
+    if success:
+        emoji = "✅"
+        level_name = {
+            "soft": "Battle Stats",
+            "hard": "Complete",
+            "weekly": "Weekly Stats"
+        }.get(reset_level, reset_level)
+        return f"{emoji} *Reset Successful*\n*Type:* {level_name}\n*Details:* {message}"
+    else:
+        return f"❌ *Reset Failed*\n*Reason:* {message}"
+
+def format_checkpoint_display(checkpoint: Dict[str, Any]) -> str:
+    """
+    Format a checkpoint info for display in chat.
+    
+    Args:
+        checkpoint: Checkpoint info dict from list_checkpoints()
+    
+    Returns:
+        Formatted checkpoint display string
+    """
+    reason = checkpoint.get("reason", "unknown")
+    timestamp = checkpoint.get("timestamp", "unknown")
+    file_size = checkpoint.get("file_size", 0)
+    
+    # Convert bytes to KB
+    size_kb = file_size / 1024
+    
+    return f"💾 `{reason}` - {timestamp} ({size_kb:.1f} KB)"
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  SAVE MANAGEMENT
+#  QUICK SAVE/LOAD HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
 
-def create_save_snapshot(user: Dict) -> Dict:
-    """Create a snapshot of current game state."""
-    snapshot = {
-        'timestamp': datetime.utcnow().isoformat(),
-        'level': user.get('level', 1),
-        'xp': user.get('xp', 0),
-        'bitcoin': user.get('bitcoin', 0),
-        'buildings': user.get('buildings', {}),
-        'military': user.get('military', {}),
-        'inventory': user.get('inventory', []),
-        'base_resources': user.get('base_resources', {}),
-        'buffs': user.get('buffs', {}),
-        'all_time_points': user.get('all_time_points', 0),
-        'weekly_points': user.get('weekly_points', 0),
-        'total_words': user.get('total_words', 0),
-        'weapons': user.get('weapons', {}),
-    }
-    return snapshot
+def quick_save(user_id: str, user_data: dict) -> bool:
+    """Quick save without reason tracking."""
+    success, msg = save_game(user_id, user_data, "quick_save")
+    return success
 
+def quick_load(user_id: str) -> dict:
+    """Quick load, returns empty dict if failed."""
+    success, state, msg = load_game(user_id)
+    return state if success else {}
 
-def save_game(user_id: str, user: Dict, slot: int = 1) -> Tuple[bool, str]:
-    """
-    Save current game state to a slot (1-5).
-    Returns (success, message)
-    """
-    if not 1 <= slot <= 5:
-        return False, "Invalid save slot! Use slots 1-5."
-    
-    # Get or initialize saves
-    saves = user.get('game_saves', {})
-    if not isinstance(saves, dict):
-        saves = {}
-    
-    # Create snapshot
-    snapshot = create_save_snapshot(user)
-    snapshot['slot'] = slot
-    
-    # Store in slot
-    saves[str(slot)] = snapshot
-    user['game_saves'] = saves
-    
-    # Format timestamp for display
-    ts = datetime.fromisoformat(snapshot['timestamp'])
-    date_str = ts.strftime('%b %d %H:%M')
-    
-    message = (
-        f"✅ GAME SAVED\n"
-        f"Slot {slot}\n"
-        f"{date_str}\n"
-        f"Level {snapshot['level']} | Bitcoin {snapshot['bitcoin']}"
-    )
-    
-    return True, message
+def has_saves(user_id: str) -> bool:
+    """Check if player has any backups."""
+    return len(list_saves(user_id)) > 0
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  DEBUG UTILITIES
+# ═══════════════════════════════════════════════════════════════════════════
 
-def load_game(user: Dict, slot: int = 1) -> Tuple[bool, str, Dict]:
-    """
-    Load game state from a save slot.
-    Returns (success, message, restored_user_data)
-    """
-    if not 1 <= slot <= 5:
-        return False, "Invalid save slot! Use slots 1-5.", user
+def print_save_info(user_id: str):
+    """Print all save information for a player (for debugging)."""
+    saves = list_saves(user_id)
+    checkpoints = list_checkpoints(user_id)
     
-    saves = user.get('game_saves', {})
-    slot_key = str(slot)
+    print(f"\n[SAVE_INFO] Player {user_id}")
+    print(f"[SAVE_INFO] Total saves: {len(saves)}")
     
-    if slot_key not in saves:
-        return False, f"❌ No save in slot {slot}.", user
-    
-    snapshot = saves[slot_key]
-    
-    # Preserve these fields from current user
-    preserved = {k: user.get(k) for k in RESET_KEEP_FIELDS if k in user}
-    
-    # Restore from snapshot
-    for field in SAVE_FIELDS:
-        user[field] = snapshot.get(field, user.get(field))
-    
-    # Re-apply preserved fields
-    user.update(preserved)
-    
-    # Format timestamp for display
-    ts = datetime.fromisoformat(snapshot['timestamp'])
-    date_str = ts.strftime('%b %d %H:%M')
-    
-    message = (
-        f"✅ GAME LOADED\n"
-        f"Slot {slot}\n"
-        f"{date_str}\n"
-        f"Level {snapshot['level']} | Bitcoin {snapshot['bitcoin']}"
-    )
-    
-    return True, message, user
-
-
-def reset_game(user: Dict) -> Tuple[bool, str, Dict]:
-    """
-    Reset game to level 1, clear all progress except prestige/weapons.
-    Returns (success, message, reset_user_data)
-    """
-    # Check daily reset limit
-    last_reset = user.get('last_reset_date')
-    today = datetime.utcnow().strftime('%Y-%m-%d')
-    
-    if last_reset and last_reset >= today:
-        return False, "❌ Already reset today! Try again tomorrow.", user
-    
-    # Preserve important fields
-    preserved = {
-        'user_id': user.get('user_id'),
-        'username': user.get('username'),
-        'base_name': user.get('base_name'),
-        'prestige': user.get('prestige', 0),
-        'weapons': user.get('weapons', {}),  # Keep unlocked weapons
-        'game_saves': user.get('game_saves', {}),  # Keep saves
-    }
-    
-    # Reset core progression
-    reset_user = {
-        **preserved,
-        'level': 1,
-        'xp': 0,
-        'bitcoin': 0,
-        'buildings': {},
-        'military': {},
-        'inventory': [],
-        'unclaimed_items': [],
-        'base_resources': {
-            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
-            'food': 0,
-            'current_streak': 0
-        },
-        'buffs': {},
-        'all_time_points': 0,
-        'weekly_points': 0,
-        'total_words': 0,
-        'last_reset_date': today,
-    }
-    
-    # Copy over other fields not explicitly reset
-    for k, v in user.items():
-        if k not in reset_user and k not in ['level', 'xp', 'bitcoin', 'buildings', 'military', 'inventory', 'unclaimed_items', 'base_resources', 'buffs', 'all_time_points', 'weekly_points', 'total_words']:
-            reset_user[k] = v
-    
-    message = (
-        f"✅ GAME RESET\n"
-        f"Level reset to 1\n"
-        f"Bitcoin and XP cleared\n"
-        f"Buildings and inventory cleared\n\n"
-        f"PRESERVED:\n"
-        f"Prestige Tier {reset_user.get('prestige', 0)}\n"
-        f"All weapons\n"
-        f"All saves"
-    )
-    
-    return True, message, reset_user
-
-
-def list_saves(user: Dict) -> str:
-    """Show all available save slots."""
-    saves = user.get('game_saves', {})
+    for cp in checkpoints:
+        print(f"  {format_checkpoint_display(cp)}")
     
     if not saves:
-        return "❌ No saves yet. Use /save 1 to save your first game!"
+        print(f"  (no backups found)")
     
-    msg = "💾 YOUR SAVED GAMES\n\n"
-    
-    for slot in range(1, 6):
-        slot_key = str(slot)
-        if slot_key in saves:
-            save = saves[slot_key]
-            ts = datetime.fromisoformat(save['timestamp'])
-            date_str = ts.strftime('%b %d %H:%M')
-            level = save.get('level', '?')
-            bitcoin = save.get('bitcoin', 0)
-            
-            msg += (
-                f"📍 Slot {slot}\n"
-                f"   📅 {date_str}\n"
-                f"   📊 Level {level} | 💰 {bitcoin}\n\n"
-            )
-        else:
-            msg += f"📍 Slot {slot} — Empty\n\n"
-    
-    msg += "Use /load [slot] to restore a saved game.\n"
-    msg += "Use /save [slot] to save to a slot."
-    
-    return msg
+    print()
 
-
-def format_reset_status(user: Dict) -> str:
-    """Show reset status and when player can reset again."""
-    last_reset = user.get('last_reset_date')
-    today = datetime.utcnow().strftime('%Y-%m-%d')
-    
-    msg = "🔄 RESET & RESTART\n\n"
-    
-    if last_reset and last_reset >= today:
-        msg += "⏰ Already reset today!\n"
-        msg += "Try again tomorrow.\n\n"
-        msg += "KEPT ON RESET:\n"
-        msg += f"👑 Prestige Tier {user.get('prestige', 0)}\n"
-        msg += "🎯 Unlocked weapons\n"
-        msg += "💾 All save slots\n\n"
-        msg += "You can reset once per day."
-    else:
-        msg += "✅ Ready to reset!\n\n"
-        msg += "WARNING: This will:\n"
-        msg += "• Reset level to 1\n"
-        msg += "• Clear all XP\n"
-        msg += "• Clear bitcoin\n"
-        msg += "• Remove all buildings, military, inventory\n\n"
-        msg += "YOU'LL KEEP:\n"
-        msg += f"👑 Prestige Tier {user.get('prestige', 0)}\n"
-        msg += "🎯 All unlocked weapons\n"
-        msg += "💾 All save slots\n\n"
-        msg += "Type /reset confirm to reset everything."
-    
-    return msg
+if __name__ == "__main__":
+    # Test the module
+    print("[TEST] Save system loaded successfully")
+    print(f"[TEST] Backup directory: {BACKUP_DIR}")
