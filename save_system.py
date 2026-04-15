@@ -6,7 +6,7 @@ Players can save their current game, load from previous saves, or reset with lim
 
 Features:
 - 5 save slots per player
-- Full game state snapshots (Level, XP, Silver, Buildings, Military, Resources, etc.)
+- Full game state snapshots (Level, XP, Bitcoin, Buildings, Military, Resources, etc.)
 - Keep prestige tier and unlocked weapons on reset
 - Once-per-day reset limit
 - Automatic save management (cleanup of old saves beyond 5 slots)
@@ -21,7 +21,7 @@ import json
 # ═══════════════════════════════════════════════════════════════════════════
 
 SAVE_FIELDS = [
-    'level', 'xp', 'silver',  # Core progression
+    'level', 'xp', 'bitcoin',  # Core progression
     'buildings', 'military', 'inventory',  # Game state
     'base_resources', 'buffs',  # Resources and buffs
     'all_time_points', 'weekly_points',  # Points
@@ -43,7 +43,7 @@ def create_save_snapshot(user: Dict) -> Dict:
         'timestamp': datetime.utcnow().isoformat(),
         'level': user.get('level', 1),
         'xp': user.get('xp', 0),
-        'silver': user.get('silver', 0),
+        'bitcoin': user.get('bitcoin', 0),
         'buildings': user.get('buildings', {}),
         'military': user.get('military', {}),
         'inventory': user.get('inventory', []),
@@ -86,7 +86,7 @@ def save_game(user_id: str, user: Dict, slot: int = 1) -> Tuple[bool, str]:
         f"✅ GAME SAVED\n"
         f"Slot {slot}\n"
         f"{date_str}\n"
-        f"Level {snapshot['level']} | Silver {snapshot['silver']}"
+        f"Level {snapshot['level']} | Bitcoin {snapshot['bitcoin']}"
     )
     
     return True, message
@@ -126,7 +126,7 @@ def load_game(user: Dict, slot: int = 1) -> Tuple[bool, str, Dict]:
         f"✅ GAME LOADED\n"
         f"Slot {slot}\n"
         f"{date_str}\n"
-        f"Level {snapshot['level']} | Silver {snapshot['silver']}"
+        f"Level {snapshot['level']} | Bitcoin {snapshot['bitcoin']}"
     )
     
     return True, message, user
@@ -159,7 +159,7 @@ def reset_game(user: Dict) -> Tuple[bool, str, Dict]:
         **preserved,
         'level': 1,
         'xp': 0,
-        'silver': 0,
+        'bitcoin': 0,
         'buildings': {},
         'military': {},
         'inventory': [],
@@ -178,13 +178,13 @@ def reset_game(user: Dict) -> Tuple[bool, str, Dict]:
     
     # Copy over other fields not explicitly reset
     for k, v in user.items():
-        if k not in reset_user and k not in ['level', 'xp', 'silver', 'buildings', 'military', 'inventory', 'unclaimed_items', 'base_resources', 'buffs', 'all_time_points', 'weekly_points', 'total_words']:
+        if k not in reset_user and k not in ['level', 'xp', 'bitcoin', 'buildings', 'military', 'inventory', 'unclaimed_items', 'base_resources', 'buffs', 'all_time_points', 'weekly_points', 'total_words']:
             reset_user[k] = v
     
     message = (
         f"✅ GAME RESET\n"
         f"Level reset to 1\n"
-        f"Silver and XP cleared\n"
+        f"Bitcoin and XP cleared\n"
         f"Buildings and inventory cleared\n\n"
         f"PRESERVED:\n"
         f"Prestige Tier {reset_user.get('prestige', 0)}\n"
@@ -211,12 +211,12 @@ def list_saves(user: Dict) -> str:
             ts = datetime.fromisoformat(save['timestamp'])
             date_str = ts.strftime('%b %d %H:%M')
             level = save.get('level', '?')
-            silver = save.get('silver', 0)
+            bitcoin = save.get('bitcoin', 0)
             
             msg += (
                 f"📍 Slot {slot}\n"
                 f"   📅 {date_str}\n"
-                f"   📊 Level {level} | 💰 {silver}\n\n"
+                f"   📊 Level {level} | 💰 {bitcoin}\n\n"
             )
         else:
             msg += f"📍 Slot {slot} — Empty\n\n"
@@ -247,7 +247,7 @@ def format_reset_status(user: Dict) -> str:
         msg += "WARNING: This will:\n"
         msg += "• Reset level to 1\n"
         msg += "• Clear all XP\n"
-        msg += "• Clear silver\n"
+        msg += "• Clear bitcoin\n"
         msg += "• Remove all buildings, military, inventory\n\n"
         msg += "YOU'LL KEEP:\n"
         msg += f"👑 Prestige Tier {user.get('prestige', 0)}\n"
