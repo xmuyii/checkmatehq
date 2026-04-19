@@ -534,7 +534,7 @@ async def game_loop(chat_id: int):
                     # Scores with medals
                     for i, p in enumerate(ss):
                         medal = medals[i] if i < 3 else f"  {i+1}."
-                        result += f"{medal} {p['name']} — *{p['pts']} pts*\n"
+                        result += f"{medal} {p['name']} — *{format_number(p['pts'])} pts*\n"
                         if i < 3:
                             try:
                                 add_unclaimed_item(p['user_id'], "super_crate", 1)
@@ -595,7 +595,7 @@ async def game_loop(chat_id: int):
                             t = "🏆 *WEEKLY TOP 5*\n━━━━━━━━━━━━━━━\n"
                             for i, p in enumerate(lb[:5], 1):
                                 medal = ["🥇","🥈","🥉"][i-1] if i<=3 else f"{i}."
-                                t += f"{medal} {p['username']} — {p['points']} pts\n"
+                                t += f"{medal} {p['username']} — {format_number(p['points'])} pts\n"
                             await bot.send_message(chat_id, t, parse_mode="Markdown")
                     except Exception as e:
                         print(f"[ERROR] Weekly leaderboard display: {e}")
@@ -637,6 +637,8 @@ def _help_text() -> str:
         "`!inventory` — Your items & crates\n"
         "`!claims` — Unclaimed rewards\n"
         "`!autoclaim` — Claim all rewards at once\n"
+        "`!mystats` — Show your personal stats card (Bitcoin, Gold, Level)\n"
+        "`!vault` — Vault management (deposit/withdraw Bitcoin & Gold safely)\n"
         "`!changename [Name]` — Change your username\n"
         "`!setup_base [Name]` — Create your first base\n"
         "`!changebasename [Name]` — Rename your base (1-time)\n"
@@ -644,12 +646,12 @@ def _help_text() -> str:
         "`!activateshield` — Activate shield (24h cooldown)\n"
         "`!deactivateshield` — Deactivate shield\n"
         "`!disruptor @user` — Break enemy shield for 1 attack\n\n"
-        "*GAME COMMANDS* _(group)_\n"
-        "`!fusion` — Start new game round\n"
-        "`!words` — Show current word pair\n"
-        "`!forcerestart` — End the round\n"
+        "*GAME COMMANDS* _(group or DM)_\n"
         "`!weekly` — Weekly leaderboard\n"
-        "`!alltime` — All-time leaderboard\n\n"
+        "`!alltime` — All-time leaderboard\n"
+        "`!fusion` — Start new game round (group only)\n"
+        "`!words` — Show current word pair\n"
+        "`!forcerestart` — End the round\n\n"
         "*🌌 IMMERSIVE EXPERIENCE* _(DM only)_\n"
         "`!obelisk` — Enter the Obelisk: gateway to consciousness\n"
         "`!sectors` — Explore all 9 sectors and their consciousness\n\n"
@@ -670,6 +672,20 @@ def _dm_only(cmd: str) -> str:
         f"🃏 *GameMaster:* \"`{cmd}` is for PRIVATE conversations only. Stop embarrassing yourself publicly, idiot.\"",
         f"🃏 *GameMaster:* \"Oh look, another moron broadcasting personal stuff to the whole group. DM me next time, *please*.\"",
     ])
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  UTILITY FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════
+
+def format_number(num: int) -> str:
+    """Format number as 1M, 1K, etc. for numbers >= 1,000,000."""
+    if num >= 1_000_000:
+        return f"{num // 1_000_000}M"
+    elif num >= 1_000:
+        return f"{num // 1_000}K"
+    else:
+        return str(num)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -758,7 +774,7 @@ async def cmd_weekly(message: types.Message):
                     except:
                         pass
                 
-                text += f"{medal} {display_name} — {p['points']} pts\n"
+                text += f"{medal} {display_name} — {format_number(p['points'])} pts\n"
         
         text += "\n━━━━━━━━━━━━━━━\n"
         text += "`!alltime` for all-time scores"
@@ -795,8 +811,183 @@ async def cmd_alltime(message: types.Message):
                 except:
                     pass
             
-            text += f"{medal} {display_name} — {p['points']} pts\n"
+            text += f"{medal} {display_name} — {format_number(p['points'])} pts\n"
     await message.answer(text, parse_mode="Markdown")
+
+
+@dp.message(_cmd("mystats"))
+async def cmd_mystats(message: types.Message):
+    """Display player's personal stats card with Bitcoin and other achievements."""
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    
+    if not user:
+        await message.answer(_unreg(), parse_mode="Markdown")
+        return
+    
+    try:
+        username = user.get('username', message.from_user.first_name)
+        bitcoin = user.get('bitcoin', 0)
+        gold = user.get('gold', 0)
+        level = user.get('level', 1)
+        all_time_points = user.get('all_time_points', 0)
+        weekly_points = user.get('weekly_points', 0)
+        
+        # Format large numbers
+        bitcoin_display = format_number(bitcoin)
+        gold_display = format_number(gold)
+        points_display = format_number(all_time_points)
+        
+        # Create stats card
+        stats_card = f"""
+╔═══════════════════════════════════════╗
+║         ⭐ MY STATS CARD ⭐          ║
+╠═══════════════════════════════════════╣
+║                                       ║
+║  👤 *{username}*
+║                                       ║
+║  💎 Bitcoin: *{bitcoin_display}*
+║  💰 Gold: *{gold_display}*
+║  ⭐ Level: *{level}*
+║                                       ║
+║  📊 All-Time Points: *{points_display}*
+║  📈 Weekly Points: *{weekly_points}*
+║                                       ║
+╚═══════════════════════════════════════╝
+"""
+        await message.answer(stats_card, parse_mode="Markdown")
+        
+    except Exception as e:
+        print(f"[ERROR] cmd_mystats: {e}")
+        await message.answer("❌ Error retrieving stats. Try again.", parse_mode="Markdown")
+
+
+@dp.message(_cmd("vault"))
+async def cmd_vault(message: types.Message):
+    """Vault management: deposit/withdraw Bitcoin and Gold safely."""
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    
+    if not user:
+        await message.answer(_unreg(), parse_mode="Markdown")
+        return
+    
+    if message.chat.type != "private":
+        await message.answer(_dm_only("!vault"), parse_mode="Markdown")
+        return
+    
+    try:
+        text = message.text.strip().lower().split()
+        
+        # Initialize vault if needed
+        if 'vault' not in user:
+            user['vault'] = {'bitcoin': 0, 'gold': 0}
+        else:
+            if 'bitcoin' not in user['vault']:
+                user['vault']['bitcoin'] = 0
+            if 'gold' not in user['vault']:
+                user['vault']['gold'] = 0
+        
+        # No args = show vault status
+        if len(text) == 1:
+            account_bitcoin = user.get('bitcoin', 0)
+            account_gold = user.get('gold', 0)
+            vault_bitcoin = user['vault'].get('bitcoin', 0)
+            vault_gold = user['vault'].get('gold', 0)
+            
+            vault_display = f"""
+🔐 *VAULT STATUS*
+━━━━━━━━━━━━━━━━━━━━━━
+
+💎 *Account Bitcoin:* {format_number(account_bitcoin)} (vulnerable to raids)
+🏦 *Vault Bitcoin:* {format_number(vault_bitcoin)} (protected)
+
+💰 *Account Gold:* {format_number(account_gold)} (safe)
+🏦 *Vault Gold:* {format_number(vault_gold)} (extra safe)
+
+━━━━━━━━━━━━━━━━━━━━━━
+
+*COMMANDS:*
+`!vault deposit bitcoin [amount]` — Move Bitcoin to vault
+`!vault withdraw bitcoin [amount]` — Withdraw Bitcoin
+`!vault deposit gold [amount]` — Move Gold to vault
+`!vault withdraw gold [amount]` — Withdraw Gold
+"""
+            await message.answer(vault_display, parse_mode="Markdown")
+            return
+        
+        # Parse command: !vault deposit/withdraw bitcoin/gold amount
+        if len(text) < 4:
+            await message.answer("❌ Format: `!vault deposit|withdraw bitcoin|gold amount`", parse_mode="Markdown")
+            return
+        
+        action = text[1].lower()  # deposit or withdraw
+        currency = text[2].lower()  # bitcoin or gold
+        
+        try:
+            amount = int(text[3])
+        except:
+            await message.answer("❌ Amount must be a number", parse_mode="Markdown")
+            return
+        
+        if amount <= 0:
+            await message.answer("❌ Amount must be positive", parse_mode="Markdown")
+            return
+        
+        if action == "deposit":
+            # Move money FROM account TO vault
+            if currency == "bitcoin":
+                account_amount = user.get('bitcoin', 0)
+                if account_amount < amount:
+                    await message.answer(f"❌ You only have {format_number(account_amount)} Bitcoin in account", parse_mode="Markdown")
+                    return
+                user['bitcoin'] = account_amount - amount
+                user['vault']['bitcoin'] = user['vault'].get('bitcoin', 0) + amount
+                await message.answer(f"✅ Deposited {format_number(amount)} Bitcoin to vault!\n\nAccount: {format_number(user['bitcoin'])} | Vault: {format_number(user['vault']['bitcoin'])}", parse_mode="Markdown")
+            elif currency == "gold":
+                account_amount = user.get('gold', 0)
+                if account_amount < amount:
+                    await message.answer(f"❌ You only have {format_number(account_amount)} Gold in account", parse_mode="Markdown")
+                    return
+                user['gold'] = account_amount - amount
+                user['vault']['gold'] = user['vault'].get('gold', 0) + amount
+                await message.answer(f"✅ Deposited {format_number(amount)} Gold to vault!\n\nAccount: {format_number(user['gold'])} | Vault: {format_number(user['vault']['gold'])}", parse_mode="Markdown")
+            else:
+                await message.answer("❌ Currency must be bitcoin or gold", parse_mode="Markdown")
+                return
+        
+        elif action == "withdraw":
+            # Move money FROM vault TO account
+            if currency == "bitcoin":
+                vault_amount = user['vault'].get('bitcoin', 0)
+                if vault_amount < amount:
+                    await message.answer(f"❌ You only have {format_number(vault_amount)} Bitcoin in vault", parse_mode="Markdown")
+                    return
+                user['vault']['bitcoin'] = vault_amount - amount
+                user['bitcoin'] = user.get('bitcoin', 0) + amount
+                await message.answer(f"✅ Withdrew {format_number(amount)} Bitcoin from vault!\n\nAccount: {format_number(user['bitcoin'])} | Vault: {format_number(user['vault']['bitcoin'])}", parse_mode="Markdown")
+            elif currency == "gold":
+                vault_amount = user['vault'].get('gold', 0)
+                if vault_amount < amount:
+                    await message.answer(f"❌ You only have {format_number(vault_amount)} Gold in vault", parse_mode="Markdown")
+                    return
+                user['vault']['gold'] = vault_amount - amount
+                user['gold'] = user.get('gold', 0) + amount
+                await message.answer(f"✅ Withdrew {format_number(amount)} Gold from vault!\n\nAccount: {format_number(user['gold'])} | Vault: {format_number(user['vault']['gold'])}", parse_mode="Markdown")
+            else:
+                await message.answer("❌ Currency must be bitcoin or gold", parse_mode="Markdown")
+                return
+        else:
+            await message.answer("❌ Action must be 'deposit' or 'withdraw'", parse_mode="Markdown")
+            return
+        
+        save_user(u_id, user)
+        
+    except Exception as e:
+        print(f"[ERROR] cmd_vault: {e}")
+        import traceback
+        traceback.print_exc()
+        await message.answer("❌ Error with vault operation. Try again.", parse_mode="Markdown")
 
 
 @dp.message(_cmd("help"))
@@ -6938,18 +7129,17 @@ async def on_group_message(message: types.Message):
         db_name = user.get("username", message.from_user.first_name)
         word_len = len(guess)
         
-        # Addictive Mechanics (reduced multiplier impact)
-        login_result = handle_daily_login(u_id)
-        if login_result["success"]:
-            daily_bonus = login_result["bonus"]
-            pts += daily_bonus // 10  # Reduced from // 5
-            print(f"[STREAK] {db_name}: Day {login_result['streak']}, +{login_result['bonus']} bonus")
+        # Addictive Mechanics - DISABLED to prevent inflated XP
+        # login_result = handle_daily_login(u_id)
+        # if login_result["success"]:
+        #     daily_bonus = login_result["bonus"]
+        #     pts += daily_bonus // 10  # Reduced from // 5
+        #     print(f"[STREAK] {db_name}: Day {login_result['streak']}, +{login_result['bonus']} bonus")
         
-        combo = increment_combo(u_id)
-        combo_mult = combo["multiplier"]
-        # Reduce combo multiplier effectiveness: cap max at 1.5x instead of 3.0x
-        combo_mult = min(combo_mult, 1.5)
-        pts = int(pts * combo_mult)
+        # combo = increment_combo(u_id)  # DISABLED - multiplier was inflating scores
+        # combo_mult = combo["multiplier"]
+        # combo_mult = min(combo_mult, 1.5)
+        # pts = int(pts * combo_mult)  # NO MULTIPLIER - base points only
         
         # Resources
         resources_awarded = {}
@@ -6975,10 +7165,10 @@ async def on_group_message(message: types.Message):
             rare_message = f"\n\n🎉 {format_rare_drop_notification(rare_item)}"
         
         # Build feedback message
-        fb = f"✅ `{guess.upper()}` +{pts} pts  ⭐ +{pts} XP"
+        fb = f"✅ `{guess.upper()}` +{format_number(pts)} pts  ⭐ +{format_number(pts)} XP"
         
-        if combo_mult > 1.0:
-            fb += f" 🔥x{combo_mult}"
+        # if combo_mult > 1.0:  # REMOVED - no multiplier display
+        #     fb += f" 🔥x{combo_mult}"
         
         # Add resources
         for resource, amount in resources_awarded.items():
@@ -6990,9 +7180,9 @@ async def on_group_message(message: types.Message):
         if streak_info.get("food_awarded", 0) > 0:
             fb += f" +{streak_info['food_awarded']} 🌽"
         
-        # Add combo milestone
-        if combo.get("milestone_message"):
-            fb += f"\n\n{combo['milestone_message']}"
+        # Add combo milestone - DISABLED
+        # if combo.get("milestone_message"):
+        #     fb += f"\n\n{combo['milestone_message']}"
         
         # Add rare drop
         fb += rare_message
