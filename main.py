@@ -524,10 +524,22 @@ async def game_loop(chat_id: int):
                                 add_unclaimed_item(str(cl['user_id']), "super_crate", 1)
                             result += f"🎁 *{len(eng.crate_claimers)} LUCKY PLAYERS CLAIMED MID-ROUND CRATES!*\n\n"
                             
-                            # If any decoys were claimed, show warning
+                            # If any decoys were claimed, show warning in group AND send DMs
                             if eng.decoy_claimers:
                                 decoy_names = ", ".join([d.get('username', f"Player {d['user_id']}") for d in eng.decoy_claimers])
                                 result += f"⚠️ *MONKEY TRAP!* {decoy_names} grabbed a DECOY! 💣 Nothing inside!\n\n"
+                                
+                                # Send individual DM notifications to decoy victims
+                                for decoy_victim in eng.decoy_claimers:
+                                    try:
+                                        await bot.send_message(
+                                            decoy_victim['user_id'],
+                                            f"💣 *MONKEY TRAP!*\n\nYou picked a decoy crate during the round!\n\n"
+                                            f"🃏 *GameMaster:* \"Better luck next time, you fool. The trap was set, and you walked right into it. Learn to be more careful.\"",
+                                            parse_mode="Markdown"
+                                        )
+                                    except Exception as e:
+                                        print(f"[ERROR] Sending decoy DM to {decoy_victim.get('username')}: {e}")
                         except Exception as e:
                             print(f"[ERROR] Crate handling: {e}")
                     
@@ -770,7 +782,7 @@ async def cmd_weekly(message: types.Message):
                     try:
                         expiry = datetime.fromisoformat(name_shield_until)
                         if datetime.now() < expiry:
-                            display_name = "[🛡️ Anonymized]"
+                            display_name = "[🛡️ Anonymous]"
                     except:
                         pass
                 
@@ -807,7 +819,7 @@ async def cmd_alltime(message: types.Message):
                 try:
                     expiry = datetime.fromisoformat(name_shield_until)
                     if datetime.now() < expiry:
-                        display_name = "[🛡️ Anonymized]"
+                        display_name = "[🛡️ Anonymous]"
                 except:
                     pass
             
@@ -1136,7 +1148,7 @@ Command: `!base`
 Shows:
 • Base name & level
 • Resource reserves
-• Military: Pawns, Knights, Bishops, Rooks, Queens, Kings
+• Military: Police and Dogs, Knights, Bishops, Rooks, Queens, Kings
 • Traps: Spike Pits, Arrow Towers, Cannons, Tesla Towers, Inferno
 • Buffs & active shields
 • War record (wins/losses)
@@ -1205,7 +1217,7 @@ Command: `!autoclaim` — Grab all at once
 ⚔️ *Build an Army*
 Command: `!base`
 Units available:
-• 👹 Pawns (1 power) — Cheap, weak
+• 👹 Police and Dogs (1 power) — Cheap, weak
 • 🗡️ Knights (3 power) — Balanced
 • ⚜️ Bishops (5 power) — Magic damage
 • 🏰 Rooks (8 power) — Fortress strength
@@ -1799,10 +1811,10 @@ async def cmd_profile(message: types.Message):
     
     # Shield status (Phase 2A)
     user = get_user(u_id)
-    shield_status = user.get('shield_status', 'ACTIVE')
-    if shield_status == 'DISRUPTED':
-        shield_status_str = "⚡ DISRUPTED (1 attack remaining)"
-    elif shield_status == 'INACTIVE':
+    shield_status = user.get('shield_status', '⚠️ UNPROTECTED')
+    if shield_status == '💥 DISRUPTED':
+        shield_status_str = "💥 DISRUPTED (1 attack remaining)"
+    elif shield_status == '⚠️ UNPROTECTED':
         cooldown = user.get('shield_cooldown')
         if cooldown:
             try:
@@ -1810,13 +1822,13 @@ async def cmd_profile(message: types.Message):
                 if remaining > 0:
                     hours = int(remaining / 3600)
                     minutes = int((remaining % 3600) / 60)
-                    shield_status_str = f"❌ INACTIVE (Cooldown: {hours}h {minutes}m)"
+                    shield_status_str = f"⚠️ UNPROTECTED (Cooldown: {hours}Hrs {minutes}Mins to activate shield)"
                 else:
-                    shield_status_str = "❌ INACTIVE (Ready to activate)"
+                    shield_status_str = "⚠️ UNPROTECTED (Ready to activate shield)"
             except Exception:
-                shield_status_str = "❌ INACTIVE"
+                shield_status_str = "⚠️ UNPROTECTED"
         else:
-            shield_status_str = "❌ INACTIVE"
+            shield_status_str = "⚠️ UNPROTECTED"
     else:
         shield_status_str = "🛡️ ACTIVE"
     
@@ -1848,7 +1860,7 @@ async def cmd_profile(message: types.Message):
         f"💰 Bitcoin: *{profile['bitcoin']}*\n"
         f"📍 Current Sector: _{profile.get('sector_display','Not Assigned')}_\n"
         f"🏰 Base Sector: _{get_sector_display(base_sector)}_\n"
-        f"🛡️ Shield: {shield_status_str}\n\n"
+        f"🛡️ Shield Status: {shield_status_str}\n\n"
         f"{divider()}\n\n"
         f"📊 *BATTLE RECORDS*\n"
         f"├─ This Week: *{profile['weekly_points']}* pts\n"
@@ -1933,7 +1945,7 @@ async def callback_train_menu(callback: types.CallbackQuery):
         "🎖️ *MILITARY TRAINING*\n\n"
         "Select unit type to train:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👹 Pawns (5 wood)", callback_data="train_pawn"),
+            [InlineKeyboardButton(text="👹 Police and Dogs (5 wood)", callback_data="train_pawn"),
              InlineKeyboardButton(text="🗡️ Knights (15 wood + 5 bronze)", callback_data="train_knight")],
             [InlineKeyboardButton(text="⚜️ Bishops (10 bronze + 3 iron)", callback_data="train_bishop"),
              InlineKeyboardButton(text="🏰 Rooks (10 iron + 2 diamond)", callback_data="train_rook")],
@@ -2439,7 +2451,7 @@ async def cmd_battle_items(message: types.Message):
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("🃏 *GameMaster:* \"Not registered.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"But youre not even registered. Type /start so I may know how to proceed with you.\"", parse_mode="Markdown"); return
     
     player_level = user.get("level", 1)
     player_bitcoin = user.get("bitcoin", 0)
@@ -2448,13 +2460,30 @@ async def cmd_battle_items(message: types.Message):
     # Define all battle items
     battle_items = {
         "common": [
-            {"id": "7day", "name": "🛡️ 7-Day Shield", "price": 500, "level": 1, "desc": "Protect your base for 7 days"},
-            {"id": "name_shield", "name": "🔐 Name Shield (24h)", "price": 800, "level": 5, "desc": "Hide your username • Block targeting • Anonymize on leaderboard"},
-            {"id": "rank_disguise", "name": "🎭 Rank Disguise (24h)", "price": 300, "level": 3, "desc": "Hide your true rank for 24 hours"},
-            {"id": "coin_explosion", "name": "🧨 Coin Explosion", "price": 400, "level": 5, "desc": "Double coins on next win"},
-            {"id": "fake_shield", "name": "🧠 Fake Shield", "price": 250, "level": 2, "desc": "Decoy shield to trick attackers"},
-            {"id": "rank_swap", "name": "💀 Rank Swap", "price": 350, "level": 4, "desc": "Swap ranks with target for 1 hour"},
-            {"id": "clown_badge", "name": "🤡 Clown Badge", "price": 200, "level": 1, "desc": "Embarrass opponent (cosmetic)"},
+            {"id": "1minx", "name": "⚡️ 1 Min Speedup", "price": 10, "level": 1, "desc": "Speed up your time"},
+            {"id": "5minx", "name": "⚡️ 5 Min Speedup", "price": 50, "level": 1, "desc": "Speed up your time"},
+            {"id": "15minx", "name": " ⚡️ 15 Min Speedup", "price": 100, "level": 1, "desc": "Speed up your time"},
+            {"id": "30minx", "name": " ⚡️ 30 Min Speedup", "price": 150, "level": 1, "desc": "Speed up your time"},
+            {"id": "1hourx", "name": " ⚡️ 1 hour Speedup", "price": 300, "level": 1, "desc": "Speed up your time"},
+            {"id": "3hourx", "name": " ⚡️ 3-Hour Speedup", "price": 500, "level": 1, "desc": "Protect your base   "},
+            {"id": "1dayx", "name": " ⚡️ 1-Day Speedup", "price": 1000, "level": 1, "desc": "Protect your base   "},
+            {"id": "5dayx", "name": " ⚡️ 5-Day Speedup", "price": 500, "level": 7, "desc": "Protect your base   "},
+            {"id": "21dayx", "name": " ⚡️ 21-Day Speedup", "price": 500, "level": 10, "desc": "Protect your base   "},
+            {"id": "1hours", "name": "🛡️ 1-Hour Shield", "price": 200, "level": 1, "desc": "Protect your base  "},
+            {"id": "3hours", "name": "🛡️ 3-Hour Shield", "price": 500, "level": 1, "desc": "Protect your base  "},
+            {"id": "12hours", "name": "🛡️ 12-Hour Shield", "price": 700, "level": 1, "desc": "Protect your base  "},
+            {"id": "1days", "name": "🛡️ 1-Day Shield", "price": 1000, "level": 1, "desc": "Protect your base  "},
+            {"id": "3days", "name": "🛡️ 3-Day Shield", "price": 2500, "level": 1, "desc": "Protect your base  "},
+            {"id": "7days", "name": "🛡️ 7-Day Shield", "price": 5000, "level": 10, "desc": "Protect your base  "},
+            {"id": "name_shield", "name": "🛡️ Name Shield", "price": 800, "level": 5, "desc": "Hide your username • Block targeting from attackers • Anonymize yourself on leaderboard. Duration: 24h "},
+            {"id": "rank_disguise", "name": "🎭 Rank Disguise", "price": 300, "level": 3, "desc": "Hide your true leaderboard rank. Duration: 24h"},
+            {"id": "coin_explosion", "name": "🤑 Coin Multiplier", "price": 200, "level": 5, "desc": "Double coins on next win"},
+            {"id": "coin_explosion", "name": "🙊 Birthday Coins ", "price": 300, "level": 5, "desc": "Drop a crate in arena for 1 minute All who try to claim the crate will deposit 50 bitcoin from their balance during the next round"},
+            {"id": "fake_shield", "name": "🛡️ Fake Shield", "price": 1000, "level": 7, "desc": "Decoy shield to trick attackers. Will get deactivated if player tries to attack another person or if they are being attacked or scouted."},
+            {"id": "rank_swap", "name": "💀 Rank Swap", "price": 350, "level": 4, "desc": "Use this to swap ranks with any target for 1 hour, use it to gain their leaderboard buffs temporarily. You can also swap with a lower rank player just to put a bounty on their head"},
+            {"id": "arank_swap", "name": "💀 Anti-Rank Swap", "price": 700, "level": 4, "desc": "Use this to restrict your rank from being swapped"},
+            {"id": "trade_pla", "name": "🤝 Trading Places", "price": 1200, "level": 4, "desc": "Use this when your opponent tries to swap ranks with you. You select what they will receieve in place of your rank, whether infamy, debuffs or negative resources. They will swap your stats for theirs. ⚠️ Warning, you will receive whatever was swapped even if they have worse than you. Use strategically!"},
+            {"id": "clown_badge", "name": "🤡 Clown Badge", "price": 1000, "level": 10, "desc": "Embarrass and disgrace an opponent. This is a cosmetic item and effect will wear off after 24 hours"},
             {"id": "scout", "name": "📸 Scout", "price": 600, "level": 6, "desc": "Reveal target's resources"},
             {"id": "anti_scout", "name": "📴 Anti-Scout", "price": 500, "level": 5, "desc": "Block scouts for 12 hours"},
         ],
@@ -2593,12 +2622,12 @@ async def cmd_buy(message: types.Message):
     if item_id == "name_shield":
         # Activate name shield for 24 hours
         user["name_shield_until"] = (datetime.now() + timedelta(hours=24)).isoformat()
-        activation_msg = "🔐 **Name Shield ACTIVATED**\n\n" \
+        activation_msg = "🔐 *Name Shield has been ACTIVATED*\n\n" \
                          "Your username is now hidden!\n" \
-                         "• Players cannot find you via `!attack` or `!scout`\n" \
-                         "• Your name will show as **[🛡️ Anonymized]** on leaderboards\n" \
-                         "• Attackers will appear as **[Anonymous]** in revenge notifications\n\n" \
-                         "⏱️ Shield expires in 24 hours!"
+                         "• Players cannot find you via `/attack` or `/scout`\n" \
+                         "• Your name will show up as *[🛡️ Anonymous]* on leaderboards\n" \
+                         "• Attackers will appear as *[Anonymous Attacker]** in revenge notifications\n\n" \
+                         "• ⏱️Name shield expires in 24 hours!"
     else:
         activation_msg = ""
     
@@ -2638,11 +2667,11 @@ async def cmd_changename(message: types.Message):
     await message.answer(f"✅ Name changed: *{old_name}* → *{new_name}*\n🃏 *GameMaster:* \"Running from your past? Noted.\"", parse_mode="Markdown")
 
 
-@dp.message(_cmd("name_shield_status"))
+@dp.message(_cmd("name_shield"))
 async def cmd_name_shield_status(message: types.Message):
     """Check if your name shield is active and when it expires."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!name_shield_status"), parse_mode="Markdown")
+        await message.answer(_dm_only("!name_shield"), parse_mode="Markdown")
         return
     
     u_id = str(message.from_user.id)
@@ -2657,11 +2686,12 @@ async def cmd_name_shield_status(message: types.Message):
     if not name_shield_until:
         await message.answer(
             f"🔐 *NAME SHIELD STATUS*\n\n"
-            f"❌ **INACTIVE**\n\n"
-            f"Your name is visible to all players!\n"
-            f"Players can attack or scout you using `!attack @{username}`\n"
-            f"Your username appears on leaderboards.\n\n"
-            f"Purchase a **Name Shield** from `!battle_items` to protect yourself!",
+            f"⚠️ *INACTIVE*\n\n"
+            f"Your username is currently visible to all players!\n"
+            f"Players can attack or scout you using `/attack @{username}`\n"
+            f"Remember that your username appears on leaderboards.\n\n"            
+            f"When a name shield is activated your username on leaderboards appear as *Anonymous*.\n\n"
+            f"Purchase a *Name Shield* from the battle shop using `/battle_items` in order to protect yourself!",
             parse_mode="Markdown"
         )
         return
@@ -2678,13 +2708,13 @@ async def cmd_name_shield_status(message: types.Message):
             
             await message.answer(
                 f"🔐 *NAME SHIELD STATUS*\n\n"
-                f"✅ **ACTIVE**\n\n"
-                f"Your name is **HIDDEN** from all players!\n\n"
+                f"✅ *ACTIVE*\n\n"
+                f"Your username is now *HIDDEN* from all players!\n\n"
                 f"⏱️ *Time Remaining:*\n"
-                f"• {hours}h {minutes}m\n\n"
-                f"*Benefits:*\n"
-                f"• ❌ Players cannot `!attack` or `!scout` you\n"
-                f"• 🛡️ You appear as **[🛡️ Anonymized]** on leaderboards\n"
+                f"• {hours}H {minutes}M\n\n"
+                f"*Take note of the following*\n"
+                f"•  Players cannot use `/attack` or `/scout` on you\n"
+                f"•  To all players you appear as *[🛡️ Anonymous]* on leaderboards\n"
                 f"• 🕵️ Attackers appear as **[Anonymous Attacker]** to you\n\n"
                 f"_Your shield expires at {expiry.strftime('%H:%M:%S UTC')}_",
                 parse_mode="Markdown"
@@ -2719,10 +2749,12 @@ async def cmd_setup_base(message: types.Message):
     user = get_user(u_id)
     
     if not user:
-        await message.answer("🃏 *GameMaster:* \"You haven't survived initiation. Use `/start` first.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"I don't even know who you are yet. You haven't survived initiation. Use `/start` first.\"", parse_mode="Markdown"); 
+        return
     
     if user.get("base_name"):
-        await message.answer(f"🃏 *GameMaster:* \"Your loyaltyw is fickle. You already rule **{user['base_name']}**.\"", parse_mode="Markdown"); return
+        await message.answer(f"🃏 *GameMaster:* \"Your loyalty is fickle. You already rule *{user['base_name']}*.\"", parse_mode="Markdown"); 
+        return
     
     # Parse command: !setup_base [sector] [Name]
     parts = message.text.strip().split(maxsplit=2)
@@ -2735,18 +2767,21 @@ async def cmd_setup_base(message: types.Message):
     try:
         sector = int(parts[1])
     except ValueError:
-        await message.answer("❌ Sector must be a number (1-9). Example: `!setup_base 5 \"Obsidian Fortress\"`", parse_mode="Markdown")
+        await message.answer("❌ You must choose sector number between (1-9). Example: `/setup_base 5 \"Naomis Fortress\"`", parse_mode="Markdown")
         return
     
     if sector < 1 or sector > 9:
-        await message.answer("❌ Sector must be between 1 and 9.", parse_mode="Markdown")
+        await message.answer("❌ You must choose sector number between (1-9)", parse_mode="Markdown")
         return
     
     base_name = parts[2].strip()[:25]
-    
+
+    xp = user.get("xp", 0)
+    base_level = 1 + (xp // 1000) 
+
     # Initialize base structure
     user["base_name"] = base_name
-    user["base_level"] = 1
+    user["base_level"] = base_level
     user["sector"] = sector  # Player's chosen sector
     user["war_points"] = 0
     user["wins"] = 0
@@ -2783,7 +2818,8 @@ async def cmd_setup_base(message: types.Message):
         "food": 50,
         "current_streak": 0
     }
-    user["military"] = {"pawn": 5}
+    user["military"] = {"Police and Dogs": 5}
+    military = user["military"]
     user["traps"] = {}
     user["buffs"] = {}
     
@@ -2799,27 +2835,29 @@ async def cmd_setup_base(message: types.Message):
         resources_str = ", ".join([f"{v}x {k}" for k, v in sector_resources.items() if v > 0])
         
         msg = f"""
-╔════════════════════════════════════════════════════╗
-║        🚩  TERRITORY CLAIMED  🚩                  ║
-╠════════════════════════════════════════════════════╣
-║                                                    ║
-║  🏰 **Base:** {base_name}                          
-║  📍 **Location:** {sector_name}                    
-║  ⭐ **Level:** 1                                   ║
-║  🛡️ **Garrison:** 5x Footmen                       ║
-║  💰 **Starting Resources:** {resources_str}       ║
-║                                                    ║
-║  You awakened here because something called you.   ║
-║  {sector_info.get('consciousness', 'Your destiny awaits.')}           ║
-║                                                    ║
-║  The map expands before you.                       ║
-║  Other players emerge from the darkness.           ║
-║  War is coming.                                    ║
-║                                                    ║
-║  Type `!profile` to see your empire.              ║
-║  Type `!obelisk` to understand this dimension.    ║
-║                                                    ║
-╚════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════╗
+║        🚩  TERRITORY CLAIMED  🚩             ║
+╠═══════════════════════════════════════════════╣
+║                                               ║
+║  🏰 *Base:* {base_name}                      ║
+║  ⭐ *Base Level:* {base_level}               ║
+║  📍 *Location:* {sector_name}                ║
+║  💰 *Resources:* {resources_str}             ║
+║  🛡️ *Garrison:* {military}                   ║
+║                                               ║
+║                                               ║
+║  You didnt choose here, here chose you you.   ║
+║  {sector_info.get('consciousness', 'Your destiny awaits.')}           
+║                                               ║
+║  This is the map laid out before you.         ║
+║  Other players will emerge from this darkness.║
+║  Be warned. War is coming.                    ║
+║                                               ║
+║  Type `/profile` to see your empire.          ║
+║  Type `/obelisk` to explore further into      ║
+║  this dimension.                              ║
+║                                               ║
+╚═══════════════════════════════════════════════╝
 """
         await message.answer(msg, parse_mode="Markdown")
         
@@ -2943,20 +2981,21 @@ async def cmd_research_lab(message: types.Message):
 async def cmd_shield_status(message: types.Message):
     """Check current shield status."""
     if message.chat.type != "private":
-        await message.answer("🛡️ *GameMaster:* \"Check your shield in *private*.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"Check your shield status and all in *private* lackey.\"", parse_mode="Markdown"); return
     
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("🃏 *GameMaster:* \"Not registered.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"Sorry not registered. You are not a part of this game why do you even need a shield. Type /start to register\"", parse_mode="Markdown"); return
     
-    shield_status = user.get('shield_status', 'UNPROTECTED')
+    shield_status = user.get('shield_status', '⚠️ UNPROTECTED')
     
     status_info = {
-        'UNPROTECTED': ("⚠️ UNPROTECTED", "Your base is vulnerable to attacks. Activate a shield!"),
-        'ACTIVE': ("🛡️ ACTIVE", "Your base is protected from attacks."),
-        'DISRUPTED': ("💥 DISRUPTED", "Your shield was hit! It will auto-restore to ACTIVE after the next attack.")
+        '⚠️ UNPROTECTED': ("⚠️ UNPROTECTED", "Your base is vulnerable to attacks. Activate a shield now!"),
+        '🛡️ ACTIVE': ("🛡️ ACTIVE", "Your base is protected from attacks."),
+        '💥 DISRUPTED': ("💥 DISRUPTED", "Your shield was hit! It will auto-restore to ACTIVE after the next attack.")
     }
+
     
     emoji, description = status_info.get(shield_status, ("❓", "Unknown status"))
     
@@ -2964,20 +3003,20 @@ async def cmd_shield_status(message: types.Message):
     txt += f"Status: {emoji} *{shield_status}*\n\n"
     txt += f"ℹ️ {description}\n\n"
     
-    if shield_status == 'UNPROTECTED':
+    if shield_status == '⚠️ UNPROTECTED':
         txt += "*Available Actions:*\n"
-        txt += "• `!activateshield` - Activate your shield\n"
-        txt += "• `!battle_items` - Buy shield items\n"
-        txt += "• `!name_shield_status` - Check name shield\n\n"
-    elif shield_status == 'ACTIVE':
+        txt += "• `/activateshield` - Activate the shield you have in your inventory\n"
+        txt += "• `/battle_items` - Buy shield items\n"
+        txt += "• `/name_shield` - Check name shield\n\n"
+    elif shield_status == '🛡️ ACTIVE':
         txt += "*Available Actions:*\n"
-        txt += "• `!deactivateshield` - Deactivate your shield\n"
-        txt += "• `!name_shield_status` - Check name shield\n"
+        txt += "• `/deactivateshield` - Deactivate your shield\n"
+        txt += "• `/name_shield_status` - Check name shield\n"
         txt += "• Attack other players fearlessly!\n\n"
-    elif shield_status == 'DISRUPTED':
+    elif shield_status == '💥 DISRUPTED':
         txt += "*What to do:*\n"
         txt += "Wait for the next attack. Your shield will auto-restore to ACTIVE.\n"
-        txt += "• `!name_shield_status` - Check name shield\n\n"
+        txt += "• `/name_shield_status` - Check name shield\n\n"
     
     txt += f"{divider()}"
     
@@ -3077,7 +3116,7 @@ async def cmd_base(message: types.Message):
     # Get military with better display
     military = user.get("military", {})
     troop_emojis = {
-        "pawn": ("👹 Pawns", 1),
+        "Police and Dogs": ("👹 Police and Dogs", 1),
         "knight": ("🗡️ Knights", 3),
         "bishop": ("⚜️ Bishops", 5),
         "rook": ("🏰 Rooks", 8),
@@ -3093,7 +3132,7 @@ async def cmd_base(message: types.Message):
             military_lines.append(f"├─ {emoji_name}: {count}")
             total_troops += count
     
-    military_str = "\n".join(military_lines) if military_lines else "├─ 👹 Pawns: 0"
+    military_str = "\n".join(military_lines) if military_lines else "├─ 👹 Police and Dogs: 0"
     if military_str:
         military_str += f"\n└─ **Total Troops:** {total_troops}"
     
@@ -3134,10 +3173,9 @@ async def cmd_base(message: types.Message):
     war_points = user.get("war_points", 0)
     
     # Calculate power (simple formula)
-    res_power = sum(resources.values()) * 10
     military_power = sum(military.values()) * 50
-    base_power = base_level * 100
-    total_power = res_power + military_power + base_power
+    base_power = base_level * 1111
+    total_power = military_power + base_power
     
     # Get sector
     sector = user.get("sector", "Unknown")
@@ -3145,7 +3183,7 @@ async def cmd_base(message: types.Message):
     # Build comprehensive base info with dynamic formatting
     info = (
         f"{divider()}\n"
-        f"🏰 {user.get('base_name', 'Unnamed')} (Level {base_level})\n"
+        f"🏰 {user.get('base_name', 'Unnamed base')} (Level {base_level})\n"
         f"{divider()}\n\n"
         f"⚡️ POWER: {total_power} | 🎖️ WAR POINTS: {war_points}\n"
         f"📍 SECTOR: {sector}\n\n"
@@ -3156,7 +3194,7 @@ async def cmd_base(message: types.Message):
         f"├─ ⛓️ Iron: *{resources.get('iron', 0)}*\n"
         f"├─ 💎 Diamond: *{resources.get('diamond', 0)}*\n"
         f"├─ 🏺 Relics: *{resources.get('relics', 0)}*\n"
-        f"└─ 🍖 Food: *{food}*\n\n"
+        f"└─ 🌽 Food: *{food}*\n\n"
         f"⚔️ *MILITARY* ({total_troops} troops)\n"
         f"{military_str}\n\n"
         f"🔱 *DEFENSIVE TRAPS*\n"
@@ -3286,12 +3324,11 @@ async def cmd_scout(message: types.Message):
     args = message.text.strip().split()
     if len(args) < 2:
         await message.answer(
-            "🛰️ *SCOUT COMMAND*\n\n"
+            "[🛰️ *SCOUT COMMAND* ]\n\n"
             "Cost: 100 Bitcoin\n"
-            "Success Rate: 70% (30% honeypot)\n\n"
-            "Usage: `!scout @username` or `!scout <name>`\n\n"
-            "_Reveals enemy army and traps if successful._\n"
-            "_Watch out for mousetraps and firewalls!_",
+            "Success Rate: 70% \n\n"
+            "Usage: Just type `/scout @username` or `!scout <name>`, without the brackets <> or quotes ''\n\n"
+            "Reveals enemy army and traps if successful, if unsuccessful alerts eenemy of your location.\n",
             parse_mode="Markdown"
         )
         return
@@ -3369,52 +3406,52 @@ async def cmd_scout(message: types.Message):
         traps = target.get("traps", {})
         
         report = f"""
-╔═════════════════════════════════════════════════╗
-║          📸  SCOUT REPORT  📸                  ║
-╠═════════════════════════════════════════════════╣
-║                                                 ║
-║  Target: **{target_display_name}**                
-║  📍 Sector: {target_sector}                        
-║  Level: {target.get('level', '?')}                
-║  Bitcoin: {target.get('bitcoin', 0):,}              
-║                                                 ║
-║  🎖️ MILITARY:                                      
+╔═══════════════════════════════════════╗
+║     📸  SCOUT REPORT  📸             ║
+╠═══════════════════════════════════════╣
+║                                       ║
+║  Target: **{target_display_name}**    ║
+||  📍 Sector: {target_sector}         ||             
+║  Level: {target.get('level', '?')}    ║            
+║  Bitcoin: {target.get('bitcoin', 0):,}║              
+║                                       ║
+║ 🎖️ MILITARY:                                      
 """
         if military:
             for unit_type, count in military.items():
-                report += f"║    {unit_type}: {count}\n"
+                report += f"║  {unit_type}: {count}\n"
         else:
-            report += "║    (No troops)\n"
+            report += "║     (No troops)\n"
         
         report += f"""║                           ║
 ║  🕳️ TRAPS:                                        
 """
         if traps:
             for trap_type, count in traps.items():
-                report += f"║    {trap_type}: {count}\n"
+                report += f"║  {trap_type}: {count}\n"
         else:
             report += "║    (No traps)\n"
         
-        report += """║                                                    ║
-║  ✅ Scout returned safely with intel!             ║
-║                                                    ║
-╚════════════════════════════════════════════════════╝
+        report += """║                     ║
+║  ✅ Scout returned safely with intel!   ║        
+║                                          ║         
+╚══════════════════════════════════════════╝
 """
     else:
         # Failed - honeypot triggered
         report = f"""
-╔═══════════════════════════════════════════════════╗
-║          ❌  SCOUT HONEYPOT  ❌                  ║
-╠═══════════════════════════════════════════════════╣
-║                                                   ║
-║  Your scout was detected!                         ║
-║                                                   ║
-║  {target_display_name} now knows you spied on them║
-║  They've set mousetraps and firewalls.            ║
-║                                                   ║
-║  🚨 WARNING: They may retaliate!                 ║
-║                                                   ║
-╚═══════════════════════════════════════════════════╝
+╔═════════════════════════════════════════╗
+║     ❌  SCOUT HONEYPOT  ❌             ║
+╠═════════════════════════════════════════╣
+║                                         ║
+║  Your scout was detected!               ║
+║                                         ║
+║  {target_display_name} now knows you    ║
+║           spied on them                 ║
+║                                         ║
+||  🚨 WARNING: They may retaliate!      ||
+║                                         ║
+╚═════════════════════════════════════════╝
 """
     
     await message.answer(report, parse_mode="Markdown")
@@ -3638,6 +3675,7 @@ async def cb_scout_before_attack(callback: types.CallbackQuery):
             f"• Target may have set mousetraps (70% escape)\n"
             f"• Target may have firewall (50% kill rate)\n"
             f"• Use multiple scouts to verify intel!\n\n"
+            f"• Target may use fake stats!\n\n"
             f"_Scout mission ID: {scout_id}_",
             parse_mode="Markdown"
         )
@@ -3681,8 +3719,8 @@ async def cb_direct_attack(callback: types.CallbackQuery):
         target_name = target.get("username", "Unknown")
         
         # CHECK SHIELD STATUS
-        attacker_shield = attacker.get('shield_status', 'UNPROTECTED')
-        if attacker_shield == 'ACTIVE':
+        attacker_shield = attacker.get('shield_status', '⚠️ UNPROTECTED')
+        if attacker_shield == '🛡️ ACTIVE':
             # Ask for confirmation
             confirm_kb = InlineKeyboardMarkup(inline_keyboard=[
                 [
@@ -3693,7 +3731,7 @@ async def cb_direct_attack(callback: types.CallbackQuery):
             
             await callback.message.edit_text(
                 f"⚠️ *SHIELD DEACTIVATION WARNING* ⚠️\n\n"
-                f"You have an **ACTIVE shield** protecting your base.\n\n"
+                f"You have an *ACTIVE shield* protecting your base.\n\n"
                 f"*Attacking {target_name} will deactivate your shield.*\n\n"
                 f"Are you sure you want to proceed?",
                 reply_markup=confirm_kb,
@@ -3727,7 +3765,7 @@ async def cmd_scout_results(message: types.Message):
     
     if not pending_scouts:
         await message.answer(
-            "🐀 *NO ACTIVE SCOUTS*\n\n"
+            "[🐀 *NO ACTIVE SCOUTS*]\n\n"
             "You have no active scout missions.\n"
             "Use `!attack @player` then select *Scout First* option.",
             parse_mode="Markdown"
@@ -3763,7 +3801,7 @@ async def cmd_scout_check(message: types.Message):
     args = message.text.strip().split()
     if len(args) < 2:
         await message.answer(
-            "🐀 *SCOUT CHECK*\n\n"
+            "[🐀 *SCOUT CHECK*]\n\n"
             "Usage: `/scout_check [scout_id]`\n\n"
             "Use `/scout_results` to see all active scouts.",
             parse_mode="Markdown"
@@ -3889,8 +3927,8 @@ async def cmd_set_traps(message: types.Message):
     
     try:
         trap_count = int(args[1])
-        if trap_count < 0 or trap_count > 100:
-            await message.answer("❌ Trap count must be 0-100.", parse_mode="Markdown")
+        if trap_count < 0 or trap_count > 10:
+            await message.answer("❌ You can only set a maximum of 10 mouse traps.", parse_mode="Markdown")
             return
     except ValueError:
         await message.answer("❌ Invalid number.", parse_mode="Markdown")
@@ -3900,7 +3938,7 @@ async def cmd_set_traps(message: types.Message):
     set_mousetraps(u_id, trap_count)
     
     await message.answer(
-        f"🪤 *TRAPS SET*: {trap_count}\n\n"
+        f"🪤 *Mouse traps have been set*: {trap_count}\n\n"
         f"✅ {trap_count} mousetraps are now active on your base.\n"
         f"Incoming scouts have a 30% chance of being caught.\n"
         f"(Scouts have 70% chance to escape)\n\n"
@@ -3999,8 +4037,8 @@ async def cmd_fake_stats(message: types.Message):
     # Set fake stats
     fake_data = {
         "level": level,
-        "shield": "ACTIVE",  # Always show as protected
-        "military": {"pawns": troops // 2, "knights": troops // 4, "bishops": troops // 4},
+        "shield": "🛡️ ACTIVE",  # Always show as protected
+        "military": {"Police and Dogs": troops // 2, "knights": troops // 4, "bishops": troops // 4},
         "resources": {
             "wood": wood,
             "bronze": bronze,
@@ -4019,10 +4057,11 @@ async def cmd_fake_stats(message: types.Message):
         f"📊 Level: {level}\n"
         f"⚔️ Troops: {troops}\n"
         f"💰 Resources: {wood} wood, {bronze} bronze, {iron} iron\n"
-        f"🛡️ Shield: ACTIVE (always shown)\n\n"
-        f"85% of scouts will see false data.\n"
-        f"15% may bypass deception.\n\n"
-        f"Use `/clear_fake_stats` to remove deception.",
+        f"🛡️ Shield: 🛡️ ACTIVE (always shown)\n\n"
+        f"85% of scouts will see your false data.\n"
+        f"70% of scouts may bypass detection.\n\n"
+        f"15% of scouts may bypass deception.\n\n"
+        f"Use `/clear_fake_stats` to remove deceptive stats .",
         parse_mode="Markdown"
     )
 
@@ -4048,8 +4087,8 @@ async def _execute_attack(attacker_id: str, target_id: str, target_display_name:
     attacker = get_user(attacker_id)
     
     # Deactivate attacker's shield if it's ACTIVE
-    if attacker.get('shield_status') == 'ACTIVE':
-        attacker['shield_status'] = 'UNPROTECTED'
+    if attacker.get('shield_status') == '🛡️ ACTIVE':
+        attacker['shield_status'] = '⚠️ UNPROTECTED'
         save_user(attacker_id, attacker)
     
     # Get revenge multiplier if applicable
@@ -6318,7 +6357,7 @@ async def cb_train_unit(callback: types.CallbackQuery):
         
         # Unit definitions with costs
         units = {
-            "pawn": {"name": "👹 Pawns", "cost": {"wood": 5}},
+            "Police and Dogs": {"name": "👹 Police and Dogs", "cost": {"wood": 5}},
             "knight": {"name": "🗡️ Knights", "cost": {"wood": 15, "bronze": 5}},
             "bishop": {"name": "⚜️ Bishops", "cost": {"bronze": 10, "iron": 3}},
             "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "diamond": 2}},
@@ -6374,7 +6413,7 @@ async def cb_train_confirm(callback: types.CallbackQuery):
         
         # Unit costs
         units = {
-            "pawn": {"name": "👹 Pawns", "cost": {"wood": 5}},
+            "Police and Dogs": {"name": "👹 Police and Dogs", "cost": {"wood": 5}},
             "knight": {"name": "🗡️ Knights", "cost": {"wood": 15, "bronze": 5}},
             "bishop": {"name": "⚜️ Bishops", "cost": {"bronze": 10, "iron": 3}},
             "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "diamond": 2}},
@@ -6583,7 +6622,7 @@ async def cb_mine_start(callback: types.CallbackQuery):
         # Deduct troops from military (they're now mining)
         military = user.get('military', {})
         troops_left = troop_count
-        for unit_type in ["king", "queen", "rook", "bishop", "knight", "pawn"]:
+        for unit_type in ["king", "queen", "rook", "bishop", "knight", "Police and Dogs"]:
             if troops_left <= 0:
                 break
             available = military.get(unit_type, 0)
@@ -7071,13 +7110,7 @@ async def on_group_message(message: types.Message):
             print(f"[SKIP] Round not active")
             return
 
-        # Prevent spam
-        if eng.msg_count >= 4:
-            eng.msg_count = 0
-            await message.answer(f"📌 *Still playing:* `{eng.word1}` + `{eng.word2}`", parse_mode="Markdown")
-            return
-
-        # Validate word format
+        # Validate word format (no spam check - count all valid words)
         guess = text.lower().strip()
         if len(guess) < 3: 
             print(f"[SKIP] Too short: {len(guess)} chars")
@@ -7099,12 +7132,6 @@ async def on_group_message(message: types.Message):
         # ════════════════════════════════════════════════════════════════════
         # WORD VALIDATION
         # ════════════════════════════════════════════════════════════════════
-        
-        # Ensure dictionary is loaded
-        if len(DICTIONARY) == 0:
-            print(f"[WARN] DICTIONARY empty, reloading...")
-            load_dictionary()
-            print(f"[WARN] Reloaded: {len(DICTIONARY)} words")
         
         is_valid = word_in_dict(guess)
         print(f"[CHECK] '{guess}' valid={is_valid} (dict size: {len(DICTIONARY)})")
@@ -7418,7 +7445,7 @@ async def gamemaster_announcement_task(bot: Bot, chat_id: int):
         
         f"{divider()}\n👑 *SECTOR WARS ARE COMING*\n{divider()}\n\nYou think Sector 1 is tough? Try Sector 9. Better resources = better rewards = *actual* power. Teleport to a high sector and watch yourself get *obliterated*. Or train harder and actually win. I'm *dying* to see which. 🌍\n{divider()}",
         
-        "⚔️ *YOUR MILITARY STINKS*\n\nPawns attack like they're scared. Knights are hit-or-miss. Bishops are *trying*. Rooks are solid. Queens? Where are your Queens? Kings? Almost never seen those. \n\nBuild better armies. Stop embarrassing the realm. 👑💔",
+        "⚔️ *YOUR MILITARY STINKS*\n\nPolice and Dogs attack like they're scared. Knights are hit-or-miss. Bishops are *trying*. Rooks are solid. Queens? Where are your Queens? Kings? Almost never seen those. \n\nBuild better armies. Stop embarrassing the realm. 👑💔",
         
         f"{divider()}\n🔗 *ALLIANCES = FRIENDSHIP BETRAYAL SIMULATORS*\n{divider()}\n\nBand together with your friends... then stab them in the back for glory. The coming *Alliance Wars* will separate true friends from back-stabbers. Spoiler: everyone's a back-stabber. 😈\n{divider()}",
         
