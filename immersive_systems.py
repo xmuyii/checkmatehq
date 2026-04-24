@@ -20,7 +20,7 @@ ASSASSIN_PROFILE = {
     "hp":            5000,
     "attack":        350,
     "xp_reward":     1_000_000,
-    "silver_reward": 50_000,
+    "bitcoin_reward": 50_000,
     "rarity":        "COSMIC",
     "description":   "A being born from the spaces between worlds.",
     "spawn_hours":   72,
@@ -30,7 +30,7 @@ ASSASSIN_APPEARANCE = """
 ╔══════════════════════════════════════════════════════════╗
 ║          ⚫  THE  VOID  ASSASSIN  ⚫                    ║
 ║          Spawn Rate: Every 72 Hours                      ║
-║          Reward:    1,000,000 XP + 50,000 Silver         ║
+║          Reward:    1,000,000 XP + 50,000 Bitcoin         ║
 ╠══════════════════════════════════════════════════════════╣
 ║                                                          ║
 ║         ██████████  ████  ██████████                    ║
@@ -387,13 +387,13 @@ ACHIEVEMENTS = {
     "first_blood": {
         "name":   "🩸 FIRST BLOOD",
         "desc":   "Win your first PvP battle",
-        "reward": "200 XP + 50 silver",
+        "reward": "200 XP + 50 bitcoin",
         "gm":     "\"You shed your first blood. The sectors acknowledge the shift.\"",
     },
     "revenge_served": {
         "name":   "💢 BLOOD DEBT PAID",
         "desc":   "Successfully execute a revenge attack",
-        "reward": "150 XP + 100 silver",
+        "reward": "150 XP + 100 bitcoin",
         "gm":     "\"Vengeance served cold. As it should be.\"",
     },
 }
@@ -440,14 +440,14 @@ def consciousness_split_awareness(player_sector: int, base_sector: int, player_n
 
 
 # ══════════════════════════════════════════════════════════════════
-#  SHOP SYSTEM — Resource purchasing with silver
+#  SHOP SYSTEM — Resource purchasing with bitcoin
 # ══════════════════════════════════════════════════════════════════
 
 SHOP_CATALOG = {
     "wood": {
         "name": "🪵 WOOD",
         "quantities": [100, 500, 1000, 5000],
-        "price_per_unit": 0.5,  # silver per wood
+        "price_per_unit": 0.5,  # bitcoin per wood
         "description": "Foundation. Structure. Permanence."
     },
     "bronze": {
@@ -470,11 +470,11 @@ SHOP_CATALOG = {
     },
 }
 
-def format_shop_menu(player_silver: int) -> str:
-    """Display interactive shop for buying resources with silver."""
+def format_shop_menu(player_bitcoin: int) -> str:
+    """Display interactive shop for buying resources with bitcoin."""
     menu = """
 ╔════════════════════════════════════════════════════════╗
-║         🏬  THE SILVER VAULT  🏬                      ║
+║         🏬  THE BITCOIN VAULT  🏬                      ║
 ║         Exchange your wealth for power                 ║
 ╠════════════════════════════════════════════════════════╣
 ║                                                        ║
@@ -483,10 +483,10 @@ def format_shop_menu(player_silver: int) -> str:
         menu += f"║  {idx}️⃣  {resource_data['name']:<25} ⦿ {resource_data['description']}\n"
     
     menu += f"""║                                                        ║
-║  Your Silver: {player_silver:,} ⚔️                                 ║
+║  Your Bitcoin: {player_bitcoin:,} ⚔️                                 ║
 ║                                                        ║
 ║  Type: !shop [resource] [quantity] to buy             ║
-║  Example: !shop wood 1000 (costs {1000 * 0.5:,.0f} silver)        ║
+║  Example: !shop wood 1000 (costs {1000 * 0.5:,.0f} bitcoin)        ║
 ║                                                        ║
 ╚════════════════════════════════════════════════════════╝
 """
