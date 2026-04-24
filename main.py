@@ -5332,7 +5332,7 @@ def get_shop_items():
         "plasma_cannon": {"name": "⚡ Plasma Cannon", "price": 2500, "category": "weapon"},
         "emp_blast": {"name": "💥 EMP Blast", "price": 800, "category": "weapon"},
         "xp_siphon": {"name": "🔋 XP Siphon", "price": 1200, "category": "weapon"},
-        "silver_siphon": {"name": "💰 Silver Siphon", "price": 1500, "category": "weapon"},
+        "bitcoin_miner": {"name": "💰 Bitcoin Miner", "price": 1500, "category": "weapon"},
         "resource_drain": {"name": "🌀 Resource Drain", "price": 2000, "category": "weapon"},
         
         # TRAPS
@@ -7333,6 +7333,109 @@ async def round_reset_task():
             await asyncio.sleep(5)  # Brief pause before retry
 
 
+async def weekly_reset_task(bot: Bot, chat_id: int):
+    """Background task: Reset weekly points every Sunday at midnight (00:00 UTC+1).
+    Checks every 60 seconds. Uses a flag to prevent duplicate resets."""
+    weekly_reset_done_for_week = ""
+    
+    while True:
+        try:
+            await asyncio.sleep(60)  # Check every 60 seconds
+            
+            now = datetime.utcnow() + timedelta(hours=1)  # UTC+1 (WAT)
+            
+            # Sunday = weekday 6, check if within 00:00-00:02 window
+            is_sunday_midnight = (
+                now.weekday() == 6 and
+                now.hour == 0 and
+                now.minute < 2
+            )
+            
+            # Use week ISO date as key to prevent duplicate resets
+            current_week_id = now.strftime("%Y-%W")
+            
+            if is_sunday_midnight and weekly_reset_done_for_week != current_week_id:
+                weekly_reset_done_for_week = current_week_id
+                print(f"[WEEKLY RESET] Triggered at {now.isoformat()}")
+                
+                try:
+                    # 1. Get the final weekly leaderboard BEFORE resetting
+                    lb = get_weekly_leaderboard(limit=10)
+                    
+                    # 2. Build the winners announcement
+                    medals = ["🥇", "🥈", "🥉"]
+                    announcement = (
+                        f"{divider()}\n"
+                        f"🏆 *WEEKLY RESET — FINAL STANDINGS* 🏆\n"
+                        f"{divider()}\n\n"
+                        f"🃏 *GameMaster:* \"Another week concluded. "
+                        f"Let's see who proved themselves... and who wasted my time.\"\n\n"
+                    )
+                    
+                    if lb:
+                        for i, p in enumerate(lb[:10]):
+                            medal = medals[i] if i < 3 else f"  {i+1}."
+                            announcement += f"{medal} *{p['username']}* — {format_number(p['points'])} pts\n"
+                        
+                        # 3. Reward top 3 players
+                        for i, p in enumerate(lb[:3]):
+                            try:
+                                reward_crates = 3 - i  # 1st=3, 2nd=2, 3rd=1
+                                for _ in range(reward_crates):
+                                    add_unclaimed_item(p['id'], "super_crate", 1)
+                                xp_bonus = [500, 300, 150][i]
+                                add_xp(p['id'], xp_bonus)
+                                print(f"[WEEKLY RESET] Rewarded {p['username']}: {reward_crates} crates + {xp_bonus} XP")
+                            except Exception as re:
+                                print(f"[WEEKLY RESET] Reward error for {p.get('username')}: {re}")
+                        
+                        announcement += (
+                            f"\n✨ *Top 3 received bonus crates + XP!*\n"
+                            f"Check `!claims` to collect.\n"
+                        )
+                    else:
+                        announcement += "Nobody scored this week. Absolutely pathetic.\n"
+                    
+                    announcement += (
+                        f"\n{divider()}\n"
+                        f"📅 *All weekly points have been RESET to 0.*\n"
+                        f"A new week begins NOW. Prove yourself.\n"
+                        f"{divider()}"
+                    )
+                    
+                    # 4. Reset ALL players' weekly_points to 0 in database
+                    try:
+                        from supabase_db import supabase, DB_TABLE, _current_week_key
+                        new_week = _current_week_key()
+                        # Bulk update: set weekly_points=0 and update week_start for all users
+                        supabase.table(DB_TABLE).update({
+                            'weekly_points': 0,
+                            'week_start': new_week
+                        }).neq('user_id', '').execute()
+                        print(f"[WEEKLY RESET] All weekly_points reset to 0, week_start = {new_week}")
+                    except Exception as db_err:
+                        print(f"[WEEKLY RESET] DB bulk reset error: {db_err}")
+                    
+                    # 5. Send announcement to group
+                    if chat_id:
+                        try:
+                            await bot.send_message(chat_id, announcement, parse_mode="Markdown")
+                            print(f"[WEEKLY RESET] Announcement sent to group {chat_id}")
+                        except Exception as send_err:
+                            print(f"[WEEKLY RESET] Failed to send announcement: {send_err}")
+                    
+                except Exception as reset_err:
+                    print(f"[WEEKLY RESET] Error during reset: {reset_err}")
+                    import traceback
+                    traceback.print_exc()
+                    
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[WEEKLY RESET ERROR] Task error: {e}")
+            await asyncio.sleep(60)
+
+
 async def sector_status_task(bot: Bot, chat_id: int):
     """Background task: Post hourly sector status to keep chat feeling alive."""
     sector_names = [
@@ -7902,6 +8005,7 @@ async def main():
     status_task = None
     mining_task_handle = None
     sheets_sync_task = None
+    weekly_task = None
     
     # Check if group ID is valid (Telegram group IDs are negative integers)
     is_valid_group = CHECKMATE_HQ_GROUP_ID and isinstance(CHECKMATE_HQ_GROUP_ID, int) and CHECKMATE_HQ_GROUP_ID < 0
@@ -7930,6 +8034,12 @@ async def main():
             print(f"[OK] Google Sheets sync task started (every 30 min)")
         except Exception as e:
             print(f"[WARN] Google Sheets sync failed: {e}")
+        
+        try:
+            weekly_task = asyncio.create_task(weekly_reset_task(bot, CHECKMATE_HQ_GROUP_ID))
+            print(f"[OK] Weekly reset task started (Sunday midnight UTC+1)")
+        except Exception as e:
+            print(f"[WARN] Weekly reset task failed: {e}")
     else:
         print(f"[WARN] CHECKMATE_HQ_GROUP_ID invalid or not set (got: {CHECKMATE_HQ_GROUP_ID}) - announcements disabled")
     
@@ -7946,6 +8056,8 @@ async def main():
         mining_task_handle.cancel()
     if sheets_sync_task:
         sheets_sync_task.cancel()
+    if weekly_task:
+        weekly_task.cancel()
     try: await task
     except asyncio.CancelledError: pass
     try: await round_task

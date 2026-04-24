@@ -5,7 +5,9 @@ Provides real-time world map data, player positions, bases, and resources
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 import asyncio
+import os
 from datetime import datetime
 
 from supabase_db import get_user, get_alltime_leaderboard
@@ -20,6 +22,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve the index.html map page at root
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+@app.get("/")
+async def serve_map():
+    """Serve the index.html world map page."""
+    index_path = os.path.join(BASE_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path, media_type="text/html")
+    raise HTTPException(status_code=404, detail="index.html not found")
 
 @app.get("/api/player/{user_id}")
 async def get_player_map_data(user_id: str):
@@ -194,9 +207,13 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+    import sys, io
+    if sys.platform == "win32":
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
     
-    print("🗺️ Map API starting on http://0.0.0.0:8001")
-    print("📚 Docs: http://0.0.0.0:8001/docs")
+    print("[MAP API] Starting on http://0.0.0.0:8001")
+    print("[MAP API] Docs: http://0.0.0.0:8001/docs")
     
     uvicorn.run(
         app,
@@ -204,3 +221,4 @@ if __name__ == "__main__":
         port=8001,
         log_level="info"
     )
+
