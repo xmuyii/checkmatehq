@@ -7494,6 +7494,35 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
             await asyncio.sleep(60)
 
 
+async def bot_activity_task():
+    """Background task: Give fake points to bot accounts every hour."""
+    while True:
+        try:
+            await asyncio.sleep(3600)  # Wait 1 hour
+            
+            from supabase_db import supabase, DB_TABLE
+            
+            try:
+                response = supabase.table(DB_TABLE).select("user_id, username, weekly_points").eq("is_bot", True).execute()
+                bots = response.data
+                
+                if bots:
+                    print(f"[BOT ACTIVITY] Simulating activity for {len(bots)} bot accounts...")
+                    for bot_player in bots:
+                        pts = random.randint(50, 200)
+                        current = int(bot_player.get('weekly_points', 0) or 0)
+                        supabase.table(DB_TABLE).update({"weekly_points": current + pts}).eq("user_id", bot_player['user_id']).execute()
+                    print(f"[BOT ACTIVITY] Successfully added points to {len(bots)} bots.")
+            except Exception as db_err:
+                print(f"[BOT ACTIVITY] Could not update bots (is_bot column might be missing): {db_err}")
+                
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[BOT ACTIVITY] Task error: {e}")
+            await asyncio.sleep(60)
+
+
 async def sector_status_task(bot: Bot, chat_id: int):
     """Background task: Post hourly sector status to keep chat feeling alive."""
     sector_names = [
@@ -8064,6 +8093,7 @@ async def main():
     mining_task_handle = None
     sheets_sync_task = None
     weekly_task = None
+    bot_activity = None
     
     # Check if group ID is valid (Telegram group IDs are negative integers)
     is_valid_group = CHECKMATE_HQ_GROUP_ID and isinstance(CHECKMATE_HQ_GROUP_ID, int) and CHECKMATE_HQ_GROUP_ID < 0
@@ -8098,6 +8128,12 @@ async def main():
             print(f"[OK] Weekly reset task started (Sunday midnight UTC+1)")
         except Exception as e:
             print(f"[WARN] Weekly reset task failed: {e}")
+            
+        try:
+            bot_activity = asyncio.create_task(bot_activity_task())
+            print(f"[OK] Bot activity simulator started (hourly)")
+        except Exception as e:
+            print(f"[WARN] Bot activity task failed: {e}")
     else:
         print(f"[WARN] CHECKMATE_HQ_GROUP_ID invalid or not set (got: {CHECKMATE_HQ_GROUP_ID}) - announcements disabled")
     
@@ -8116,6 +8152,8 @@ async def main():
         sheets_sync_task.cancel()
     if weekly_task:
         weekly_task.cancel()
+    if bot_activity:
+        bot_activity.cancel()
     try: await task
     except asyncio.CancelledError: pass
     try: await round_task
