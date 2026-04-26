@@ -44,11 +44,11 @@ DEFAULT_BASE_NAMES = [
 # ── Week helper ────────────────────────────────────────────────────────────
 
 def _current_week_key() -> str:
-    """ISO date string of the Sunday that starts this week (Sun–Sat)."""
+    """ISO date string of the Monday that starts this week (Mon-Sun). Resets Monday 00:00 UTC (Sunday 11:59 PM)."""
     today = datetime.utcnow()
-    days_since_sunday = (today.weekday() + 1) % 7   # Monday=0 … Sunday=6
-    sunday = today - timedelta(days=days_since_sunday)
-    return sunday.date().isoformat()   # e.g. "2026-04-06"
+    days_since_monday = today.weekday()   # Monday=0 … Sunday=6
+    monday = today - timedelta(days=days_since_monday)
+    return monday.date().isoformat()
 
 
 def _fix_item_ids(items_list: list) -> list:
