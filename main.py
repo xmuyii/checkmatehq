@@ -480,13 +480,18 @@ async def game_loop(chat_id: int):
                 possible_words_count = compute_possible_words(eng.letters)
 
                 # Show last week winners
-                lb = get_weekly_leaderboard(limit=3)
+                try:
+                    with open('last_week_winners.json', 'r', encoding='utf-8') as f:
+                        last_winners = json.load(f)
+                except Exception:
+                    last_winners = []
+
                 winners_text = ""
-                if lb:
+                if last_winners:
                     winners_text = "🏆 *LAST WEEK'S TOP PLAYERS* 🏆\n"
-                    for i, p in enumerate(lb):
+                    for i, p in enumerate(last_winners):
                         medal = ["🥇", "🥈", "🥉"][i]
-                        winners_text += f"{medal} {p['username']} — {p['points']:,} pts\n"
+                        winners_text += f"{medal} {p.get('username', 'Unknown')} — {p.get('points', 0):,} pts\n"
                     winners_text += f"{divider()}\n"
 
                 await bot.send_message(
@@ -7390,11 +7395,11 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
             
             now = datetime.utcnow() + timedelta(hours=1)  # UTC+1 (WAT)
             
-            # Sunday = weekday 6, check if within 00:00-00:02 window
+            # Sunday = weekday 6, check if within 23:58-23:59 window (just before Monday)
             is_sunday_midnight = (
                 now.weekday() == 6 and
-                now.hour == 0 and
-                now.minute < 2
+                now.hour == 23 and
+                now.minute >= 58
             )
             
             # Use week ISO date as key to prevent duplicate resets
@@ -7434,6 +7439,13 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                                 print(f"[WEEKLY RESET] Rewarded {p['username']}: {reward_crates} crates + {xp_bonus} XP")
                             except Exception as re:
                                 print(f"[WEEKLY RESET] Reward error for {p.get('username')}: {re}")
+                        
+                        # Save to file for display in games
+                        try:
+                            with open('last_week_winners.json', 'w', encoding='utf-8') as f:
+                                json.dump(lb[:3], f)
+                        except Exception as e:
+                            print(f"[WEEKLY RESET] Failed to save last week winners: {e}")
                         
                         announcement += (
                             f"\n✨ *Top 3 received bonus crates + XP!*\n"
