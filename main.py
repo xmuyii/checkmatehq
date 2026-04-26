@@ -492,10 +492,10 @@ async def game_loop(chat_id: int):
                 await bot.send_message(
                     chat_id,
                     f"{winners_text}"
-                    f"🃏 *The GameMaster:* Topic is *Fusion*.\n"
-                    f"🃏 *The GameMaster:* Use the letters from these words to make new words: *{eng.word1.lower()}* *{eng.word2.lower()}*.\n"
-                    f"🃏 *The GameMaster:* There are {possible_words_count} possible words.\n"
-                    f"{crate_note}\n\n⏱️ *180 SECONDS* — Go hard.",
+                    f"🃏 *The GameMaster:* Topic is *FUSION*.\n"
+                    f"🃏 You are to use the letters from these words to make new words: *{eng.word1}* + *{eng.word2}*.\n"
+                    f"🃏 There are {possible_words_count} possible words.\n"
+                    f"{crate_note}\n\n⏱️ *Game on* — Go hard.",
                     parse_mode="Markdown"
                 )
 
@@ -531,9 +531,10 @@ async def game_loop(chat_id: int):
                         
                         await bot.send_message(
                             chat_id,
-                            f"🃏 *The GameMaster:* Adding extra letters `{eng.extra_letters[0]}` `{eng.extra_letters[1]}`\n"
-                            f"🃏 *The GameMaster:* There are now {new_possible_count} possible words\n"
-                            f"🃏 *The GameMaster:* The round will end in 60 seconds.",
+                            f"🃏 *The GameMaster:* *THE WORDS ARE:* \n\n\n`{eng.word1}` + `{eng.word2}`\n\n", parse_mode="Markdown")
+                            f"🃏 Adding extra letters \n `{eng.extra_letters[0]}` `{eng.extra_letters[1]}`\n\n"
+                            f"🃏 There are now {new_possible_count} possible words\n\n"
+                            f"🃏 The round will end in 60 seconds.",
                             parse_mode="Markdown"
                         )
 
@@ -769,7 +770,7 @@ async def cmd_forcerestart(message: types.Message):
         await message.answer("🃏 *GameMaster:* \"This command is for GROUPS only. Stop wasting my time in private.\"", parse_mode="Markdown"); return
     eng = get_engine(message.chat.id)
     if not eng.running:
-        await message.answer("🃏 *GameMaster:* \"No round is running, numbskull. Type `!fusion` to start one.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"No round is running", parse_mode="Markdown"); return
     eng.force_stop = True
     eng.active = False
     await message.answer("🃏 *GameMaster:* \"FINE. Terminating round because apparently you can't handle it. Fresh words incoming. Try not to mess this up.\"", parse_mode="Markdown")
@@ -781,8 +782,8 @@ async def cmd_words(message: types.Message):
         await message.answer("🃏 *GameMaster:* \"Groups ONLY. What part of that is confusing?\"", parse_mode="Markdown"); return
     eng = get_engine(message.chat.id)
     if not eng.active or not eng.word1:
-        await message.answer("🃏 *GameMaster:* \"No round running. Stop asking stupid questions and type `!fusion`.\"", parse_mode="Markdown"); return
-    await message.answer(f"📝 *CURRENT WORDS:* `{eng.word1}` + `{eng.word2}`", parse_mode="Markdown")
+        await message.answer("🃏 *GameMaster:*No round running.", parse_mode="Markdown"); return
+    await message.answer(f"📝 *THE WORDS ARE:* \n\n\n`{eng.word1}`  `{eng.word2}` with added letters `{eng.extra_letters[0]}` `{eng.extra_letters[1]}`", parse_mode="Markdown")
 
 
 @dp.message(_cmd("weekly"))
@@ -886,20 +887,17 @@ async def cmd_mystats(message: types.Message):
         
         # Create stats card
         stats_card = f"""
-╔═══════════════════════════════════════╗
-║         ⭐ MY STATS CARD ⭐          ║
-╠═══════════════════════════════════════╣
-║                                       ║
-║  👤 *{username}*
-║                                       ║
-║  💎 Bitcoin: *{bitcoin_display}*
-║  💰 Gold: *{gold_display}*
-║  ⭐ Level: *{level}*
-║                                       ║
-║  📊 All-Time Points: *{points_display}*
-║  📈 Weekly Points: *{weekly_points}*
-║                                       ║
-╚═══════════════════════════════════════╝
+╔═══════════════════════════════════╗
+║         ⭐ HQ CARD ⭐            ║
+╠═══════════════════════════════════╣
+║                                   ║
+║  👤 *{username}*                  ║
+║                                   ║
+║  💎 Bitcoin: *{bitcoin_display}*  ║
+║  ⭐ Level: *{level}*              ║
+║                                   ║  
+║                                   ║
+╚═══════════════════════════════════╝
 """
         await message.answer(stats_card, parse_mode="Markdown")
         
@@ -944,12 +942,14 @@ async def cmd_vault(message: types.Message):
             vault_display = f"""
 🔐 *VAULT STATUS*
 ━━━━━━━━━━━━━━━━━━━━━━
+ *BALANCE* 
 
-💎 *Account Bitcoin:* {format_number(account_bitcoin)} (vulnerable to raids)
-🏦 *Vault Bitcoin:* {format_number(vault_bitcoin)} (protected)
+💎 *Bitcoin:* {format_number(account_bitcoin)} 
+💰 *Gold:* {format_number(account_gold)} 
 
-💰 *Account Gold:* {format_number(account_gold)} (safe)
-🏦 *Vault Gold:* {format_number(vault_gold)} (extra safe)
+
+ *VAULT*
+*Bitcoin:* {format_number(vault_bitcoin)} (safe)
 
 ━━━━━━━━━━━━━━━━━━━━━━
 
@@ -958,13 +958,15 @@ async def cmd_vault(message: types.Message):
 `!vault withdraw bitcoin [amount]` — Withdraw Bitcoin
 `!vault deposit gold [amount]` — Move Gold to vault
 `!vault withdraw gold [amount]` — Withdraw Gold
+
+Move bitcoin to your vault to protect it from raids/
 """
             await message.answer(vault_display, parse_mode="Markdown")
             return
         
-        # Parse command: !vault deposit/withdraw bitcoin/gold amount
+        # Parse command: /vault deposit/withdraw bitcoin/gold amount
         if len(text) < 4:
-            await message.answer("❌ Format: `!vault deposit|withdraw bitcoin|gold amount`", parse_mode="Markdown")
+            await message.answer("❌ Format: `/vault deposit|withdraw bitcoin|gold amount`", parse_mode="Markdown")
             return
         
         action = text[1].lower()  # deposit or withdraw
@@ -1053,18 +1055,18 @@ async def cmd_obelisk(message: types.Message):
             await message.answer(OBELISK_GATEWAY)
             await asyncio.sleep(1)
         
-        msg = "🌌 Welcome to the Obelisk\n\nYou stand before a gateway to cosmic sectors.\n\nType !sectors to view them.\nType !teleport [1-9] to enter."
+        msg = "🌌 Welcome to the Obelisk\n\nYou stand before a gateway to cosmic sectors.\n\nType !sectors to view them.\nType /teleport [1-9] to enter."
         await message.answer(msg, parse_mode="Markdown")
         
     except Exception as e:
-        await message.answer("Obelisk awaits you. Use !sectors to explore.", parse_mode="Markdown")
+        await message.answer("Obelisk awaits you. Use /sectors to explore.", parse_mode="Markdown")
 
 
 @dp.message(_cmd("sectors"))
 async def cmd_sectors(message: types.Message):
     """Explore all sectors and their consciousness."""
     if message.chat.type != "private":
-        await message.answer("🗺️ *Sectors guide must be studied alone...* DM me `!sectors`", parse_mode="Markdown")
+        await message.answer("🗺️ *Sectors guide must be studied alone...* DM me `/sectors`", parse_mode="Markdown")
         return
     
     try:
@@ -1118,7 +1120,7 @@ async def cmd_tutorial(message: types.Message):
 🃏 *WELCOME TO CHECKMATE HQ*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-*PART 1: THE BASICS*
+THE BASICS*
 
 🎮 *How to Play the Word Game*
 1️⃣ `!fusion` starts a round in the group
@@ -7197,7 +7199,7 @@ async def on_group_message(message: types.Message):
         eng.words_repeated_count += 1
         
         if getattr(eng, 'words_repeated_count', 0) > 0 and eng.words_repeated_count % 4 == 0:
-            await bot.send_message(message.chat.id, f"🃏 *The GameMaster:* The words are: *{eng.word1.lower()}* *{eng.word2.lower()}*\nAvailable letters: `{eng.letters}`", parse_mode="Markdown")
+            await bot.send_message(message.chat.id, f"🃏 *The GameMaster:* The words are: *{eng.word1.lower()}* *{eng.word2.lower()}", parse_mode="Markdown")
             
         # Calculate base points
         pts = max(len(guess) - 2, 1)
@@ -7327,7 +7329,7 @@ async def on_group_message(message: types.Message):
         import traceback
         traceback.print_exc()
         try:
-            await message.reply("⚠️ Error processing word. Try again.", parse_mode="Markdown")
+            await message.reply("That round is over!", parse_mode="Markdown")
         except:
             pass
 
