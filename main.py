@@ -347,16 +347,16 @@ def load_dictionary():
 
 async def fetch_words() -> tuple[str, str]:
     headers = {'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {SUPABASE_KEY}'}
-    url = f"{SUPABASE_URL}/rest/v1/Dictionary?word_length=eq.7&select=word&limit=1"
+    url = f"{SUPABASE_URL}/rest/v1/Dictionary?word_length=eq.6&select=word&limit=1"
     async with httpx.AsyncClient() as c:
         try:
             r1 = await c.get(f"{url}&offset={random.randint(0,500)}", headers=headers, timeout=8.0)
             r2 = await c.get(f"{url}&offset={random.randint(0,500)}", headers=headers, timeout=8.0)
-            w1 = r1.json()[0]['word'].upper() if r1.json() else "PLAYERS"
-            w2 = r2.json()[0]['word'].upper() if r2.json() else "DANGERS"
+            w1 = r1.json()[0]['word'].upper() if r1.json() else "PLAYER"
+            w2 = r2.json()[0]['word'].upper() if r2.json() else "DANGER"
             return w1, w2
         except Exception:
-            return "PLAYERS", "DANGERS"
+            return "PLAYER", "DANGER"
 
 def word_in_dict(word: str) -> bool:
     """Check if word exists in local dictionary (fast, no network calls)."""
@@ -380,6 +380,15 @@ def word_in_dict(word: str) -> bool:
         print(f"[ERROR] DICTIONARY is EMPTY! word_in_dict('{word_lower}') returning False")
     
     return False
+
+def compute_possible_words(letters: str) -> int:
+    if not DICTIONARY:
+        load_dictionary()
+    count = 0
+    for word in DICTIONARY:
+        if len(word) >= 3 and can_spell(word, letters):
+            count += 1
+    return count
 
 def can_spell(word: str, pool: str) -> bool:
     avail = list(pool)
@@ -438,7 +447,7 @@ load_dictionary()
 #  GAME LOOP  — tick-based, no asyncio.Event complexity
 # ═══════════════════════════════════════════════════════════════════════════
 
-ROUND_SECS = 120
+ROUND_SECS = 180
 BREAK_SECS = 15
 
 async def game_loop(chat_id: int):
@@ -457,23 +466,36 @@ async def game_loop(chat_id: int):
 
                 eng.word1, eng.word2 = await fetch_words()
                 eng.letters = (eng.word1 + eng.word2).lower()
+                eng.extra_letters = ""
+                eng.words_repeated_count = 0
 
                 crate_note = ""
                 if random.random() < 0.2:
                     eng.crates_dropping = random.randint(1, 2)
                     eng.crate_claimers  = []
-                    crate_note = f"\n\n🎁 *BONUS:* {eng.crates_dropping} incoming!"
+                    crate_note = f"\n🎁 *BONUS:* {eng.crates_dropping} incoming!"
                 else:
                     eng.crates_dropping = 0
 
+                possible_words_count = compute_possible_words(eng.letters)
+
+                # Show last week winners
+                lb = get_weekly_leaderboard(limit=3)
+                winners_text = ""
+                if lb:
+                    winners_text = "🏆 *LAST WEEK'S TOP PLAYERS* 🏆\n"
+                    for i, p in enumerate(lb):
+                        medal = ["🥇", "🥈", "🥉"][i]
+                        winners_text += f"{medal} {p['username']} — {p['points']:,} pts\n"
+                    winners_text += f"{divider()}\n"
+
                 await bot.send_message(
                     chat_id,
-                    f"🃏 *GameMaster:* \"Fresh meat. Let's see if you've learned *anything* since last time.\"\n\n"
-                    f"{divider()}\n"
-                    f"📝 *FUSION PAIR*\n"
-                    f"`{eng.word1.upper()}`  +  `{eng.word2.upper()}`\n"
-                    f"{divider()}"
-                    f"{crate_note}\n\n⏱️ *120 SECONDS* — Go hard.",
+                    f"{winners_text}"
+                    f"🃏 *The GameMaster:* Topic is *Fusion*.\n"
+                    f"🃏 *The GameMaster:* Use the letters from these words to make new words: *{eng.word1.lower()}* *{eng.word2.lower()}*.\n"
+                    f"🃏 *The GameMaster:* There are {possible_words_count} possible words.\n"
+                    f"{crate_note}\n\n⏱️ *180 SECONDS* — Go hard.",
                     parse_mode="Markdown"
                 )
 
@@ -482,6 +504,9 @@ async def game_loop(chat_id: int):
                     await asyncio.sleep(1)
                     if eng.force_stop:
                         break
+                        
+                    # Repetition every 4 inputs is handled in on_group_message, but we can also just remind them if inactive
+                    
                     if eng.crates_dropping > 0 and elapsed == 50 and not crate_dropped:
                         crate_dropped = True
                         # 50% chance for monkey trap decoy
@@ -495,14 +520,20 @@ async def game_loop(chat_id: int):
                         eng.crate_msg_id   = m.message_id
                         eng.crate_claimers = []
                         eng.decoy_claimers = []
-                        # Store trap flag for later handling
                         if not hasattr(eng, 'current_crate_is_trap'):
                             eng.current_crate_is_trap = is_monkey_trap
                         eng.is_current_crate_decoy = is_monkey_trap
-                    if eng.crates_dropping == 0 and elapsed == 60:
+                        
+                    if elapsed == 120:
+                        eng.extra_letters = "".join(random.sample("abcdefghijklmnopqrstuvwxyz", 2))
+                        eng.letters += eng.extra_letters
+                        new_possible_count = compute_possible_words(eng.letters)
+                        
                         await bot.send_message(
                             chat_id,
-                            "⏱️ *GameMaster:* \"60 seconds remaining. PROVE you're not brain-dead. *Tick tock*.\"",
+                            f"🃏 *The GameMaster:* Adding extra letters `{eng.extra_letters[0]}` `{eng.extra_letters[1]}`\n"
+                            f"🃏 *The GameMaster:* There are now {new_possible_count} possible words\n"
+                            f"🃏 *The GameMaster:* The round will end in 60 seconds.",
                             parse_mode="Markdown"
                         )
 
@@ -546,7 +577,7 @@ async def game_loop(chat_id: int):
                     # Scores with medals
                     for i, p in enumerate(ss):
                         medal = medals[i] if i < 3 else f"  {i+1}."
-                        result += f"{medal} {p['name']} — *{format_number(p['pts'])} pts*\n"
+                        result += f"{medal} {p['name']} — *{p['pts']:,} pts*\n"
                         if i < 3:
                             try:
                                 add_unclaimed_item(p['user_id'], "super_crate", 1)
@@ -600,14 +631,14 @@ async def game_loop(chat_id: int):
                     await bot.send_message(chat_id, _help_text(), parse_mode="Markdown")
                     eng.games_until_help = eng.games_played + random.randint(3, 7)
 
-                if eng.games_played % 10 == 0:
+                if eng.games_played % 5 == 0:
                     try:
                         lb = get_weekly_leaderboard()
                         if lb:
-                            t = "🏆 *WEEKLY TOP 5*\n━━━━━━━━━━━━━━━\n"
-                            for i, p in enumerate(lb[:5], 1):
+                            t = "🏆 *WEEKLY TOP 10*\n━━━━━━━━━━━━━━━\n"
+                            for i, p in enumerate(lb[:10], 1):
                                 medal = ["🥇","🥈","🥉"][i-1] if i<=3 else f"{i}."
-                                t += f"{medal} {p['username']} — {format_number(p['points'])} pts\n"
+                                t += f"{medal} {p['username']} — {p['points']:,} pts\n"
                             await bot.send_message(chat_id, t, parse_mode="Markdown")
                     except Exception as e:
                         print(f"[ERROR] Weekly leaderboard display: {e}")
@@ -708,7 +739,10 @@ def _cmd(*names):
     ns = {n.lower() for n in names}
     def check(text: str) -> bool:
         if not text: return False
-        first = text.strip().split()[0].lstrip("/!").lower().split("@")[0]
+        parts = text.strip().split()
+        if not parts: return False
+        if not parts[0].startswith("/"): return False
+        first = parts[0][1:].lower().split("@")[0]
         return first in ns
     return F.text.func(check)
 
@@ -786,7 +820,7 @@ async def cmd_weekly(message: types.Message):
                     except:
                         pass
                 
-                text += f"{medal} {display_name} — {format_number(p['points'])} pts\n"
+                text += f"{medal} {display_name} — {p['points']:,} pts\n"
         
         text += "\n━━━━━━━━━━━━━━━\n"
         text += "`!alltime` for all-time scores"
@@ -823,7 +857,7 @@ async def cmd_alltime(message: types.Message):
                 except:
                     pass
             
-            text += f"{medal} {display_name} — {format_number(p['points'])} pts\n"
+            text += f"{medal} {display_name} — {p['points']:,} pts\n"
     await message.answer(text, parse_mode="Markdown")
 
 
@@ -846,8 +880,8 @@ async def cmd_mystats(message: types.Message):
         weekly_points = user.get('weekly_points', 0)
         
         # Format large numbers
-        bitcoin_display = format_number(bitcoin)
-        gold_display = format_number(gold)
+        bitcoin_display = f"{bitcoin:,}"
+        gold_display = f"{gold:,}"
         points_display = format_number(all_time_points)
         
         # Create stats card
@@ -6737,8 +6771,21 @@ async def on_reaction(event: types.MessageReactionUpdated):
             and eng.crates_dropping > 0
             and uid not in [c['user_id'] for c in eng.crate_claimers]
             and len(eng.crate_claimers) < 3):
-        eng.crate_claimers.append({'user_id': uid})
-
+        uid_str = str(uid)
+        user_info = get_user(uid_str)
+        username = user_info.get("username", f"Player {uid}") if user_info else f"Player {uid}"
+        eng.crate_claimers.append({'user_id': uid_str, 'username': username})
+        if getattr(eng, 'is_current_crate_decoy', False):
+            eng.decoy_claimers.append({'user_id': uid_str, 'username': username})
+            if user_info:
+                user_info['bitcoin'] = max(0, user_info.get('bitcoin', 0) - 100)
+                save_user(uid_str, user_info)
+                # Send group notification (fire and forget using asyncio to avoid holding up reaction)
+                asyncio.create_task(bot.send_message(
+                    event.chat.id,
+                    f"⚠️ *MONKEY TRAP!* {username} grabbed a decoy crate and lost *100 Bitcoin*! 💣",
+                    parse_mode="Markdown"
+                ))
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  BANDIT ENCOUNTER HANDLERS
@@ -7107,7 +7154,8 @@ async def on_group_message(message: types.Message):
 
         # Check if round is active
         if not eng.active:
-            print(f"[SKIP] Round not active")
+            if can_spell(guess, eng.letters) and word_in_dict(guess):
+                await message.reply("⏳ The round has already ended! Wait for the next one.")
             return
 
         # Validate word format (no spam check - count all valid words)
@@ -7125,8 +7173,6 @@ async def on_group_message(message: types.Message):
         
         # Check if can spell from letters
         if not can_spell(guess, eng.letters):
-            print(f"[SKIP] Can't spell from available letters")
-            await message.reply(f"❌ Can't spell `{guess.upper()}` from: `{eng.letters.upper()}`", parse_mode="Markdown")
             return
 
         # ════════════════════════════════════════════════════════════════════
@@ -7137,9 +7183,7 @@ async def on_group_message(message: types.Message):
         print(f"[CHECK] '{guess}' valid={is_valid} (dict size: {len(DICTIONARY)})")
         
         if not is_valid:
-            print(f"[INVALID] '{guess}' not in dictionary")
             update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
-            await message.reply(f"❌ `{guess.upper()}` is not a valid word.", parse_mode="Markdown")
             return
 
         # ════════════════════════════════════════════════════════════════════
@@ -7150,7 +7194,11 @@ async def on_group_message(message: types.Message):
         
         eng.used_words.append(guess)
         eng.msg_count += 1
+        eng.words_repeated_count += 1
         
+        if getattr(eng, 'words_repeated_count', 0) > 0 and eng.words_repeated_count % 4 == 0:
+            await bot.send_message(message.chat.id, f"🃏 *The GameMaster:* The words are: *{eng.word1.lower()}* *{eng.word2.lower()}*\nAvailable letters: `{eng.letters}`", parse_mode="Markdown")
+            
         # Calculate base points
         pts = max(len(guess) - 2, 1)
         db_name = user.get("username", message.from_user.first_name)
@@ -7192,7 +7240,7 @@ async def on_group_message(message: types.Message):
             rare_message = f"\n\n🎉 {format_rare_drop_notification(rare_item)}"
         
         # Build feedback message
-        fb = f"✅ `{guess.upper()}` +{format_number(pts)} pts  ⭐ +{format_number(pts)} XP"
+        fb = f"✅ `{guess.upper()}` +{pts:,} pts  ⭐ +{pts:,} XP"
         
         # if combo_mult > 1.0:  # REMOVED - no multiplier display
         #     fb += f" 🔥x{combo_mult}"
@@ -7251,11 +7299,7 @@ async def on_group_message(message: types.Message):
             eng.scores[u_id] = {"pts": 0, "name": db_name, "user_id": u_id}
         eng.scores[u_id]["pts"] += pts
         
-        # Track if player claimed a decoy crate this round
-        already_claimed = any(cl['user_id'] == u_id for cl in eng.crate_claimers)
-        if already_claimed and hasattr(eng, 'is_current_crate_decoy') and eng.is_current_crate_decoy:
-            if u_id not in [d['user_id'] for d in eng.decoy_claimers]:
-                eng.decoy_claimers.append({'user_id': u_id, 'username': db_name})
+        # (decoy logic moved to on_reaction)
         
         # Track word pattern for weapon unlocks
         try:
@@ -7356,7 +7400,7 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
             
             if is_sunday_midnight and weekly_reset_done_for_week != current_week_id:
                 weekly_reset_done_for_week = current_week_id
-                print(f"[WEEKLY RESET] Triggered at {now.isoformat()}")
+                print(f"Leaderboard has been reset at {now.isoformat()}")
                 
                 try:
                     # 1. Get the final weekly leaderboard BEFORE resetting
@@ -7375,7 +7419,7 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                     if lb:
                         for i, p in enumerate(lb[:10]):
                             medal = medals[i] if i < 3 else f"  {i+1}."
-                            announcement += f"{medal} *{p['username']}* — {format_number(p['points'])} pts\n"
+                            announcement += f"{medal} *{p['username']}* — {p['points']:,} pts\n"
                         
                         # 3. Reward top 3 players
                         for i, p in enumerate(lb[:3]):
