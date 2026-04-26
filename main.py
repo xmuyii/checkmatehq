@@ -537,6 +537,11 @@ async def game_loop(chat_id: int):
                         await bot.send_message(
                             chat_id,
                             f"🃏 *The GameMaster:* *THE WORDS ARE:* \n\n\n`{eng.word1}` + `{eng.word2}`\n\n", parse_mode="Markdown")
+
+                        # After sending word pair, wait a bit then send extra letters
+                        await asyncio.sleep(0.1)
+                        await bot.send_message(
+                            chat_id,
                             f"🃏 Adding extra letters \n `{eng.extra_letters[0]}` `{eng.extra_letters[1]}`\n\n"
                             f"🃏 There are now {new_possible_count} possible words\n\n"
                             f"🃏 The round will end in 60 seconds.",
@@ -7204,7 +7209,7 @@ async def on_group_message(message: types.Message):
         eng.words_repeated_count += 1
         
         if getattr(eng, 'words_repeated_count', 0) > 0 and eng.words_repeated_count % 4 == 0:
-            await bot.send_message(message.chat.id, f"🃏 *The GameMaster:* The words are: *{eng.word1.lower()}* *{eng.word2.lower()}", parse_mode="Markdown")
+            await bot.send_message(message.chat.id, f"🃏 *The GameMaster:* THE WORDS ARE: *{eng.word1.lower()}* *{eng.word2.lower()}* *{eng.extra_letters[0]}* *{eng.extra_letters[1]}*" , parse_mode="Markdown")
             
         # Calculate base points
         pts = max(len(guess) - 2, 1)
