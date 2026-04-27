@@ -542,7 +542,7 @@ async def game_loop(chat_id: int):
                         await asyncio.sleep(0.1)
                         await bot.send_message(
                             chat_id,
-                            f"🃏 Adding extra letters \n `{eng.extra_letters[0]}` `{eng.extra_letters[1]}`\n\n"
+                            f"🃏 *The GameMaster:* You can add these extra letters as well \n `{eng.extra_letters[0]}` `{eng.extra_letters[1]}`\n\n"
                             f"🃏 There are now {new_possible_count} possible words\n\n"
                             f"🃏 The round will end in 60 seconds.",
                             parse_mode="Markdown"
@@ -7209,7 +7209,8 @@ async def on_group_message(message: types.Message):
         eng.words_repeated_count += 1
         
         if getattr(eng, 'words_repeated_count', 0) > 0 and eng.words_repeated_count % 4 == 0:
-            await bot.send_message(message.chat.id, f"🃏 *The GameMaster:* THE WORDS ARE: *{eng.word1.lower()}* *{eng.word2.lower()}* *{eng.extra_letters[0]}* *{eng.extra_letters[1]}*" , parse_mode="Markdown")
+            extra = f" *{eng.extra_letters[0]}* *{eng.extra_letters[1]}*" if len(getattr(eng, 'extra_letters', '')) >= 2 else ""
+            await bot.send_message(message.chat.id, f"🃏 *The GameMaster:* THE WORDS ARE: *{eng.word1.lower()}* *{eng.word2.lower()}*{extra}" , parse_mode="Markdown")
             
         # Calculate base points
         pts = max(len(guess) - 2, 1)
@@ -7516,7 +7517,10 @@ async def bot_activity_task():
                     for bot_player in bots:
                         pts = random.randint(50, 200)
                         current = int(bot_player.get('weekly_points', 0) or 0)
-                        supabase.table(DB_TABLE).update({"weekly_points": current + pts}).eq("user_id", bot_player['user_id']).execute()
+                        supabase.table(DB_TABLE).update({
+                            "weekly_points": current + pts,
+                            "week_start": _current_week_key()
+                        }).eq("user_id", bot_player['user_id']).execute()
                     print(f"[BOT ACTIVITY] Successfully added points to {len(bots)} bots.")
             except Exception as db_err:
                 print(f"[BOT ACTIVITY] Could not update bots (is_bot column might be missing): {db_err}")

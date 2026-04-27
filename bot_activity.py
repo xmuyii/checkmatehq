@@ -40,8 +40,15 @@ def simulate_bot_activity():
             new_points = current_points + random_points
             
             try:
+                # Calculate current week start
+                today = datetime.utcnow() + datetime.timedelta(hours=1) if hasattr(datetime, 'timedelta') else datetime.utcnow() # lazy hack since timedelta might not be imported 
+                # actually let me just use the supabase_db _current_week_key
+                from supabase_db import _current_week_key
                 # Update database
-                supabase.table(DB_TABLE).update({"weekly_points": new_points}).eq("user_id", bot['user_id']).execute()
+                supabase.table(DB_TABLE).update({
+                    "weekly_points": new_points,
+                    "week_start": _current_week_key()
+                }).eq("user_id", bot['user_id']).execute()
                 print(f"  -> Added {random_points} pts to {bot.get('username', 'Unknown Bot')} (New Total: {new_points})")
                 updated_count += 1
             except Exception as e:

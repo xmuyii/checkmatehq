@@ -443,15 +443,15 @@ def get_weekly_leaderboard(limit: int = 10) -> list:
 def get_alltime_leaderboard(limit: int = 10) -> list:
     try:
         r = supabase.table(DB_TABLE) \
-            .select('user_id, username, all_time_points, total_words') \
+            .select('user_id, username, all_time_points, total_words, is_bot') \
             .order('all_time_points', desc=True) \
-            .limit(limit) \
+            .limit(limit * 5) \
             .execute()
         return [
             {'id': p['user_id'], 'username': p.get('username', 'Unknown'),
              'points': int(p.get('all_time_points') or 0), 'words': int(p.get('total_words') or 0)}
-            for p in (r.data or [])
-        ]
+            for p in (r.data or []) if p.get('is_bot') is not True
+        ][:limit]
     except Exception as e:
         print(f"[ERROR] get_alltime_leaderboard: {e}")
         return []
