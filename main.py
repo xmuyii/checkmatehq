@@ -481,7 +481,9 @@ async def game_loop(chat_id: int):
 
                 # Show last week winners
                 try:
-                    with open('last_week_winners.json', 'r', encoding='utf-8') as f:
+                    import os
+                    winners_path = os.path.join(os.path.dirname(__file__), 'last_week_winners.json')
+                    with open(winners_path, 'r', encoding='utf-8') as f:
                         last_winners = json.load(f)
                 except Exception:
                     last_winners = []
@@ -489,7 +491,8 @@ async def game_loop(chat_id: int):
                 winners_text = ""
                 if last_winners:
                     winners_text = "🏆 *LAST WEEK'S TOP PLAYERS* 🏆\n"
-                    for i, p in enumerate(last_winners):
+                    # Only show up to 3 winners to prevent IndexError
+                    for i, p in enumerate(last_winners[:3]):
                         medal = ["🥇", "🥈", "🥉"][i]
                         winners_text += f"{medal} {p.get('username', 'Unknown')} — {p.get('points', 0):,} pts\n"
                     winners_text += f"{divider()}\n"
@@ -843,6 +846,43 @@ async def cmd_weekly(message: types.Message):
         traceback.print_exc()
         await message.answer("❌ Error retrieving leaderboard. Try again.", parse_mode="Markdown")
 
+@dp.message(_cmd("score"))
+async def cmd_score(message: types.Message):
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await message.answer(_unreg(), parse_mode="Markdown"); return
+        
+    lb = get_weekly_leaderboard(limit=500)
+    
+    # Find user index
+    user_idx = -1
+    for i, p in enumerate(lb):
+        if str(p['id']) == u_id:
+            user_idx = i
+            break
+            
+    if user_idx == -1:
+        from supabase_db import _current_week_key
+        pts = int(user.get('weekly_points', 0))
+        if pts > 0 and user.get('week_start') == _current_week_key():
+            await message.answer(f"📊 *YOUR SCORE*\n{divider()}\nYou have *{pts:,}* points, but are outside the Top 500.", parse_mode="Markdown")
+        else:
+            await message.answer(f"📊 *YOUR SCORE*\n{divider()}\nYou haven't scored any points this week yet!", parse_mode="Markdown")
+        return
+        
+    start_idx = max(0, user_idx - 5)
+    end_idx = min(len(lb), user_idx + 6)
+    
+    text = f"📊 *YOUR SCORE AND RANKING*\n{divider()}\n"
+    for i in range(start_idx, end_idx):
+        p = lb[i]
+        rank = i + 1
+        prefix = "👉" if i == user_idx else "  "
+        medal = ["🥇", "🥈", "🥉"][i] if i < 3 else f"{rank}."
+        text += f"{prefix} {medal} {p.get('username', 'Unknown')} — {p.get('points', 0):,} pts\n"
+        
+    await message.answer(text, parse_mode="Markdown")
 
 @dp.message(_cmd("alltime"))
 async def cmd_alltime(message: types.Message):
@@ -7479,6 +7519,25 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                         print(f"[WEEKLY RESET] All weekly_points reset to 0, week_start = {new_week}")
                     except Exception as db_err:
                         print(f"[WEEKLY RESET] DB bulk reset error: {db_err}")
+                        
+                    # Pre-load bots
+                    try:
+                        import os, json
+                        from supabase_db import ensure_bot_exists
+                        if os.path.exists('bot_initial_scores.json'):
+                            with open('bot_initial_scores.json', 'r', encoding='utf-8') as f:
+                                bot_scores = json.load(f)
+                            for bot_name, score in bot_scores.items():
+                                if "World Boss" in bot_name:
+                                    continue
+                                bot_id = ensure_bot_exists(bot_name, score)
+                                supabase.table(DB_TABLE).update({
+                                    'weekly_points': score,
+                                    'week_start': new_week
+                                }).eq('user_id', bot_id).execute()
+                            print(f"[WEEKLY RESET] Pre-loaded bot initial scores (World Boss skipped).")
+                    except Exception as bot_preload_err:
+                        print(f"[WEEKLY RESET] Bot preload error: {bot_preload_err}")
                     
                     # 5. Send announcement to group
                     if chat_id:
@@ -7506,9 +7565,39 @@ async def bot_activity_task():
         try:
             await asyncio.sleep(3600)  # Wait 1 hour
             
-            from supabase_db import supabase, DB_TABLE
+            from supabase_db import supabase, DB_TABLE, ensure_bot_exists, _current_week_key
+            from datetime import datetime, timedelta
+            import os, json
             
             try:
+                now = datetime.utcnow() + timedelta(hours=1)
+                
+                # Ensure bots exist
+                if os.path.exists('bot_initial_scores.json'):
+                    with open('bot_initial_scores.json', 'r', encoding='utf-8') as f:
+                        bot_scores = json.load(f)
+                    for bot_name, score in bot_scores.items():
+                        if "World Boss" in bot_name:
+                            # Spawn World Boss on Tuesday or later
+                            if now.weekday() >= 1: 
+                                bot_id = ensure_bot_exists(bot_name, score)
+                                r = supabase.table(DB_TABLE).select('weekly_points, week_start').eq('user_id', bot_id).execute()
+                                if r.data:
+                                    wb_data = r.data[0]
+                                    wb_pts = int(wb_data.get('weekly_points') or 0)
+                                    wb_week = wb_data.get('week_start')
+                                    # If wrong week or points too low, reset to score
+                                    if wb_week != _current_week_key() or wb_pts < score:
+                                        supabase.table(DB_TABLE).update({
+                                            'weekly_points': max(wb_pts, score),
+                                            'week_start': _current_week_key()
+                                        }).eq('user_id', bot_id).execute()
+                                        print(f"[BOT ACTIVITY] Spawned World Boss with {score} points!")
+                        else:
+                            # Normal bots
+                            ensure_bot_exists(bot_name, score)
+
+                # Add hourly points
                 response = supabase.table(DB_TABLE).select("user_id, username, weekly_points").eq("is_bot", True).execute()
                 bots = response.data
                 

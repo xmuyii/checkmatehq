@@ -237,6 +237,48 @@ def register_user(user_id, username: str):
     }).execute()
 
 
+def ensure_bot_exists(username: str, initial_points: int = 0):
+    """Ensure a bot account exists in the database. Returns user_id."""
+    # First find by username and is_bot=True
+    r = supabase.table(DB_TABLE).select('user_id').eq('username', username).eq('is_bot', True).execute()
+    if r.data:
+        return r.data[0]['user_id']
+        
+    # Generate a unique pseudo user_id for the bot
+    import hashlib
+    bot_id = "bot_" + hashlib.md5(username.encode()).hexdigest()[:12]
+    
+    random_base_name = random.choice(DEFAULT_BASE_NAMES)
+    supabase.table(DB_TABLE).upsert({
+        'user_id': bot_id,
+        'username': username,
+        'is_bot': True,
+        'all_time_points': 0,
+        'weekly_points': initial_points,
+        'week_start': _current_week_key(),
+        'total_words': 0,
+        'bitcoin': 0,
+        'xp': 0,
+        'level': 1,
+        'last_level': 1,
+        'backpack_slots': 5,
+        'backpack_image': 'normal_backpack',
+        'inventory': json.dumps([]),
+        'unclaimed_items': json.dumps([]),
+        'base_name': random_base_name,
+        'base_resources': json.dumps({
+            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
+            'food': 0,
+            'current_streak': 0
+        }),
+        'military': json.dumps({}),
+        'traps': json.dumps({}),
+        'shield_status': 'UNPROTECTED'
+    }).execute()
+    
+    return bot_id
+
+
 # ── Points (weekly + all-time) ─────────────────────────────────────────────
 
 def add_points(user_id, points: int, username: str = ''):
@@ -415,7 +457,7 @@ def get_weekly_leaderboard(limit: int = 10) -> list:
         r = supabase.table(DB_TABLE) \
             .select('user_id, username, weekly_points, week_start') \
             .order('weekly_points', desc=True) \
-            .limit(50) \
+            .limit(max(limit, 50)) \
             .execute()
         results = []
         for p in (r.data or []):
