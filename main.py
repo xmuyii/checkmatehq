@@ -27,6 +27,7 @@ if sys.platform == "win32":
 import asyncio
 import random
 import time
+import json
 from datetime import datetime, timedelta
 import httpx
 import os
@@ -480,12 +481,24 @@ async def game_loop(chat_id: int):
                 possible_words_count = compute_possible_words(eng.letters)
 
                 # Show last week winners
+                last_winners = []
                 try:
-                    import os
-                    winners_path = os.path.join(os.path.dirname(__file__), 'last_week_winners.json')
-                    with open(winners_path, 'r', encoding='utf-8') as f:
-                        last_winners = json.load(f)
-                except Exception:
+                    paths_to_try = [
+                        'last_week_winners.json',
+                        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'last_week_winners.json'),
+                        os.path.join(os.getcwd(), 'last_week_winners.json')
+                    ]
+                    for path in paths_to_try:
+                        if os.path.exists(path):
+                            with open(path, 'r', encoding='utf-8') as f:
+                                last_winners = json.load(f)
+                            if last_winners:
+                                print(f"[GAME LOOP] Loaded {len(last_winners)} last week winners from {path}")
+                            break
+                except Exception as e:
+                    print(f"[ERROR] Loading last week winners: {e}")
+                    import traceback
+                    traceback.print_exc()
                     last_winners = []
 
                 winners_text = ""
@@ -704,6 +717,7 @@ def _help_text() -> str:
         "`!deactivateshield` — Deactivate shield\n"
         "`!disruptor @user` — Break enemy shield for 1 attack\n\n"
         "*GAME COMMANDS* _(group or DM)_\n"
+        "`!score` — Your weekly rank + 5 players above/below you\n"
         "`!weekly` — Weekly leaderboard\n"
         "`!alltime` — All-time leaderboard\n"
         "`!fusion` — Start new game round (group only)\n"
@@ -7520,22 +7534,20 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                     except Exception as db_err:
                         print(f"[WEEKLY RESET] DB bulk reset error: {db_err}")
                         
-                    # Pre-load bots
+                    # Pre-load bots (including World Boss with its high score)
                     try:
-                        import os, json
                         from supabase_db import ensure_bot_exists
                         if os.path.exists('bot_initial_scores.json'):
                             with open('bot_initial_scores.json', 'r', encoding='utf-8') as f:
                                 bot_scores = json.load(f)
                             for bot_name, score in bot_scores.items():
-                                if "World Boss" in bot_name:
-                                    continue
                                 bot_id = ensure_bot_exists(bot_name, score)
                                 supabase.table(DB_TABLE).update({
                                     'weekly_points': score,
                                     'week_start': new_week
                                 }).eq('user_id', bot_id).execute()
-                            print(f"[WEEKLY RESET] Pre-loaded bot initial scores (World Boss skipped).")
+                                print(f"[WEEKLY RESET] Bot '{bot_name}' initialized with {score} pts")
+                            print(f"[WEEKLY RESET] Pre-loaded all bot initial scores.")
                     except Exception as bot_preload_err:
                         print(f"[WEEKLY RESET] Bot preload error: {bot_preload_err}")
                     
@@ -7561,10 +7573,9 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
 
 async def bot_activity_task():
     """Background task: Give fake points to bot accounts every hour."""
+    await asyncio.sleep(10) # Brief pause before initial run
     while True:
         try:
-            await asyncio.sleep(3600)  # Wait 1 hour
-            
             from supabase_db import supabase, DB_TABLE, ensure_bot_exists, _current_week_key
             from datetime import datetime, timedelta
             import os, json
@@ -7572,45 +7583,66 @@ async def bot_activity_task():
             try:
                 now = datetime.utcnow() + timedelta(hours=1)
                 
-                # Ensure bots exist
+                # Load bot initial scores config
+                bot_scores = {}
                 if os.path.exists('bot_initial_scores.json'):
                     with open('bot_initial_scores.json', 'r', encoding='utf-8') as f:
                         bot_scores = json.load(f)
-                    for bot_name, score in bot_scores.items():
-                        if "World Boss" in bot_name:
-                            # Spawn World Boss on Tuesday or later
-                            if now.weekday() >= 1: 
-                                bot_id = ensure_bot_exists(bot_name, score)
-                                r = supabase.table(DB_TABLE).select('weekly_points, week_start').eq('user_id', bot_id).execute()
-                                if r.data:
-                                    wb_data = r.data[0]
-                                    wb_pts = int(wb_data.get('weekly_points') or 0)
-                                    wb_week = wb_data.get('week_start')
-                                    # If wrong week or points too low, reset to score
-                                    if wb_week != _current_week_key() or wb_pts < score:
-                                        supabase.table(DB_TABLE).update({
-                                            'weekly_points': max(wb_pts, score),
-                                            'week_start': _current_week_key()
-                                        }).eq('user_id', bot_id).execute()
-                                        print(f"[BOT ACTIVITY] Spawned World Boss with {score} points!")
-                        else:
-                            # Normal bots
-                            ensure_bot_exists(bot_name, score)
+                
+                # Collect World Boss names so we can exclude them from hourly random points
+                world_boss_ids = set()
+                
+                # Ensure all bots exist and have at least their initial score
+                for bot_name, score in bot_scores.items():
+                    if "World Boss" in bot_name:
+                        # World Boss always stays at the top with its fixed score
+                        bot_id = ensure_bot_exists(bot_name, score)
+                        world_boss_ids.add(bot_id)
+                        r = supabase.table(DB_TABLE).select('weekly_points, week_start').eq('user_id', bot_id).execute()
+                        if r.data:
+                            wb_data = r.data[0]
+                            wb_pts = int(wb_data.get('weekly_points') or 0)
+                            wb_week = (wb_data.get('week_start') or '').split('T')[0]
+                            # If wrong week or points below initial, force to initial score
+                            if wb_week != _current_week_key() or wb_pts < score:
+                                supabase.table(DB_TABLE).update({
+                                    'weekly_points': score,
+                                    'week_start': _current_week_key()
+                                }).eq('user_id', bot_id).execute()
+                                print(f"[BOT ACTIVITY] World Boss set to {score} points")
+                    else:
+                        # Normal bots — ensure they exist and have at least initial score
+                        bot_id = ensure_bot_exists(bot_name, score)
+                        r = supabase.table(DB_TABLE).select('weekly_points, week_start').eq('user_id', bot_id).execute()
+                        if r.data:
+                            bot_data = r.data[0]
+                            bot_pts = int(bot_data.get('weekly_points') or 0)
+                            bot_week = (bot_data.get('week_start') or '').split('T')[0]
+                            if bot_week != _current_week_key() or bot_pts < score:
+                                supabase.table(DB_TABLE).update({
+                                    'weekly_points': score,
+                                    'week_start': _current_week_key()
+                                }).eq('user_id', bot_id).execute()
+                                print(f"[BOT ACTIVITY] Bot '{bot_name}' topped up to initial {score} pts")
 
-                # Add hourly points
+                # Add hourly random points to NON-World-Boss bots only
                 response = supabase.table(DB_TABLE).select("user_id, username, weekly_points").eq("is_bot", True).execute()
                 bots = response.data
                 
                 if bots:
-                    print(f"[BOT ACTIVITY] Simulating activity for {len(bots)} bot accounts...")
+                    updated_count = 0
                     for bot_player in bots:
+                        # Skip World Boss — it stays at its fixed score
+                        if bot_player['user_id'] in world_boss_ids:
+                            continue
                         pts = random.randint(50, 200)
                         current = int(bot_player.get('weekly_points', 0) or 0)
                         supabase.table(DB_TABLE).update({
                             "weekly_points": current + pts,
                             "week_start": _current_week_key()
                         }).eq("user_id", bot_player['user_id']).execute()
-                    print(f"[BOT ACTIVITY] Successfully added points to {len(bots)} bots.")
+                        updated_count += 1
+                    print(f"[BOT ACTIVITY] Added 50-200 pts to {updated_count} bots (World Boss excluded).")
             except Exception as db_err:
                 print(f"[BOT ACTIVITY] Could not update bots (is_bot column might be missing): {db_err}")
                 
@@ -7618,7 +7650,8 @@ async def bot_activity_task():
             break
         except Exception as e:
             print(f"[BOT ACTIVITY] Task error: {e}")
-            await asyncio.sleep(60)
+            
+        await asyncio.sleep(3600)  # Wait 1 hour between runs
 
 
 async def sector_status_task(bot: Bot, chat_id: int):
