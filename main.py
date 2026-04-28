@@ -753,19 +753,19 @@ def _help_text() -> str:
         "Enjoy the game? Invite others! https://t.me/checkmateHQ"
     )
 
-def _unreg() -> str:
-    return random.choice([
-        "🃏 *GameMaster:* \"Who even *are* you? An unregistered ghost. How pathetic. DM me to exist.\"",
-        "🃏 *GameMaster:* \"You're not real to me. Register in my DMs and *maybe* I'll acknowledge you.\"",
-        "🃏 *GameMaster:* \"Nobody cares about unregistered nobodies. Go beg me for registration in private. *Now*.\"",
-    ])
+async def _send_unreg_sticker(message):
+    """Send the unregistered player video sticker (already contains all needed text)."""
+    try:
+        await bot.send_sticker(message.chat.id, STICKER_UNREGISTERED)
+    except Exception:
+        pass
 
-def _dm_only(cmd: str) -> str:
-    return random.choice([
-        f"🃏 *GameMaster:* \"Did you just expose your business to *everyone*? Brilliant move. Use `{cmd}` in my *PRIVATE* DMs, genius.\"",
-        f"🃏 *GameMaster:* \"`{cmd}` is for PRIVATE conversations only. Stop embarrassing yourself publicly, idiot.\"",
-        f"🃏 *GameMaster:* \"Oh look, another moron broadcasting personal stuff to the whole group. DM me next time, *please*.\"",
-    ])
+async def _send_access_denied_sticker(message):
+    """Send the access denied sticker for commands the player can't use here."""
+    try:
+        await bot.send_sticker(message.chat.id, STICKER_ACCESS_DENIED)
+    except Exception:
+        pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -810,7 +810,7 @@ async def cmd_fusion(message: types.Message):
     if eng.running:
         await message.answer("🃏 *GameMaster:* \"A game is ALREADY running, you blind buffoon. Pay attention next time.\"", parse_mode="Markdown"); return
     if not get_user(str(message.from_user.id)):
-        await message.answer("🃏 *GameMaster:* \"An unregistered peasant summoning me? Fine. *Fine.* I'll start. But YOU—go beg for registration in my DMs. *NOW*.\"\n\n_Nobody plays unregistered._", parse_mode="Markdown")
+        await _send_unreg_sticker(message)
     asyncio.create_task(game_loop(message.chat.id))
 
 
@@ -843,7 +843,7 @@ async def cmd_weekly(message: types.Message):
     user = get_user(user_id)
     
     if not user:
-        await message.answer(_unreg(), parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     # Get the weekly leaderboard
@@ -888,7 +888,7 @@ async def cmd_score(message: types.Message):
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer(_unreg(), parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
         
     lb = get_weekly_leaderboard(limit=500)
     
@@ -924,7 +924,7 @@ async def cmd_score(message: types.Message):
 @dp.message(_cmd("alltime"))
 async def cmd_alltime(message: types.Message):
     if not get_user(str(message.from_user.id)):
-        await message.answer(_unreg(), parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     lb = get_alltime_leaderboard()
     text = "🏆 *ALL-TIME LEADERBOARD*\n━━━━━━━━━━━━━━━\n"
     if not lb:
@@ -956,7 +956,7 @@ async def cmd_mystats(message: types.Message):
     user = get_user(u_id)
     
     if not user:
-        await message.answer(_unreg(), parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     try:
@@ -1000,11 +1000,11 @@ async def cmd_vault(message: types.Message):
     user = get_user(u_id)
     
     if not user:
-        await message.answer(_unreg(), parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     if message.chat.type != "private":
-        await message.answer(_dm_only("!vault"), parse_mode="Markdown")
+        await _send_access_denied_sticker(message)
         return
     
     try:
@@ -1201,7 +1201,7 @@ The Obelisk awaits your decision. 🌌
 async def cmd_tutorial(message: types.Message):
     """Comprehensive game tutorial and walkthrough."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!tutorial"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     
     tutorial = """
 🃏 *WELCOME TO CHECKMATE HQ*
@@ -1483,14 +1483,14 @@ Good luck, warrior. The GameMaster is watching. 👀
 async def cmd_shop(message: types.Message):
     """Buy resources with bitcoin from the vault."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!shop"), parse_mode="Markdown")
+        await _send_access_denied_sticker(message)
         return
     
     try:
         user_id = message.from_user.id
         user = get_user(user_id)
         if not user:
-            await message.answer("❌ Player not found. Register first.", parse_mode="Markdown")
+            await _send_unreg_sticker(message)
             return
         
         # Parse command: !shop [resource] [quantity]
@@ -1559,14 +1559,14 @@ Your Balance: {user['bitcoin']:,} bitcoin
 async def cmd_weapons(message: types.Message):
     """Browse and buy weapons from weapons shop with inline buttons."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!weapons"), parse_mode="Markdown")
+        await _send_access_denied_sticker(message)
         return
     
     try:
         u_id = str(message.from_user.id)
         user = get_user(u_id)
         if not user:
-            await message.answer("Register first with `/start`", parse_mode="Markdown")
+            await _send_unreg_sticker(message)
             return
         
         level = user.get("level", 1)
@@ -1698,7 +1698,7 @@ async def cmd_use_weapon(message: types.Message):
         u_id = str(message.from_user.id)
         user = get_user(u_id)
         if not user:
-            await message.answer("Register first", parse_mode="Markdown")
+            await _send_unreg_sticker(message)
             return
         
         weapons = user.get('weapons', {})
@@ -1889,11 +1889,11 @@ async def cmd_upgrade(message: types.Message):
 async def cmd_challenges(message: types.Message):
     """Show weekly challenges and progress."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!challenges"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     
     u_id = str(message.from_user.id)
     if not get_user(u_id):
-        await message.answer("🃏 *GameMaster:* \"You're not registered, fool. Type `/start` first.\"", parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     
     challenges = get_weekly_challenges(u_id)
     
@@ -1923,11 +1923,11 @@ async def cmd_challenges(message: types.Message):
 @dp.message(_cmd("profile"))
 async def cmd_profile(message: types.Message):
     if message.chat.type != "private":
-        await message.answer(_dm_only("!profile"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     u_id = str(message.from_user.id)
     profile = get_profile(u_id)
     if not profile:
-        await message.answer("🃏 *GameMaster:* \"No profile? You haven't even *started* the tutorial? What are you doing here, fool? DM me, run `!start`, and actually play the game.\"", parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     
     xp_pct = (profile['xp_progress'] / profile['xp_needed'] * 100) if profile['xp_needed'] > 0 else 0
     xp_bar = progress_bar(profile['xp_progress'], profile['xp_needed'], width=15)
@@ -2014,7 +2014,7 @@ async def cmd_prestige(message: types.Message):
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("Register first with `/start`", parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     level = user.get("level", 1)
@@ -2350,13 +2350,13 @@ async def callback_trap_confirm(callback: types.CallbackQuery):
 async def cmd_myaccount(message: types.Message):
     """Display account management panel with save/load/reset options."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!myaccount"), parse_mode="Markdown")
+        await _send_access_denied_sticker(message)
         return
     
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("❌ *Register first!*\nPlay a round with `!fusion` to get started.", parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     username = user.get('username', 'Player')
@@ -2414,12 +2414,12 @@ Use: `/reset soft` or `/reset hard`
 async def cmd_weapons_inventory(message: types.Message):
     """Display all weapons currently owned by player."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!weapons_inventory"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("🃏 *GameMaster:* \"Not registered.\"", parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     
     weapons = user.get('weapons', {})
     if not weapons:
@@ -2448,10 +2448,10 @@ async def cmd_weapons_inventory(message: types.Message):
 @dp.message(_cmd("inventory"))
 async def cmd_inventory(message: types.Message):
     if message.chat.type != "private":
-        await message.answer(_dm_only("!inventory"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     u_id = str(message.from_user.id)
     if not get_user(u_id):
-        await message.answer("🃏 *GameMaster:* \"You have nothing. You ARE nothing. Register first.\"", parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     inv = get_inventory(u_id)
     if not inv:
         await message.answer("🃏 *GameMaster:* \"Your inventory is empty. How *pathetic*.\"", parse_mode="Markdown"); return
@@ -2495,10 +2495,10 @@ async def cmd_inventory(message: types.Message):
 async def cmd_claims(message: types.Message):
     """Display unclaimed rewards with individual or auto-claim options."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!claims"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     u_id = str(message.from_user.id)
     if not get_user(u_id):
-        await message.answer("🃏 *GameMaster:* \"No account. Register first.\"", parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     
     unclaimed = get_unclaimed_items(u_id)
     if not unclaimed:
@@ -2558,10 +2558,10 @@ async def cmd_claims(message: types.Message):
 async def cmd_autoclaim(message: types.Message):
     """Auto-claim all unclaimed items to inventory."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!autoclaim"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     u_id = str(message.from_user.id)
     if not get_user(u_id):
-        await message.answer("🃏 *GameMaster:* \"No account. Register first.\"", parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     await _do_claim_all(message, u_id, is_command=True)
 
 
@@ -2574,7 +2574,7 @@ async def cmd_battle_items(message: types.Message):
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("🃏 *GameMaster:* \"But youre not even registered. Type /start so I may know how to proceed with you.\"", parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     
     player_level = user.get("level", 1)
     player_bitcoin = user.get("bitcoin", 0)
@@ -2666,7 +2666,7 @@ async def cmd_buy(message: types.Message):
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("🃏 *GameMaster:* \"Not registered.\"", parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     
     args = message.text.strip().split()
     if len(args) < 2:
@@ -2773,11 +2773,11 @@ async def cmd_buy(message: types.Message):
 @dp.message(_cmd("changename"))
 async def cmd_changename(message: types.Message):
     if message.chat.type != "private":
-        await message.answer(_dm_only("!changename"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("🃏 *GameMaster:* \"Not registered. Can't change a name you don't have.\"", parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     parts = message.text.strip().split(maxsplit=1)
     if len(parts) < 2 or not parts[1].strip():
         await message.answer("🃏 *GameMaster:* \"Usage: `!changename NewName`\"", parse_mode="Markdown"); return
@@ -2794,13 +2794,13 @@ async def cmd_changename(message: types.Message):
 async def cmd_name_shield_status(message: types.Message):
     """Check if your name shield is active and when it expires."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!name_shield"), parse_mode="Markdown")
+        await _send_access_denied_sticker(message)
         return
     
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("🔐 *GameMaster:* \"Not registered.\"", parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     name_shield_until = user.get("name_shield_until")
@@ -2866,13 +2866,13 @@ async def cmd_name_shield_status(message: types.Message):
 @dp.message(_cmd("setup_base"))
 async def cmd_setup_base(message: types.Message):
     if message.chat.type != "private":
-        await message.answer(_dm_only("!setup_base"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     
     if not user:
-        await message.answer("🃏 *GameMaster:* \"I don't even know who you are yet. You haven't survived initiation. Use `/start` first.\"", parse_mode="Markdown"); 
+        await _send_unreg_sticker(message) 
         return
     
     if user.get("base_name"):
@@ -2994,13 +2994,13 @@ async def cmd_setup_base(message: types.Message):
 @dp.message(_cmd("changebasename"))
 async def cmd_changebasename(message: types.Message):
     if message.chat.type != "private":
-        await message.answer(_dm_only("!changebasename"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     
     if not user:
-        await message.answer("🃏 *GameMaster:* \"You have no base to rename.\"", parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     
     if not user.get("base_name"):
         await message.answer("🃏 *GameMaster:* \"You haven't established a base yet. Use `!setup_base`\"", parse_mode="Markdown"); return
@@ -3036,13 +3036,13 @@ async def cmd_changebasename(message: types.Message):
 async def cmd_research_lab(message: types.Message):
     """Science Laboratory: Spend resources to unlock powerful abilities."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!lab"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     
     if not user:
-        await message.answer("🃏 *GameMaster:* \"You're not even registered, fool. Can't research nothing.\"", parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     
     # Define research upgrades
     researches = {
@@ -3109,7 +3109,7 @@ async def cmd_shield_status(message: types.Message):
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("🃏 *GameMaster:* \"Sorry not registered. You are not a part of this game why do you even need a shield. Type /start to register\"", parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     
     shield_status = user.get('shield_status', '⚠️ UNPROTECTED')
     
@@ -3150,7 +3150,7 @@ async def cmd_shield_status(message: types.Message):
 async def cmd_activate_shield(message: types.Message):
     """Activate shield with 24-hour cooldown between activations."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!activateshield"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     
     u_id = str(message.from_user.id)
     ok, msg = activate_shield(u_id)
@@ -3165,7 +3165,7 @@ async def cmd_activate_shield(message: types.Message):
 async def cmd_deactivate_shield(message: types.Message):
     """Deactivate shield and start 24-hour cooldown before re-activation."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!deactivateshield"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     
     u_id = str(message.from_user.id)
     ok, msg = deactivate_shield(u_id)
@@ -3180,7 +3180,7 @@ async def cmd_deactivate_shield(message: types.Message):
 async def cmd_use_disruptor(message: types.Message):
     """Use disruptor item to break enemy shield for 1 attack."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!disruptor"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     
     # Parse target
     parts = message.text.strip().split(maxsplit=1)
@@ -3210,13 +3210,13 @@ async def cmd_use_disruptor(message: types.Message):
 @dp.message(_cmd("base"))
 async def cmd_base(message: types.Message):
     if message.chat.type != "private":
-        await message.answer(_dm_only("!base"), parse_mode="Markdown"); return
+        await _send_access_denied_sticker(message); return
     
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     
     if not user:
-        await message.answer("🃏 *GameMaster:* \"You have no profile.\"", parse_mode="Markdown"); return
+        await _send_unreg_sticker(message); return
     
     if not user.get("base_name"):
         await message.answer("🃏 *GameMaster:* \"You haven't claimed a base. Use `!setup_base [Name]`\"", parse_mode="Markdown"); return
@@ -3342,14 +3342,14 @@ async def cmd_base(message: types.Message):
 async def cmd_build(message: types.Message):
     """Build structures inside your base for bonuses."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!build"), parse_mode="Markdown")
+        await _send_access_denied_sticker(message)
         return
     
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     
     if not user:
-        await message.answer("🃏 *GameMaster:* \"You're not registered.\"", parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     if not user.get("base_name"):
@@ -3440,7 +3440,7 @@ async def cmd_scout(message: types.Message):
     u_id = str(message.from_user.id)
     scout_user = get_user(u_id)
     if not scout_user:
-        await message.answer("🃏 *GM:* \"You're not registered. Try `!start` first.\"", parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     # Parse command: !scout @username or !scout user_id
@@ -3590,7 +3590,7 @@ async def cmd_revenge(message: types.Message):
     u_id = str(message.from_user.id)
     player = get_user(u_id)
     if not player:
-        await message.answer("🃏 *GM:* \"You're not registered. Try `!start` first.\"", parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     # Check if player has active revenge debt
@@ -3638,7 +3638,7 @@ async def cmd_attack(message: types.Message):
     u_id = str(message.from_user.id)
     attacker = get_user(u_id)
     if not attacker:
-        await message.answer("🃏 *GM:* \"You're not registered. Try `!start` first.\"", parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     # Check if attacker has troops
@@ -4320,7 +4320,7 @@ async def handle_new_member(event: types.ChatMemberUpdated):
 async def cmd_start(message: types.Message):
     """Welcome screen with main menu navigation."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("start"), parse_mode="Markdown")
+        await _send_access_denied_sticker(message)
         return
     
     u_id = str(message.from_user.id)
@@ -5511,7 +5511,7 @@ async def cmd_callout(message: types.Message):
     u_id = str(message.from_user.id)
     challenger = get_user(u_id)
     if not challenger:
-        await message.answer("🃏 *GameMaster:* \"You're not registered.\"", parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     # Parse target player ID or username
@@ -5550,7 +5550,7 @@ async def cmd_train(message: types.Message):
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("🃏 *GM:* \"You're not registered.\"", parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     # Parse: !train [unit] [amount] or !train (show queue)
@@ -5602,7 +5602,7 @@ async def cmd_share(message: types.Message):
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("🃏 *GM:* \"You're not registered.\"", parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     # Parse: !share [amount] [resource] @member
@@ -5645,7 +5645,7 @@ async def cmd_alliance(message: types.Message):
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     if not user:
-        await message.answer("🃏 *GM:* \"You're not registered.\"", parse_mode="Markdown")
+        await _send_unreg_sticker(message)
         return
     
     args = message.text.strip().split()
@@ -7288,7 +7288,7 @@ async def on_group_message(message: types.Message):
                     await bot.send_sticker(message.chat.id, STICKER_UNREGISTERED)
                 except Exception:
                     pass
-                await message.reply(_unreg(), parse_mode="Markdown")
+
             print(f"[SKIP] User not registered")
             return
 
@@ -7990,7 +7990,7 @@ async def cmd_save(message: types.Message):
     user = get_user(u_id) # Fetch the user from Supabase/DB
     
     if not user:
-        await message.answer("❌ Register first by playing a round!")
+        await _send_unreg_sticker(message)
         return
 
     # Parse the slot number (e.g., /save 1)
@@ -8025,7 +8025,7 @@ async def cmd_load(message: types.Message):
     user = get_user(u_id) # Fetch the user from Supabase/DB
     
     if not user:
-        await message.answer("❌ Register first by playing a round!")
+        await _send_unreg_sticker(message)
         return
 
     # Parse the slot number (e.g., /load 1)
@@ -8063,7 +8063,7 @@ async def cmd_reset(message: types.Message):
     user = get_user(u_id)
     
     if not user:
-        await message.answer("❌ Register first by playing a round!")
+        await _send_unreg_sticker(message)
         return
 
     # Parse the reset level (e.g., /reset soft)
@@ -8115,7 +8115,7 @@ async def cmd_confirm_reset(message: types.Message):
     user = get_user(u_id)
     
     if not user:
-        await message.answer("❌ Register first by playing a round!")
+        await _send_unreg_sticker(message)
         return
 
     # Parse the reset level
@@ -8149,14 +8149,14 @@ async def cmd_confirm_reset(message: types.Message):
 async def cmd_saves(message: types.Message):
     """Display all saved game slots."""
     if message.chat.type != "private":
-        await message.answer(_dm_only("!saves"), parse_mode="Markdown")
+        await _send_access_denied_sticker(message)
         return
     
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     
     if not user:
-        await message.answer("❌ Register first by playing a round!")
+        await _send_unreg_sticker(message)
         return
     
     # Get all save checkpoints
