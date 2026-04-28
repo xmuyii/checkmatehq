@@ -7387,23 +7387,31 @@ async def on_group_message(message: types.Message):
 
         dashboard_text = build_player_dashboard(db_name, session)
 
-        # Delete old dashboard + send new one (keeps it at bottom of chat)
+        # Hybrid dashboard: edit for speed, reposition every 4th word
         try:
-            if u_id in eng.dashboard_msgs:
+            word_num = session['word_count']
+            if u_id in eng.dashboard_msgs and word_num % 4 != 0:
+                # Fast edit (keeps position but instant)
                 try:
-                    await bot.delete_message(
+                    await bot.edit_message_text(
+                        dashboard_text,
                         chat_id=message.chat.id,
-                        message_id=eng.dashboard_msgs[u_id]
+                        message_id=eng.dashboard_msgs[u_id],
+                        parse_mode="HTML"
                     )
                 except Exception:
-                    pass  # Old message already gone, no problem
-
-            msg = await bot.send_message(
-                message.chat.id,
-                dashboard_text,
-                parse_mode="HTML"
-            )
-            eng.dashboard_msgs[u_id] = msg.message_id
+                    # Edit failed — send fresh
+                    msg = await bot.send_message(message.chat.id, dashboard_text, parse_mode="HTML")
+                    eng.dashboard_msgs[u_id] = msg.message_id
+            else:
+                # Every 4th word (or first word): delete old + send new at bottom
+                if u_id in eng.dashboard_msgs:
+                    try:
+                        await bot.delete_message(chat_id=message.chat.id, message_id=eng.dashboard_msgs[u_id])
+                    except Exception:
+                        pass
+                msg = await bot.send_message(message.chat.id, dashboard_text, parse_mode="HTML")
+                eng.dashboard_msgs[u_id] = msg.message_id
         except Exception as dash_err:
             # Fallback to simple text
             fb = f"✅ {guess.upper()} +{pts:,} pts ⭐ +{xp_awarded:,} XP"
@@ -7443,26 +7451,15 @@ async def on_group_message(message: types.Message):
         
         # (decoy logic moved to on_reaction)
         
-        # Track word pattern for weapon unlocks
+        # Track word pattern in memory only (no DB column for this)
         try:
             word_pattern = detect_word_pattern(guess)
-            if user_fresh:
-                if 'word_patterns' not in user_fresh:
-                    user_fresh['word_patterns'] = {}
-                user_fresh['word_patterns'][word_pattern] = user_fresh['word_patterns'].get(word_pattern, 0) + 1
-                save_user(u_id, user_fresh)
-                
-                # Check for new weapon unlock
-                patterns_unlocked = {
-                    'palindrome': 'Weapon Class: Precision',
-                    'anagram_set': 'Weapon Class: Artillery',
-                    'double_letters': 'Weapon Class: Rapid-Fire',
-                    'vowel_rich': 'Weapon Class: Heavy'
-                }
-                if word_pattern in patterns_unlocked and user_fresh['word_patterns'].get(word_pattern) == 1:
-                    print(f"[UNLOCK] {db_name} unlocked {patterns_unlocked[word_pattern]}")
+            if u_id in eng.scores:
+                if 'word_patterns' not in eng.scores[u_id]:
+                    eng.scores[u_id]['word_patterns'] = {}
+                eng.scores[u_id]['word_patterns'][word_pattern] = eng.scores[u_id]['word_patterns'].get(word_pattern, 0) + 1
         except Exception as e:
-            print(f"[PATTERN ERROR] {e}")
+            pass  # Pattern tracking is non-critical
     
     except Exception as e:
         print(f"[HANDLER ERROR] {type(e).__name__}: {e}")
