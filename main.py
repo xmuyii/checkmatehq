@@ -269,7 +269,8 @@ class GameEngine:
         self.crate_claimers   = []
         self.crate_msg_id     = None
         self.decoy_claimers   = []  # Track who got decoy crates
-        self.decoy_claimers   = []  # Track who got decoy crates
+        self.dashboard_msgs   = {}  # user_id -> message_id for live dashboards
+        self.player_sessions  = {}  # user_id -> round session stats dict
 
 active_games: dict[int, GameEngine] = {}
 
@@ -464,6 +465,8 @@ async def game_loop(chat_id: int):
                 eng.msg_count  = 0
                 eng.force_stop = False
                 eng.active     = True
+                eng.dashboard_msgs  = {}
+                eng.player_sessions = {}
 
                 eng.word1, eng.word2 = await fetch_words()
                 eng.letters = (eng.word1 + eng.word2).lower()
@@ -951,17 +954,17 @@ async def cmd_mystats(message: types.Message):
         
         # Create stats card
         stats_card = f"""
-╔═══════════════════════════════════╗
-║         ⭐ HQ CARD ⭐            ║
-╠═══════════════════════════════════╣
-║                                   ║
-║  👤 *{username}*                  ║
-║                                   ║
-║  💎 Bitcoin: *{bitcoin_display}*  ║
-║  ⭐ Level: *{level}*              ║
-║                                   ║  
-║                                   ║
-╚═══════════════════════════════════╝
+╔══════════════════════════════╗
+║    ⭐ HQ CARD ⭐            ║
+╠══════════════════════════════╣
+║                              ║
+║  👤 *{username}*            ║
+║                              ║
+║  💎 Bitcoin:*{bitcoin_display}*║
+║  ⭐ Level: *{level}*        ║
+║                              ║  
+║                              ║
+╚══════════════════════════════╝
 """
         await message.answer(stats_card, parse_mode="Markdown")
         
@@ -7186,6 +7189,53 @@ This file contains a working version of the word validation handler.
 Copy the function below into main.py to replace the corrupted version.
 """
 
+
+def build_player_dashboard(player_name: str, session: dict) -> str:
+    """Build an HTML-formatted in-text dashboard for a player's round stats."""
+    last_word = session.get('last_word', '???')
+    total_pts = session.get('pts', 0)
+    total_xp = session.get('xp', 0)
+    word_count = session.get('word_count', 0)
+    streak = session.get('streak', 0)
+    food = session.get('food', 0)
+    resources = session.get('resources', {})
+    last_pts = session.get('last_pts', 0)
+    rare_msg = session.get('rare_message', '')
+
+    # Resource line - only show resources that have been earned
+    res_parts = []
+    for key, emoji in [('wood','🪵'),('bronze','🧱'),('iron','⛓️'),('diamond','💎'),('relics','🏺')]:
+        val = resources.get(key, 0)
+        if val > 0:
+            res_parts.append(f"{emoji}{val}")
+
+    # Extras: resources, food, streak
+    extras = []
+    if res_parts:
+        extras.append("  ".join(res_parts))
+    if food > 0:
+        extras.append(f"🌽{food}")
+    if streak >= 3:
+        extras.append(f"🔥x{streak}")
+    extras_line = "  ".join(extras)
+
+    dashboard = (
+        f"🎮 <b>{player_name}</b>\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"✅ <code>{last_word.upper()}</code>  <b>+{last_pts}</b>\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"💰 <b>{total_pts:,}</b> pts   ⭐ <b>{total_xp:,}</b> XP\n"
+    )
+    if extras_line:
+        dashboard += f"{extras_line}\n"
+    dashboard += (
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"📊 {word_count} word{'s' if word_count != 1 else ''} found"
+    )
+    if rare_msg:
+        dashboard += f"\n\n{rare_msg}"
+    return dashboard
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  WORD-GUESS CATCH-ALL  ←── MUST BE THE LAST @dp.message HANDLER
 # ═══════════════════════════════════════════════════════════════════════════
@@ -7306,32 +7356,59 @@ async def on_group_message(message: types.Message):
             add_unclaimed_item(u_id, rare_item["key"], 1)
             rare_message = f"\n\n🎉 {format_rare_drop_notification(rare_item)}"
         
-        # Build feedback message
-        fb = f"✅ `{guess.upper()}` +{pts:,} pts  ⭐ +{pts:,} XP"
-        
-        # if combo_mult > 1.0:  # REMOVED - no multiplier display
-        #     fb += f" 🔥x{combo_mult}"
-        
-        # Add resources
-        for resource, amount in resources_awarded.items():
-            emoji_map = {"wood": "🪵", "bronze": "🧱", "iron": "⛓️", "diamond": "💎", "relics": "🏺"}
-            emoji = emoji_map.get(resource, "📦")
-            fb += f" +{amount} {emoji}"
-        
-        # Add food
-        if streak_info.get("food_awarded", 0) > 0:
-            fb += f" +{streak_info['food_awarded']} 🌽"
-        
-        # Add combo milestone - DISABLED
-        # if combo.get("milestone_message"):
-        #     fb += f"\n\n{combo['milestone_message']}"
-        
-        # Add rare drop
-        fb += rare_message
-        
-        # Send feedback
-        await message.reply(fb, parse_mode="Markdown")
-        print(f"[SENT] Feedback to {db_name}")
+        # ════════════════════════════════════════════════════════════════
+        # PLAYER DASHBOARD — one editable message per player per round
+        # ════════════════════════════════════════════════════════════════
+        xp_awarded = pts  # XP equals base pts
+
+        # Initialize session on first word
+        if u_id not in eng.player_sessions:
+            eng.player_sessions[u_id] = {
+                'pts': 0, 'xp': 0, 'word_count': 0,
+                'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
+                'food': 0, 'streak': 0,
+                'last_word': '', 'last_pts': 0, 'rare_message': ''
+            }
+
+        session = eng.player_sessions[u_id]
+        session['pts'] += pts
+        session['xp'] += xp_awarded
+        session['word_count'] += 1
+        session['last_word'] = guess
+        session['last_pts'] = pts
+        session['streak'] = streak_info.get('streak', 0)
+        session['food'] += streak_info.get('food_awarded', 0)
+        for res_type, amount in resources_awarded.items():
+            session['resources'][res_type] = session['resources'].get(res_type, 0) + amount
+
+        # Rare drop (HTML-safe)
+        if rare_item:
+            session['rare_message'] = f"🎉 <b>RARE DROP!</b> {rare_item['name']}"
+
+        dashboard_text = build_player_dashboard(db_name, session)
+
+        # Send or edit the dashboard message
+        try:
+            if u_id in eng.dashboard_msgs:
+                try:
+                    await bot.edit_message_text(
+                        dashboard_text,
+                        chat_id=message.chat.id,
+                        message_id=eng.dashboard_msgs[u_id],
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    # Edit failed — send fresh dashboard
+                    msg = await message.reply(dashboard_text, parse_mode="HTML")
+                    eng.dashboard_msgs[u_id] = msg.message_id
+            else:
+                msg = await message.reply(dashboard_text, parse_mode="HTML")
+                eng.dashboard_msgs[u_id] = msg.message_id
+        except Exception as dash_err:
+            # Fallback to simple text
+            fb = f"✅ {guess.upper()} +{pts:,} pts ⭐ +{xp_awarded:,} XP"
+            await message.reply(fb)
+        print(f"[SENT] Dashboard to {db_name}")
         
         # Save to database (background)
         try:
@@ -7354,9 +7431,7 @@ async def on_group_message(message: types.Message):
                 user_fresh['base_resources'] = base_res
                 save_user(u_id, user_fresh)
                 add_points(u_id, pts, db_name)
-                # XP is now calculated as base value (not multiplied)
-                xp_awarded = max(len(guess) - 2, 1)  # Base value only, no multiplier
-                add_xp(u_id, xp_awarded)
+                add_xp(u_id, xp_awarded)  # xp_awarded computed above in dashboard section
                 print(f"[DB] Saved for {db_name} - pts: {pts}, xp: {xp_awarded}")
         except Exception as e:
             print(f"[DB ERROR] {e}")
