@@ -246,6 +246,15 @@ bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher()
 dp.include_router(initiation_router)
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  STICKER FILE IDs (Telegram)
+# ═══════════════════════════════════════════════════════════════════════════
+
+STICKER_ACCESS_DENIED = "CAACAgQAAxkBAAFIQ_lp8GsJepZi0KF6r2mfAl_WppJJmAAC-xkAAvSegFORr5sV0ZQ50TsE"
+STICKER_NEW_ROUND     = "CAACAgQAAxkBAAFIQ_Vp8GsBLJUMxVfnCZf1T2USv9LcmQACTS0AAhhCgVMpo0o9nkUv1TsE"
+STICKER_UNREGISTERED  = "CAACAgQAAxkBAAFIQ_dp8GsGpaBG4Mwq8eLR2KssKRZNigACYB8AAkTagVMHGNklL-OePzsE"
+STICKER_CRATE_DROP    = "CAACAgQAAxkBAAFIQ9hp8Go_f_MiW-ZSQUiR8aGCuPhZzwAC6B0AAnpiiVMDM_gbbCe70TsE"
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  GAME ENGINE
@@ -513,6 +522,12 @@ async def game_loop(chat_id: int):
                         winners_text += f"{medal} {p.get('username', 'Unknown')} — {p.get('points', 0):,} pts\n"
                     winners_text += f"{divider()}\n"
 
+                # Send new round sticker
+                try:
+                    await bot.send_sticker(chat_id, STICKER_NEW_ROUND)
+                except Exception:
+                    pass
+
                 await bot.send_message(
                     chat_id,
                     f"{winners_text}"
@@ -535,10 +550,15 @@ async def game_loop(chat_id: int):
                         crate_dropped = True
                         # 50% chance for monkey trap decoy
                         is_monkey_trap = random.random() < 0.50
-                        crate_message = "⚡ *CRATE DROP!  🐵*" if is_monkey_trap else "⚡ *CRATE DROP!*"
+                        # Send crate sticker instead of text
+                        try:
+                            await bot.send_sticker(chat_id, STICKER_CRATE_DROP)
+                        except Exception:
+                            pass
+                        crate_label = "🐵 *MONKEY TRAP?!*" if is_monkey_trap else "⚡ *CRATE DROP!*"
                         m = await bot.send_message(
                             chat_id,
-                            crate_message,
+                            crate_label,
                             parse_mode="Markdown"
                         )
                         eng.crate_msg_id   = m.message_id
@@ -7264,6 +7284,10 @@ async def on_group_message(message: types.Message):
         # Must be registered
         if not user:
             if random.random() < 0.25:
+                try:
+                    await bot.send_sticker(message.chat.id, STICKER_UNREGISTERED)
+                except Exception:
+                    pass
                 await message.reply(_unreg(), parse_mode="Markdown")
             print(f"[SKIP] User not registered")
             return
