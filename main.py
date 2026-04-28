@@ -7387,23 +7387,23 @@ async def on_group_message(message: types.Message):
 
         dashboard_text = build_player_dashboard(db_name, session)
 
-        # Send or edit the dashboard message
+        # Delete old dashboard + send new one (keeps it at bottom of chat)
         try:
             if u_id in eng.dashboard_msgs:
                 try:
-                    await bot.edit_message_text(
-                        dashboard_text,
+                    await bot.delete_message(
                         chat_id=message.chat.id,
-                        message_id=eng.dashboard_msgs[u_id],
-                        parse_mode="HTML"
+                        message_id=eng.dashboard_msgs[u_id]
                     )
                 except Exception:
-                    # Edit failed — send fresh dashboard
-                    msg = await message.reply(dashboard_text, parse_mode="HTML")
-                    eng.dashboard_msgs[u_id] = msg.message_id
-            else:
-                msg = await message.reply(dashboard_text, parse_mode="HTML")
-                eng.dashboard_msgs[u_id] = msg.message_id
+                    pass  # Old message already gone, no problem
+
+            msg = await bot.send_message(
+                message.chat.id,
+                dashboard_text,
+                parse_mode="HTML"
+            )
+            eng.dashboard_msgs[u_id] = msg.message_id
         except Exception as dash_err:
             # Fallback to simple text
             fb = f"✅ {guess.upper()} +{pts:,} pts ⭐ +{xp_awarded:,} XP"
