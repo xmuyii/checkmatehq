@@ -594,7 +594,7 @@ async def game_loop(chat_id: int):
                             await bot.send_sticker(chat_id, STICKER_CRATE_DROP)
                         except Exception:
                             pass
-                        crate_label = "🐵 *MONKEY TRAP?!*" if is_monkey_trap else "⚡ *CRATE DROP!*"
+                        crate_label = "🐵 *CRATE DROP!*" if is_monkey_trap else "⚡ *CRATE DROP!*"
                         m = await bot.send_message(
                             chat_id,
                             crate_label,
@@ -630,7 +630,7 @@ async def game_loop(chat_id: int):
                 ss = sorted(eng.scores.values(), key=lambda x: x['pts'], reverse=True)
                 
                 if not ss:
-                    result = f"🏆 *ROUND OVER*\n{divider()}\nNobody scored. Pathetic."
+                    result = f"🏆 *ROUND OVER*\n{divider()}\n."
                     eng.empty_rounds += 1
                 else:
                     eng.empty_rounds = 0
@@ -647,15 +647,15 @@ async def game_loop(chat_id: int):
                             # If any decoys were claimed, show warning in group AND send DMs
                             if eng.decoy_claimers:
                                 decoy_names = ", ".join([d.get('username', f"Player {d['user_id']}") for d in eng.decoy_claimers])
-                                result += f"⚠️ *MONKEY TRAP!* {decoy_names} grabbed a DECOY! 💣 Nothing inside!\n\n"
+                                result += f"⚠️ *MONKEY TRAP!* {decoy_names} grabbed DECOY! 💣\n\n"
                                 
                                 # Send individual DM notifications to decoy victims
                                 for decoy_victim in eng.decoy_claimers:
                                     try:
                                         await bot.send_message(
                                             decoy_victim['user_id'],
-                                            f"💣 *MONKEY TRAP!*\n\nYou picked a decoy crate during the round!\n\n"
-                                            f"🃏 *GameMaster:* \"Better luck next time, you fool. The trap was set, and you walked right into it. Learn to be more careful.\"",
+                                            f"💣 *MONKEY TRAP!*\n\nYou picked a decoy crate during that round!\n\n"
+                                            f"🃏 *GameMaster:* \"Better luck next time, be more alert.\"",
                                             parse_mode="Markdown"
                                         )
                                     except Exception as e:
