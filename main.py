@@ -88,6 +88,28 @@ from addictive_mechanics import (
     format_rare_drop_notification, get_limited_offer
 )
 
+# ── Jammer Perk System (Scrambler/Anti-Jammer) ─────────────────────────────
+try:
+    from jammer_perk_system import (
+        activate_perk, deactivate_perk, is_perk_active, get_active_perks,
+        format_active_perks, scramble_word, use_anti_jammer,
+        format_scrambled_validation, check_and_cleanup_expired_perks,
+        PERK_DEFINITIONS
+    )
+    print("✅ Jammer perk system loaded")
+except Exception as e:
+    print(f"⚠️  Jammer perk system failed ({e})")
+    def activate_perk(u, p): return {"ok": False}
+    def deactivate_perk(u, p): return {"ok": False}
+    def is_perk_active(u, p): return False
+    def get_active_perks(u): return {}
+    def format_active_perks(u): return ""
+    def scramble_word(w): return w
+    def use_anti_jammer(u): return {"ok": False}
+    def format_scrambled_validation(w, v=True): return ""
+    def check_and_cleanup_expired_perks(u): pass
+    PERK_DEFINITIONS = {}
+
 # ── Immersive Systems (Psychological Depth & Narrative) ───────────────────
 try:
     from immersive_systems import (
@@ -1128,6 +1150,149 @@ Move bitcoin to your vault to protect it from raids/
 @dp.message(_cmd("help"))
 async def cmd_help(message: types.Message):
     await message.answer(_help_text(), parse_mode="Markdown")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  PERK ACTIVATION COMMANDS
+# ═══════════════════════════════════════════════════════════════════════════
+
+@dp.message(_cmd("jammer"))
+async def cmd_activate_jammer(message: types.Message):
+    """Activate Jammer perk to scramble your words."""
+    user_id = str(message.from_user.id)
+    user = get_user(user_id)
+    
+    if not user:
+        await message.answer("❌ You must be registered first. Send /start in private chat.", parse_mode="Markdown")
+        return
+    
+    result = activate_perk(user_id, "jammer")
+    if result["ok"]:
+        await message.answer(
+            f"✅ *Jammer Activated!*\n\n"
+            f"⚡ Your words will be scrambled for 5 minutes.\n"
+            f"Other players won't see what you're saying.\n\n"
+            f"_Cost: 500 Silver_\n"
+            f"_Active: 5 minutes_",
+            parse_mode="Markdown"
+        )
+        # Show perk status above dashboard
+        active_display = format_active_perks(user_id)
+        if active_display:
+            await message.answer(active_display, parse_mode="HTML")
+    else:
+        await message.answer(f"❌ {result['msg']}", parse_mode="Markdown")
+
+
+@dp.message(_cmd("anti_jammer"))
+async def cmd_activate_anti_jammer(message: types.Message):
+    """Activate Anti-Jammer to reveal scrambled words."""
+    user_id = str(message.from_user.id)
+    user = get_user(user_id)
+    
+    if not user:
+        await message.answer("❌ You must be registered first. Send /start in private chat.", parse_mode="Markdown")
+        return
+    
+    result = activate_perk(user_id, "anti_jammer")
+    if result["ok"]:
+        await message.answer(
+            f"✅ *Anti-Jammer Activated!*\n\n"
+            f"🔓 You can reveal 5 scrambled words from opponents.\n"
+            f"See through the deception!\n\n"
+            f"_Cost: 800 Silver_\n"
+            f"_Active: 5 minutes_\n"
+            f"_Uses: 5_",
+            parse_mode="Markdown"
+        )
+        # Show perk status above dashboard
+        active_display = format_active_perks(user_id)
+        if active_display:
+            await message.answer(active_display, parse_mode="HTML")
+    else:
+        await message.answer(f"❌ {result['msg']}", parse_mode="Markdown")
+
+
+@dp.message(_cmd("perks"))
+async def cmd_show_perks(message: types.Message):
+    """Show currently active perks."""
+    user_id = str(message.from_user.id)
+    user = get_user(user_id)
+    
+    if not user:
+        await message.answer("❌ You must be registered first. Send /start in private chat.", parse_mode="Markdown")
+        return
+    
+    # Clean up expired perks
+    check_and_cleanup_expired_perks(user_id)
+    active_perks = get_active_perks(user_id)
+    
+    if not active_perks:
+        await message.answer(
+            "❌ No active perks.\n\n"
+            "Available perks:\n"
+            "• `/jammer` - Scramble your words (500 Silver, 5 min)\n"
+            "• `/anti_jammer` - Reveal scrambled words (800 Silver, 5 min, 5 uses)",
+            parse_mode="Markdown"
+        )
+        return
+    
+    response = "🔥 *ACTIVE PERKS*\n━━━━━━━━━━━━━━\n"
+    for perk_type, perk_data in active_perks.items():
+        perk_def = PERK_DEFINITIONS.get(perk_type, {})
+        icon = perk_def.get("icon", "⚡")
+        name = perk_def.get("name", perk_type)
+        
+        try:
+            expires_at = datetime.fromisoformat(perk_data["expires_at"])
+            remaining = (expires_at - datetime.utcnow()).total_seconds()
+            if remaining > 0:
+                minutes = int(remaining // 60)
+                seconds = int(remaining % 60)
+                time_str = f"{minutes}m {seconds}s"
+            else:
+                time_str = "Expired"
+        except:
+            time_str = "?"
+        
+        if perk_data.get("uses_remaining") is not None:
+            response += f"\n{icon} **{name}**\n   ⏱️ {time_str}\n   📊 {perk_data['uses_remaining']} uses left"
+        else:
+            response += f"\n{icon} **{name}**\n   ⏱️ {time_str}"
+    
+    await message.answer(response, parse_mode="Markdown")
+
+
+@dp.message(_cmd("jammers"))
+async def cmd_show_jammers(message: types.Message):
+    """Show which players in the current chat have jammer active."""
+    if message.chat.type not in ["group", "supergroup"]:
+        await message.answer("This command only works in group chats.", parse_mode="Markdown")
+        return
+    
+    user_id = str(message.from_user.id)
+    user = get_user(user_id)
+    
+    if not user:
+        await message.answer("❌ You must be registered first.", parse_mode="Markdown")
+        return
+    
+    # Check if user has anti-jammer active
+    if not is_perk_active(user_id, "anti_jammer"):
+        await message.answer(
+            "🔓 You need Anti-Jammer active to see who has Jammer!\n\n"
+            "Activate it with: `/anti_jammer`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # This would need to scan all recent messages to find jammers
+    # For now, show a placeholder
+    response = "🔓 *JAMMER DETECTION SCAN*\n━━━━━━━━━━━━━━\n\n"
+    response += "⚡ Scanning for active scramblers...\n\n"
+    response += "_In a real game, this would show players with jammer active in this chat._"
+    
+    await message.answer(response, parse_mode="Markdown")
 
 
 @dp.message(_cmd("obelisk"))
@@ -7210,7 +7375,7 @@ Copy the function below into main.py to replace the corrupted version.
 """
 
 
-def build_player_dashboard(player_name: str, session: dict) -> str:
+def build_player_dashboard(player_name: str, session: dict, user_id: str = None) -> str:
     """Build an HTML-formatted in-text dashboard for a player's round stats."""
     last_word = session.get('last_word', '???')
     total_pts = session.get('pts', 0)
@@ -7239,7 +7404,17 @@ def build_player_dashboard(player_name: str, session: dict) -> str:
         extras.append(f"🔥x{streak}")
     extras_line = "  ".join(extras)
 
-    dashboard = (
+    # Build dashboard with active perks if user_id provided
+    dashboard = ""
+    if user_id:
+        try:
+            active_perks = format_active_perks(user_id)
+            if active_perks:
+                dashboard += f"{active_perks}\n━━━━━━━━━━━━━━━━━\n"
+        except Exception as e:
+            print(f"[ERROR] Failed to format perks in dashboard: {e}")
+    
+    dashboard += (
         f"🎮 <b>{player_name}</b>\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"✅ <code>{last_word.upper()}</code>  <b>+{last_pts}</b>\n"
@@ -7322,7 +7497,36 @@ async def on_group_message(message: types.Message):
         is_valid = word_in_dict(guess)
         print(f"[CHECK] '{guess}' valid={is_valid} (dict size: {len(DICTIONARY)})")
         
+        # Check if jammer is active
+        has_jammer = is_perk_active(u_id, "jammer")
+        
         if not is_valid:
+            # Even invalid words get scrambled if jammer is active
+            if has_jammer:
+                scrambled_word = scramble_word(guess)
+                print(f"[JAMMER] Invalid word scrambled: {guess} -> {scrambled_word}")
+                
+                # Edit player's message to show scrambled word
+                try:
+                    await bot.edit_message_text(
+                        text=scrambled_word,
+                        chat_id=message.chat.id,
+                        message_id=message.message_id
+                    )
+                except Exception as e:
+                    print(f"[JAMMER] Could not edit message: {e}")
+                
+                # Send Game Master response with scrambled validation
+                gm_response = format_scrambled_validation(guess, is_valid=False)
+                try:
+                    await bot.send_message(
+                        message.chat.id,
+                        gm_response,
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    print(f"[JAMMER] Could not send GM response: {e}")
+            
             update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
             return
 
@@ -7339,6 +7543,38 @@ async def on_group_message(message: types.Message):
         if getattr(eng, 'words_repeated_count', 0) > 0 and eng.words_repeated_count % 4 == 0:
             extra = f" *{eng.extra_letters[0]}* *{eng.extra_letters[1]}*" if len(getattr(eng, 'extra_letters', '')) >= 2 else ""
             await bot.send_message(message.chat.id, f"🃏 *The GameMaster:* THE WORDS ARE: *{eng.word1.lower()}* *{eng.word2.lower()}*{extra}" , parse_mode="Markdown")
+        
+        # ════════════════════════════════════════════════════════════════════
+        # JAMMER PERK CHECK - Scramble word if active
+        # ════════════════════════════════════════════════════════════════════
+        
+        has_jammer = is_perk_active(u_id, "jammer")
+        scrambled_word = None
+        if has_jammer:
+            scrambled_word = scramble_word(guess)
+            print(f"[JAMMER] {u_id}: {guess} -> {scrambled_word}")
+            
+            # Edit player's message to show scrambled word
+            try:
+                await bot.edit_message_text(
+                    text=scrambled_word,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id
+                )
+                print(f"[JAMMER] Edited message to show scrambled word")
+            except Exception as e:
+                print(f"[JAMMER] Could not edit message: {e}")
+            
+            # Send Game Master response with scrambled validation
+            gm_response = format_scrambled_validation(guess, is_valid=True)
+            try:
+                await bot.send_message(
+                    message.chat.id,
+                    gm_response,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                print(f"[JAMMER] Could not send GM response: {e}")
             
         # Calculate base points
         pts = max(len(guess) - 2, 1)
@@ -7409,7 +7645,7 @@ async def on_group_message(message: types.Message):
         if rare_item:
             session['rare_message'] = f"🎉 <b>RARE DROP!</b> {rare_item['name']}"
 
-        dashboard_text = build_player_dashboard(db_name, session)
+        dashboard_text = build_player_dashboard(db_name, session, u_id)
 
         # Hybrid dashboard: edit for speed, reposition every 4th word
         try:
