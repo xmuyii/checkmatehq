@@ -158,7 +158,7 @@ except Exception as e:
 # ── Internal Chess System (PvP Chess Challenges) ───────────────────────────
 try:
     from internal_chess_system import (
-        create_game_challenge, accept_game_challenge, record_game_result,
+        create_game_challenge, accept_game_challenge, submit_game_result,
         initialize_chess_stats, format_chess_stats, get_game_info, cleanup_expired_games
     )
     print("✅ Internal chess system loaded")
@@ -166,7 +166,7 @@ except Exception as e:
     print(f"⚠️  Internal chess system failed ({e}), chess disabled")
     async def create_game_challenge(*args, **kwargs): return False, "❌ Chess system unavailable", ""
     async def accept_game_challenge(*args, **kwargs): return False, "❌ Chess system unavailable"
-    async def record_game_result(*args, **kwargs): return False, "❌ Chess system unavailable"
+    async def submit_game_result(*args, **kwargs): return False, "❌ Chess system unavailable"
     async def initialize_chess_stats(*args): return False
     async def format_chess_stats(*args): return "❌ Chess system unavailable"
     async def get_game_info(*args): return False, "❌ Chess system unavailable"
@@ -1399,12 +1399,16 @@ async def cmd_accept_chess(message: types.Message):
 
 @dp.message(_cmd("chess_result"))
 async def cmd_chess_result(message: types.Message):
-    """Record the result of a chess match."""
+    """Submit a chess match result for opponent confirmation."""
     args = message.text.split()
     if len(args) < 3:
         await message.answer(
+            "♟️ **SUBMIT CHESS RESULT**\n━━━━━━━━━━━━━━\n\n"
             "Usage: `/chess_result <game_id> <win|loss|draw>`\n\n"
-            "Example: `/chess_result chess_123456_789 win`",
+            "Example: `/chess_result chess_123456_789 win`\n\n"
+            "⏳ Opponent must confirm the result.\n"
+            "✅ If both agree → Auto-confirmed\n"
+            "⚠️ If dispute → Admin review",
             parse_mode="Markdown"
         )
         return
@@ -1417,7 +1421,7 @@ async def cmd_chess_result(message: types.Message):
         await message.answer("❌ Result must be: **win**, **loss**, or **draw**", parse_mode="Markdown")
         return
     
-    success, msg = await record_game_result(user_id, game_id, result)
+    success, msg = await submit_game_result(user_id, game_id, result)
     
     if success:
         # Announce to group
@@ -1525,284 +1529,63 @@ The Obelisk awaits your decision. 🌌
 
 @dp.message(_cmd("tutorial"))
 async def cmd_tutorial(message: types.Message):
-    """Comprehensive game tutorial and walkthrough."""
+    """Quick reference guide (simplified)."""
     if message.chat.type != "private":
-        await _send_access_denied_sticker(message); return
+        await _send_access_denied_sticker(message)
+        return
     
-    tutorial = """
-🃏 *WELCOME TO CHECKMATE HQ*
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+    quick_guide = """
+🎮 **QUICK START GUIDE**
+━━━━━━━━━━━━━━━━━━━━━
+✅ Auto-registered with Telegram username!
 
-THE BASICS*
+**IN THE GROUP:**
+`!fusion` — Start word game
+`!weekly` — View leaderboard
+`!mystats` — Your stats
 
-🎮 *How to Play the Word Game*
-1️⃣ `!fusion` starts a round in the group
-2️⃣ Two random words appear (e.g., PLAYING + FOREIGN)
-3️⃣ Type ANY valid English word using ONLY those letters
-4️⃣ Points = word length − 2 (4-letter word = 2 pts)
-5️⃣ Highest scorers get bonus crates! (Top 3 = prizes)
-6️⃣ Rounds last 2 minutes, then streak resets
+**PERSONAL COMMANDS:**
+`/start` — Main menu
+`/chess_stats` — Chess rating
+`/callout` — Challenge to chess
+`/jammer` — Scrambler perk
+`/perks` — Active perks
 
-⭐ *Your Streaks & Food*
-• Build consecutive correct words = higher streaks
-• At streak 3+, earn FOOD each guess
-• Food feeds your base during wars
-• Invalid words reset your streak to 0
-• New round = new streak (automatic reset)
+**WORD GAME RULES:**
+• 2 words displayed (e.g., PLAYING + FOREIGN)
+• Type valid English words using ONLY those letters
+• Points = word length − 2
+• Streak bonus at 3+ consecutive correct guesses
+• Invalid word resets streak
 
-📊 *Resources Matter*
-🪵 Wood (4-letter words) — Build structures
-🧱 Bronze (5-letter words) — Military training
-⛓️ Iron (6-letter words) — Fortifications
-💎 Diamond (7-letter words) — Elite units
-🏺 Relics (8+ letter words) — Ancient power
+**RESOURCES (by word length):**
+4 letters = 🪵 Wood
+5 letters = 🧱 Bronze  
+6 letters = ⛓️ Iron
+7 letters = 💎 Diamond
+8+ letters = 🏺 Relics
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+**CHESS:**
+`/callout` → Reply to player
+`/accept_chess <id>` → Accept
+`/chess_result <id> [win|loss|draw]` → Submit result
+(Both players must confirm!)
 
-*PART 2: YOUR PROFILE & IDENTITY*
+**JAMMER PERK:**
+`/jammer` — Cost: 500 Bitcoin, Duration: 5 mins
+Your words will be scrambled, hidden from others!
 
-👤 *Change Your Name*
-Command: `!changename [NewName]`
-• GameMaster loves mockery: "Running from your past? Noted."
-• Shows in leaderboards and scores
+**CURRENCY:**
+💰 Bitcoin — Earn from games, buy perks
+⭐ XP — Level up by finding words
 
-📍 *View Your Profile*
-Command: `!profile`
-Shows:
-• Your level & XP progress
-• Resources: wood, bronze, iron, diamond, relics
-• Food reserves
-• Bitcoin balance (premium currency)
-• Shield status
-• Sector location
+---
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-*PART 3: BASE MANAGEMENT*
-
-🏰 *Create Your First Base*
-Command: `!setup_base [BaseName]`
-• Creates your fortress in a random sector
-• You get starting resources & units
-• Sector determines which resources spawn more
-• Station your troops there
-
-🏗️ *Rename Your Base*
-Command: `!changebasename [NewName]`
-• Only one rename allowed (track it carefully)
-• Shows your loyalty... or cowardice
-
-👁️ *View Your Base Details*
-Command: `!base`
-Shows:
-• Base name & level
-• Resource reserves
-• Military: Police and Dogs, Knights, Bishops, Rooks, Queens, Kings
-• Traps: Spike Pits, Arrow Towers, Cannons, Tesla Towers, Inferno
-• Buffs & active shields
-• War record (wins/losses)
-
-🏅 *Level Up Your Base*
-• Each level requires resources
-• Higher level = more military slots
-• Higher level = stronger defenses
-• Improves your power in war
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-*PART 4: INVENTORY & ITEMS*
-
-📦 *Your Inventory*
-Command: `!inventory`
-• Max 5 slots (upgrade to 20)
-• Shows all claimed items
-• Crates ready to open
-• Shields to activate
-• Multipliers to use
-
-🎁 *Claim Rewards*
-Commands: `!claims` — See unclaimed items
-Command: `!autoclaim` — Grab all at once
-• Items wait until you claim them
-• If inventory full, discard items first
-• Random gifts: crates, powerful items, or resources
-
-⚡ *Multiplier Items*
-• XP Multiplier: Double/triple your XP gains
-• When used: pick 5/10/15/20 guesses
-• X multiplier applies to selected guesses
-• Uses up and expires
-
-🗑️ *Discard Items*
-• Use 🗑️ button in inventory
-• Frees up slots for new rewards
-• Can't undo — think first!
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-*PART 5: SECTORS & TELEPORTATION*
-
-🌍 *What Are Sectors?*
-• 9 different regions on the map
-• Each has unique environments & perks
-• Different sectors = different resource rates
-• Better sectors = more competition
-
-🧭 *Your Current Sector*
-• Shown in `!profile`
-• Determines resource availability
-• Teleport to move between sectors
-
-📍 *Teleport Between Sectors*
-• Collect TELEPORT items from crates
-• Use from inventory to jump sectors
-• Strategy: find sectors with your preferred resources
-• High-level players own the best sectors
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-*PART 6: MILITARY & COMBAT*
-
-⚔️ *Build an Army*
-Command: `!base`
-Units available:
-• 👹 Police and Dogs (1 power) — Cheap, weak
-• 🗡️ Knights (3 power) — Balanced
-• ⚜️ Bishops (5 power) — Magic damage
-• 🏰 Rooks (8 power) — Fortress strength
-• 👑 Queens (12 power) — Domination
-• ⚔️ Kings (20 power) — Ultimate force
-
-💪 *Train Soldiers*
-• Costs resources (wood, bronze, iron)
-• Higher tier = expensive (diamond/relics)
-• More soldiers = higher power
-• Power determines war outcomes
-
-🛡️ *Shields Protect You*
-• Everyone starts with PERMANENT shield
-• Shields prevent attacks on your base
-• Later: can be removed by enemy kings
-• Gather resources while shielded
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-*PART 7: DEFENSES & TRAPS*
-
-🕳️ *Traps Defend Your Base*
-Available:
-• 🕳️ Spike Pits — Low damage, cheap
-• 🏹 Arrow Towers — Medium damage
-• 🔫 Cannons — Heavy damage
-• ⚡ Tesla Towers — Area damage
-• 🔥 Inferno — Massive AOE
-
-🎯 *How Traps Work*
-• Cost resources to build
-• Damage invaders during war
-• Research "Trap Mastery" for +60% damage
-• More traps = stronger defense
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-*PART 8: RESEARCH LABORATORY*
-
-🔬 *Unlock Power Through Research*
-Command: `!lab`
-Spend resources to unlock:
-
-⚙️ *Armor Plating*
-Cost: 100 Iron + 50 Bronze
-Effect: Soldiers take 20% less damage
-
-⚡ *Speed Training*
-Cost: 150 Wood + 100 Bronze
-Effect: Armies attack 30% faster
-
-🪓 *Deep Mining*
-Cost: 20 Diamond + 200 Wood
-Effect: Resource gathering +50% yield
-
-👨‍👩‍👧‍👦 *Breeding Program*
-Cost: 200 Food + 150 Bronze
-Effect: Natural unit spawn +40%
-
-🔩 *Trap Mastery*
-Cost: 150 Iron + 25 Diamond
-Effect: Traps deal 60% more damage
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-*PART 9: LEADERBOARDS & RANKING*
-
-🏆 *Weekly Leaderboard*
-Command: `!weekly`
-• Resets every Sunday 00:00 UTC
-• Top players earn bonus rewards
-• Ranked by points earned this week
-• Compete in your group
-
-🌟 *All-Time Leaderboard*
-Command: `!alltime`
-• Never resets
-• Shows strongest players ever
-• Bragging rights eternal
-• Legend status
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-*PART 10: COMING SOON*
-
-🤝 *Alliances* (Soon™)
-• Team up with other players
-• Shared alliance shop & buffs
-• Alliance wars & conquest
-• Split spoils from victories
-
-⚔️ *Wars & Conquest* (Soon™)
-• Attack unshielded players
-• Steal their resources
-• Capture their sectors
-• Build empires
-
-💰 *Premium Shop* (Soon™)
-• Real-money packs for impatient players
-• Bundles with exclusive items
-• Battle passes seasonal rewards
-
-🎯 *Missions & Quests* (Soon™)
-• Daily challenges
-• Seasonal events
-• Legendary item hunts
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-*FINAL TIPS*
-
-✅ *DO*
-✓ Build your base before wars start
-✓ Mine resources obsessively in group games
-✓ Research upgrades for huge power boost
-✓ Collect crates from game rounds
-✓ Invite friends — more players = more fun!
-
-❌ *DON'T*
-✗ Waste resources early
-✗ Neglect trap defenses
-✗ Skip the research lab
-✗ Discard valuable items carelessly
-✗ Ignore your streak resets
-
-🔗 *Share With Friends*
-If you enjoy this game, and would love to play with your friends, share this link to others:
-https://t.me/checkmateHQ
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Good luck, warrior. The GameMaster is watching. 👀
+Questions? Ask in group or DM GameMaster!
+Ready to play? Go to the group and type `!fusion` 🎮
 """
     
-    await message.answer(tutorial, parse_mode="Markdown")
+    await message.answer(quick_guide, parse_mode="Markdown")
 
 
 @dp.message(_cmd("shop"))
@@ -4644,7 +4427,7 @@ async def handle_new_member(event: types.ChatMemberUpdated):
 
 @dp.message(_cmd("start"))
 async def cmd_start(message: types.Message):
-    """Welcome screen with main menu navigation."""
+    """Welcome screen and main menu (simplified)."""
     if message.chat.type != "private":
         await _send_access_denied_sticker(message)
         return
@@ -4652,68 +4435,57 @@ async def cmd_start(message: types.Message):
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     
-    # If user doesn't exist, start tutorial
+    # If user doesn't exist, auto-register
     if not user:
-        from initiation import Trial
-        markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⚔️ Enter Checkmate HQ", callback_data="start_tutorial")],
-            [InlineKeyboardButton(text="🚪 Cancel", callback_data="start_cancel")],
-        ])
-        await message.answer(
-            "🃏 *GameMaster:* \"Well, well, well. A new face.\"\n\n"
-            "_Prepare yourself for The 64 - where words are weapons and strategy reigns supreme._\n\n"
-            "**Are you ready to begin?**",
-            parse_mode="Markdown", 
-            reply_markup=markup
-        )
+        username = message.from_user.first_name or message.from_user.username or "Player"
+        register_user(u_id, username)
+        user = get_user(u_id)
+        
+        intro = f"""
+🃏 **WELCOME TO THE 64!** 🃏
+━━━━━━━━━━━━━━━━━━━━━━━━
+👤 Profile: **{username}**
+⭐ Level: 1
+💰 Bitcoin: 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+**You're all set!** Go to the group and use:
+
+`!fusion` — Start a word game round
+`!weekly` — Check leaderboard
+`!mystats` — View your stats
+`/callout` — Challenge someone to chess
+
+**Game Commands:**
+`/jammer` — Activate scrambler
+`/chess_stats` — View rating
+`/perks` — Active perks
+
+Let's play! 🎮
+"""
+        await message.answer(intro, parse_mode="Markdown")
         return
     
     # Existing player - show main menu
     username = user.get("username", "Player")
     level = user.get("level", 1)
     bitcoin = user.get("bitcoin", 0)
-    gold = user.get("gold", 0)
-    
-    # Initialize vault if missing
-    if "vault" not in user:
-        user["vault"] = {"bitcoin": 0, "gold": 0}
-        save_user(u_id, user)
-    
-    # Initialize daily quests if missing
-    if "daily_quests" not in user:
-        user["daily_quests"] = []
-        save_user(u_id, user)
-    
-    # Check and award daily login quest
-    last_quest_check = user.get("last_quest_check", 0)
-    now = int(time.time())
-    if now - last_quest_check > 86400:  # 24 hours
-        user["daily_quests"] = generate_daily_quests()
-        user["last_quest_check"] = now
-        save_user(u_id, user)
-        daily_quest_msg = "\n\n🎯 *New daily quests available! Check /quests*"
-    else:
-        daily_quest_msg = ""
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏰 Base", callback_data="menu_base"),
-         InlineKeyboardButton(text="🪵 Resources", callback_data="menu_resources")],
         [InlineKeyboardButton(text="👤 Profile", callback_data="menu_profile"),
+         InlineKeyboardButton(text="📊 Stats", callback_data="menu_stats")],
+        [InlineKeyboardButton(text="💰 Vault", callback_data="menu_vault"),
          InlineKeyboardButton(text="🛍️ Shop", callback_data="menu_shop")],
-        [InlineKeyboardButton(text="⚔️ Guild", callback_data="menu_guild"),
-         InlineKeyboardButton(text="🗺️ Map", callback_data="menu_map")],
-        [InlineKeyboardButton(text="💎 Account", callback_data="menu_account"),
-         InlineKeyboardButton(text="🎒 Inventory", callback_data="menu_inventory")],
+        [InlineKeyboardButton(text="🎒 Inventory", callback_data="menu_inventory"),
+         InlineKeyboardButton(text="🎮 Help", callback_data="menu_help")],
     ])
     
     await message.answer(
-        f"🃏 *CHECKMATE HQ* 🃏\n\n"
-        f"━━━━━━━━━━━━━━━━━━\n\n"
-        f"*Welcome back, {username}!*\n"
-        f"**Level {level}** • Ready for Battle\n\n"
-        f"💳 **Bitcoin:** {bitcoin:,} | 👑 **Gold:** {gold}\n\n"
-        f"━━━━━━━━━━━━━━━━━━\n\n"
-        f"_Where would you like to go?_{daily_quest_msg}",
+        f"🃏 **WELCOME BACK, {username.upper()}!** 🃏\n\n"
+        f"⭐ Level: {level}\n"
+        f"💰 Bitcoin: {bitcoin:,}\n\n"
+        f"_Where would you like to go?_",
         parse_mode="Markdown",
         reply_markup=markup
     )

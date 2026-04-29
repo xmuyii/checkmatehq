@@ -27,11 +27,13 @@ from supabase_db import get_user, save_user
 ACTIVE_GAMES: Dict[str, Dict] = {}
 
 # Game status constants
-GAME_STATUS_PENDING = "pending"      # Waiting for opponent to accept
-GAME_STATUS_ACTIVE = "active"        # Game in progress
-GAME_STATUS_COMPLETED = "completed"  # Game finished
-GAME_STATUS_REJECTED = "rejected"    # Challenge rejected
-GAME_STATUS_EXPIRED = "expired"      # Challenge timed out
+GAME_STATUS_PENDING = "pending"            # Waiting for opponent to accept
+GAME_STATUS_ACTIVE = "active"              # Game in progress
+GAME_STATUS_AWAITING_VERIFICATION = "verifying"  # Waiting for opponent to verify result
+GAME_STATUS_COMPLETED = "completed"        # Game finished & verified
+GAME_STATUS_DISPUTED = "disputed"          # Result conflict - players disagreed
+GAME_STATUS_REJECTED = "rejected"          # Challenge rejected
+GAME_STATUS_EXPIRED = "expired"            # Challenge timed out
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  CHESS GAME MANAGEMENT
@@ -128,6 +130,10 @@ async def create_game_challenge(
             "accepted_at": None,
             "completed_at": None,
             "result": None,  # "win", "loss", "draw"
+            "claimed_by": None,  # Who claimed the result
+            "claimed_result": None,  # What they claimed
+            "verified_by": None,  # Who verified it
+            "verification_status": "pending",  # "pending", "confirmed", "disputed"
             "winner_id": None,
             "loser_id": None,
             "white_player_id": challenger_id if challenger_color == "white" else opponent_id,
@@ -250,9 +256,9 @@ Use `/chess_result {game_id} [win|loss|draw]` to record outcome.
         return False, f"❌ Error: {str(e)}"
 
 
-async def record_game_result(user_id: int, game_id: str, result: str) -> Tuple[bool, str]:
+async def submit_game_result(user_id: int, game_id: str, result: str) -> Tuple[bool, str]:
     """
-    Record the result of a chess game.
+    Submit a game result - awaiting opponent confirmation.
     
     Args:
         user_id: User submitting result
@@ -275,17 +281,93 @@ async def record_game_result(user_id: int, game_id: str, result: str) -> Tuple[b
         if game["status"] != GAME_STATUS_ACTIVE:
             return False, f"❌ Game is {game['status']}"
         
-        # Determine opponent
+        if result not in ["win", "loss", "draw"]:
+            return False, "❌ Invalid result. Use: win, loss, or draw"
+        
+        # Store submission
+        if "result_submissions" not in game:
+            game["result_submissions"] = {}
+        
         opponent_id = game["opponent_id"] if game["challenger_id"] == user_id else game["challenger_id"]
         user_name = game["challenger_name"] if game["challenger_id"] == user_id else game["opponent_name"]
         opponent_name = game["opponent_name"] if game["challenger_id"] == user_id else game["challenger_name"]
         
-        # Update game record
+        game["result_submissions"][user_id] = {
+            "result": result,
+            "timestamp": datetime.now().isoformat(),
+            "confirmed": False
+        }
+        
+        # Check if opponent already submitted
+        if opponent_id in game["result_submissions"]:
+            opponent_submission = game["result_submissions"][opponent_id]
+            
+            # Compare results
+            if opponent_submission["result"] == result:
+                # ✅ Both agree - finalize
+                return await _finalize_game_result(user_id, opponent_id, game_id, result)
+            else:
+                # ❌ Disagreement - need admin confirmation
+                pending_msg = f"""
+⚠️ **RESULT DISPUTE**
+━━━━━━━━━━━━━━━━━
+🎮 Game: `{game_id}`
+
+{user_name}: **{result.upper()}**
+{opponent_name}: **{opponent_submission["result"].upper()}**
+
+📋 Players disagree on result!
+⏳ Waiting for admin to confirm...
+
+_A Game Master will verify the actual game outcome._
+"""
+                print(f"[CHESS] DISPUTE: {game_id} - {user_name} claims {result}, {opponent_name} claims {opponent_submission['result']}")
+                return True, pending_msg
+        
+        # Opponent hasn't submitted yet
+        message = f"""
+⏳ **RESULT SUBMITTED**
+━━━━━━━━━━━━━━━━━
+✅ You submitted: **{result.upper()}**
+
+🎮 Game: `{game_id}`
+⏱️ Waiting for {opponent_name} to confirm...
+
+Once they submit their result:
+- If both agree → Auto-confirmed
+- If dispute → Admin review needed
+
+Confirm with: `/chess_result {game_id} {result}`
+"""
+        return True, message
+    
+    except Exception as e:
+        print(f"[CHESS ERROR] Failed to submit result: {e}")
+        return False, f"❌ Error: {str(e)}"
+
+
+async def _finalize_game_result(user_id: int, opponent_id: int, game_id: str, result: str) -> Tuple[bool, str]:
+    """
+    Finalize a game result after mutual confirmation.
+    
+    Args:
+        user_id: Player who submitted
+        opponent_id: Other player
+        game_id: Game ID
+        result: Result ("win", "loss", or "draw")
+    
+    Returns:
+        (success: bool, message: str)
+    """
+    try:
+        game = ACTIVE_GAMES[game_id]
+        user_name = game["challenger_name"] if game["challenger_id"] == user_id else game["opponent_name"]
+        opponent_name = game["opponent_name"] if game["challenger_id"] == user_id else game["challenger_name"]
+        
         game["status"] = GAME_STATUS_COMPLETED
         game["completed_at"] = datetime.now().isoformat()
         game["result"] = result
         
-        # Get both players
         user_obj = await get_user(user_id)
         opponent_obj = await get_user(opponent_id)
         
@@ -301,78 +383,106 @@ async def record_game_result(user_id: int, game_id: str, result: str) -> Tuple[b
             await initialize_chess_stats(opponent_id)
             opponent_obj = await get_user(opponent_id)
         
-        # Record result
-        if result == "win":
-            game["winner_id"] = user_id
-            game["loser_id"] = opponent_id
-            
-            user_obj["chess_stats"]["wins"] += 1
-            user_obj["chess_stats"]["streak"] += 1
-            user_obj["chess_stats"]["rating"] += 15
-            
-            opponent_obj["chess_stats"]["losses"] += 1
-            opponent_obj["chess_stats"]["streak"] = 0
-            opponent_obj["chess_stats"]["rating"] = max(800, opponent_obj["chess_stats"]["rating"] - 10)
-            
-            result_msg = f"🏆 **{user_name}** WINS! +15 rating"
+        # Who submitted first?
+        first_submitter = [uid for uid in game["result_submissions"].keys()][0]
         
-        elif result == "loss":
-            game["winner_id"] = opponent_id
-            game["loser_id"] = user_id
-            
-            user_obj["chess_stats"]["losses"] += 1
-            user_obj["chess_stats"]["streak"] = 0
-            user_obj["chess_stats"]["rating"] = max(800, user_obj["chess_stats"]["rating"] - 10)
-            
-            opponent_obj["chess_stats"]["wins"] += 1
-            opponent_obj["chess_stats"]["streak"] += 1
-            opponent_obj["chess_stats"]["rating"] += 15
-            
-            result_msg = f"💀 **{opponent_name}** WINS! {user_name} loses 10 rating"
-        
-        elif result == "draw":
+        if result == "draw":
+            # Both draw
             user_obj["chess_stats"]["draws"] += 1
             opponent_obj["chess_stats"]["draws"] += 1
-            
-            result_msg = f"🤝 **DRAW** - Both players drew"
+            result_msg = f"✅ **GAME CONFIRMED** 🤝\n━━━━━━━━━━━━━━━━━\n🤝 **DRAW** between {user_name} and {opponent_name}\n\n📊 Both gain draw record"
         
         else:
-            return False, "❌ Invalid result. Use: win, loss, or draw"
+            # Determine winner from first submitter's perspective
+            if first_submitter == user_id:
+                if result == "win":
+                    # User won
+                    winner_id, loser_id = user_id, opponent_id
+                    winner_name, loser_name = user_name, opponent_name
+                else:
+                    # User lost
+                    winner_id, loser_id = opponent_id, user_id
+                    winner_name, loser_name = opponent_name, user_name
+            else:
+                if result == "win":
+                    # Opponent won
+                    winner_id, loser_id = opponent_id, user_id
+                    winner_name, loser_name = opponent_name, user_name
+                else:
+                    # Opponent lost
+                    winner_id, loser_id = user_id, opponent_id
+                    winner_name, loser_name = user_name, opponent_name
+            
+            # Update stats
+            winner_obj = await get_user(winner_id)
+            loser_obj = await get_user(loser_id)
+            
+            if "chess_stats" not in winner_obj:
+                await initialize_chess_stats(winner_id)
+                winner_obj = await get_user(winner_id)
+            if "chess_stats" not in loser_obj:
+                await initialize_chess_stats(loser_id)
+                loser_obj = await get_user(loser_id)
+            
+            winner_obj["chess_stats"]["wins"] += 1
+            winner_obj["chess_stats"]["streak"] += 1
+            winner_obj["chess_stats"]["rating"] += 15
+            
+            if winner_obj["chess_stats"]["streak"] > winner_obj["chess_stats"]["best_streak"]:
+                winner_obj["chess_stats"]["best_streak"] = winner_obj["chess_stats"]["streak"]
+            
+            loser_obj["chess_stats"]["losses"] += 1
+            loser_obj["chess_stats"]["streak"] = 0
+            loser_obj["chess_stats"]["rating"] = max(800, loser_obj["chess_stats"]["rating"] - 10)
+            
+            winner_obj["chess_stats"]["games_played"] += 1
+            loser_obj["chess_stats"]["games_played"] += 1
+            
+            # Save
+            await save_user(winner_id, winner_obj)
+            await save_user(loser_id, loser_obj)
+            
+            game["winner_id"] = winner_id
+            game["loser_id"] = loser_id
+            
+            result_msg = f"""✅ **GAME CONFIRMED** 🏆
+━━━━━━━━━━━━━━━━━
+🏆 **{winner_name}** WINS!
+💀 {loser_name} loses
+
+⭐ {winner_name}: +15 rating
+⭐ {loser_name}: -10 rating
+"""
         
-        # Update stats
-        if user_obj["chess_stats"]["streak"] > user_obj["chess_stats"]["best_streak"]:
-            user_obj["chess_stats"]["best_streak"] = user_obj["chess_stats"]["streak"]
-        
-        if opponent_obj["chess_stats"]["streak"] > opponent_obj["chess_stats"]["best_streak"]:
-            opponent_obj["chess_stats"]["best_streak"] = opponent_obj["chess_stats"]["streak"]
-        
+        # Save game records
         user_obj["chess_stats"]["games_played"] += 1
         opponent_obj["chess_stats"]["games_played"] += 1
         
-        # Save game in history
-        game_record = {
+        game_record_user = {
             "game_id": game_id,
             "opponent_id": opponent_id,
             "result": result,
-            "rating_before": user_obj["chess_stats"]["rating"],
             "timestamp": datetime.now().isoformat()
         }
         
         if "recent_games" not in user_obj["chess_stats"]:
             user_obj["chess_stats"]["recent_games"] = []
-        
-        user_obj["chess_stats"]["recent_games"].insert(0, game_record)
+        user_obj["chess_stats"]["recent_games"].insert(0, game_record_user)
         user_obj["chess_stats"]["recent_games"] = user_obj["chess_stats"]["recent_games"][:10]
+        
+        if "recent_games" not in opponent_obj["chess_stats"]:
+            opponent_obj["chess_stats"]["recent_games"] = []
+        opponent_obj["chess_stats"]["recent_games"].insert(0, game_record_user)
+        opponent_obj["chess_stats"]["recent_games"] = opponent_obj["chess_stats"]["recent_games"][:10]
         
         await save_user(user_id, user_obj)
         await save_user(opponent_id, opponent_obj)
         
-        print(f"[CHESS] Game result recorded: {game_id} - {result}")
-        
+        print(f"[CHESS] Game finalized: {game_id} - {result}")
         return True, result_msg
     
     except Exception as e:
-        print(f"[CHESS ERROR] Failed to record result: {e}")
+        print(f"[CHESS ERROR] Failed to finalize: {e}")
         return False, f"❌ Error: {str(e)}"
 
 
