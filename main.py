@@ -852,9 +852,19 @@ async def cmd_fusion(message: types.Message):
         # Automatically register user if not found
         user_id = str(message.from_user.id)
         username = message.from_user.first_name or message.from_user.username or "Player"
-        register_user(user_id, username)
-        print(f"[AUTO-REGISTER] User {user_id} ({username}) registered via !fusion.")
-        await message.reply(f"✅ Welcome, {username}! You've been automatically registered. Starting game...", parse_mode="Markdown")
+        try:
+            reg_success = register_user(user_id, username)
+            if reg_success:
+                print(f"[AUTO-REGISTER] User {user_id} ({username}) registered via !fusion.")
+                await message.reply(f"✅ Welcome, {username}! You've been automatically registered. Starting game...", parse_mode="Markdown")
+            else:
+                print(f"[AUTO-REGISTER FAILED] Could not register {user_id} via !fusion")
+                await message.reply(f"❌ Registration failed. Cannot start game.", parse_mode="Markdown")
+                return
+        except Exception as e:
+            print(f"[AUTO-REGISTER ERROR] Exception during !fusion registration for {user_id}: {e}")
+            await message.reply(f"⚠️ Error during registration. Cannot start game.", parse_mode="Markdown")
+            return
     asyncio.create_task(game_loop(message.chat.id))
 
 
@@ -1763,20 +1773,6 @@ async def on_weapon_purchase(callback: types.CallbackQuery):
 
 
 @dp.callback_query(lambda q: q.data == "show_weapons_inv")
-async def on_show_weapons_inventory(callback: types.CallbackQuery):
-    """Show weapons inventory from callback."""
-    try:
-        u_id = str(callback.from_user.id)
-        user = get_user(u_id)
-        
-        if not user:
-            await callback.answer("❌ User not found", show_alert=True)
-            return
-        
-        weapons = user.get('weapons', {})
-        if not weapons or len(weapons) == 0:
-            await callback.answer("🃏 You have no weapons yet. Buy some first!", show_alert=True)
- .callback_query(lambda q: q.data == "show_weapons_inv")
 async def on_show_weapons_inventory(callback: types.CallbackQuery):
     """Show weapons inventory from callback."""
     try:
@@ -4433,8 +4429,11 @@ async def handle_new_member(event: types.ChatMemberUpdated):
         
         if not existing_user:
             # New member - register them
-            register_user(user_id, username)
-            print(f"✅ [AUTO-JOIN-REGISTER] {username} ({user_id}) registered")
+            reg_success = register_user(user_id, username)
+            if reg_success:
+                print(f"✅ [AUTO-JOIN-REGISTER] {username} ({user_id}) registered")
+            else:
+                print(f"❌ [AUTO-JOIN-REGISTER FAILED] Could not register {username} ({user_id})")
         else:
             # Already exists, just update name if missing
             if not existing_user.get('username') or existing_user.get('username') == "Player":
@@ -4460,8 +4459,17 @@ async def cmd_start(message: types.Message):
     # If user doesn't exist, auto-register
     if not user:
         username = message.from_user.first_name or message.from_user.username or "Player"
-        register_user(u_id, username)
-        user = get_user(u_id)
+        try:
+            reg_success = register_user(u_id, username)
+            if reg_success:
+                user = get_user(u_id)
+            else:
+                await message.answer("❌ Registration failed. Please try again later.", parse_mode="Markdown")
+                return
+        except Exception as e:
+            print(f"[START REGISTER ERROR] Failed to register {u_id}: {e}")
+            await message.answer(f"⚠️ Error during registration. Please try again.", parse_mode="Markdown")
+            return
         
         intro = f"""
 🃏 **WELCOME TO THE 64!** 🃏
@@ -7978,10 +7986,6 @@ async def sector_status_task(bot: Bot, chat_id: int):
             
             # Get top player (overlord) from leaderboard
             top_players = get_weekly_leaderboard(limit=1)
-            overlchoice(resources)
-            
-            # Get top player (overlord) from leaderboard
-            top_players = get_weekly_leaderboard(limit=1)
             overlord = top_players[0].get('username', 'The Council') if top_players else "The Council"
             
             # Generate status message
@@ -8579,4 +8583,28 @@ async def main():
     if status_task:
         status_task.cancel()
     if mining_task_handle:
-    
+        mining_task_handle.cancel()
+    if sheets_sync_task:
+        sheets_sync_task.cancel()
+    if weekly_task:
+        weekly_task.cancel()
+    if bot_activity:
+        bot_activity.cancel()
+    try: await task
+    except asyncio.CancelledError: pass
+    try: await round_task
+    except asyncio.CancelledError: pass
+    if announce_task:
+        try: await announce_task
+        except asyncio.CancelledError: pass
+    if status_task:
+        try: await status_task
+        except asyncio.CancelledError: pass
+    if mining_task_handle:
+        try: await mining_task_handle
+        except asyncio.CancelledError: pass
+    await bot.session.close()
+    print("Bot stopped.")
+
+if __name__ == "__main__":
+    asyncio.run(main())
