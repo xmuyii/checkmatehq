@@ -849,7 +849,12 @@ async def cmd_fusion(message: types.Message):
     if eng.running:
         await message.answer("🃏 *GameMaster:* \"A game is ALREADY running, you blind buffoon. Pay attention next time.\"", parse_mode="Markdown"); return
     if not get_user(str(message.from_user.id)):
-        await _send_unreg_sticker(message)
+        # Automatically register user if not found
+        user_id = str(message.from_user.id)
+        username = message.from_user.first_name or message.from_user.username or "Player"
+        register_user(user_id, username)
+        print(f"[AUTO-REGISTER] User {user_id} ({username}) registered via !fusion.")
+        await message.reply(f"✅ Welcome, {username}! You've been automatically registered. Starting game...", parse_mode="Markdown")
     asyncio.create_task(game_loop(message.chat.id))
 
 
@@ -4394,35 +4399,51 @@ async def _execute_attack(attacker_id: str, target_id: str, target_display_name:
         )
 
 
-@dp.my_chat_member()
+@dp.chat_member()
 async def handle_new_member(event: types.ChatMemberUpdated):
-    """Auto-register new members and existing members to leaderboard when they join a group."""
-    # Only process when someone joins a group
+    """Auto-register new members when they join ANY group or supergroup."""
+    # Only process when someone NEW joins (status = member or restricted)
     if event.new_chat_member.status not in ["member", "restricted"]:
         return
     
-    # Skip if the member is a bot
+    # Skip if it's a bot joining
     if event.new_chat_member.user.is_bot:
         return
     
+    # Skip if user was already a member (status change only, not join)
+    if event.old_chat_member and event.old_chat_member.status in ["member", "restricted"]:
+        return
+    
     user_id = str(event.new_chat_member.user.id)
-    username = event.new_chat_member.user.first_name or event.new_chat_member.user.username or "Player"
+    first_name = event.new_chat_member.user.first_name
+    username = event.new_chat_member.user.username
+    chat_name = event.chat.title or f"Group {event.chat.id}"
+    
+    # Prefer first_name, fallback to username, then generic
+    display_name = first_name or username or "Player"
     
     try:
-        # Check if user exists
+        # Check if user already exists in database
         existing_user = get_user(user_id)
         
         if not existing_user:
-            # New member - register them so they appear on leaderboard
-            register_user(user_id, username)
-            print(f"[NEW MEMBER] Registered {username} ({user_id}) to leaderboard")
+            # Brand new player - register them
+            register_user(user_id, display_name)
+            new_user = get_user(user_id)
+            if new_user:
+                print(f"✅ [AUTO-REGISTER] {display_name} ({user_id}) registered in {chat_name}")
+            else:
+                print(f"⚠️ [WARNING] Registered {display_name} but fetch failed")
         else:
-            # Existing member - just ensure they're registered
-            if not existing_user.get('username'):
-                save_user(user_id, {**existing_user, 'username': username})
-                print(f"[MEMBER] Updated username for {user_id}: {username}")
+            # Existing player - ensure username is set
+            if not existing_user.get('username') or existing_user.get('username') == "Player":
+                existing_user['username'] = display_name
+                save_user(user_id, existing_user)
+                print(f"✅ [UPDATE] {user_id} username updated to {display_name}")
     except Exception as e:
-        print(f"[ERROR] Failed to register new member {user_id}: {e}")
+        print(f"❌ [ERROR] Failed to auto-register {user_id}: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 
 @dp.message(_cmd("start"))
@@ -4491,6 +4512,49 @@ Let's play! 🎮
     )
 
 
+@dp.message(_cmd("register"))
+async def cmd_register(message: types.Message):
+    """Manual registration command (fallback if auto-register fails)."""
+    u_id = str(message.from_user.id)
+    
+    # Check if already registered
+    user = get_user(u_id)
+    if user:
+        username = user.get('username', 'Player')
+        await message.answer(
+            f"✅ You're already registered as **{username}**!\n\n"
+            f"Go to the game group and type words to play!",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Register new player
+    display_name = message.from_user.first_name or message.from_user.username or "Player"
+    try:
+        register_user(u_id, display_name)
+        new_user = get_user(u_id)
+        
+        if new_user:
+            await message.answer(
+                f"🎮 **REGISTRATION SUCCESS!**\n\n"
+                f"👤 Name: **{display_name}**\n"
+                f"⭐ Level: 1\n"
+                f"💰 Bitcoin: 0\n\n"
+                f"✅ You're ready to play!\n\n"
+                f"**Go to the game group and:**\n"
+                f"• Type words to play the Fusion game\n"
+                f"• Use `!fusion` to start a round\n"
+                f"• Use `!weekly` to see leaderboard\n"
+                f"• Use `/callout @player` to challenge chess",
+                parse_mode="Markdown"
+            )
+            print(f"✅ [MANUAL REGISTER] {u_id} registered as {display_name}\"")
+        else:
+            await message.answer("⚠️ Registration failed. Please try again or contact @admin.")
+            print(f"❌ [REGISTER FAILED] Claimed success but user fetch failed for {u_id}")
+    except Exception as e:
+        await message.answer(f"❌ Registration error: {str(e)}")
+        print(f"❌ [REGISTER ERROR] {u_id}: {e}")
 @dp.callback_query(lambda q: q.data == "start_tutorial")
 async def cb_start_tutorial(callback: types.CallbackQuery):
     """Begin new player tutorial."""
@@ -7389,15 +7453,36 @@ async def on_group_message(message: types.Message):
         user = get_user(u_id)
         print(f"[USER] {user.get('username') if user else 'NOT_REGISTERED'}, eng.active={eng.active}")
 
-        # Must be registered
+        # Must be registered - auto-register if missing
         if not user:
-            if random.random() < 0.25:
-                try:
-                    await bot.send_sticker(message.chat.id, STICKER_UNREGISTERED)
-                except Exception:
-                    pass
-
-            print(f"[SKIP] User not registered")
+            display_name = message.from_user.first_name or message.from_user.username or "Player"
+            try:
+                # Register the user
+                register_user(u_id, display_name)
+                user = get_user(u_id)  # Re-fetch
+                print(f"✅ [AUTO-REGISTER in GAME] {u_id} as {display_name}")
+                
+                if user:
+                    await message.reply(
+                        f"🎮 **Welcome, {display_name}!**\n\n"
+                        f"✅ You're automatically registered!\n"
+                        f"Type words to play The 64 Fusion game!\n\n"
+                        f"Commands:\n"
+                        f"`!fusion` - Start a round\n"
+                        f"`!weekly` - Leaderboard\n"
+                        f"`/callout` - Challenge chess",
+                        parse_mode="Markdown"
+                    )
+                else:
+                    print(f"❌ [CRITICAL] Registration claimed success but user still None for {u_id}")
+                    return
+            except Exception as e:
+                print(f"❌ [FAILED] Auto-register failed: {e}")
+                return
+        
+        if not user:
+            # Should not happen, but safeguard
+            print(f"❌ [SKIP] User is None even after registration attempt for {u_id}")
             return
 
         # Check if round is active
