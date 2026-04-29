@@ -155,20 +155,22 @@ try:
 except Exception as e:
     print(f"⚠️  Bandit system failed ({e}), no enemy encounters")
 
-# ── Lichess Chess System (PvP Chess Challenges) ────────────────────────────
+# ── Internal Chess System (PvP Chess Challenges) ───────────────────────────
 try:
-    from lichess_chess_system import (
-        create_callout, initialize_chess_leaderboard, register_lichess_username,
-        record_game_result, format_chess_stats, create_challenge, get_user_games
+    from internal_chess_system import (
+        create_game_challenge, accept_game_challenge, record_game_result,
+        initialize_chess_stats, format_chess_stats, get_game_info, cleanup_expired_games
     )
-    print("✅ Lichess chess system loaded")
+    print("✅ Internal chess system loaded")
 except Exception as e:
-    print(f"⚠️  Lichess chess system failed ({e}), chess disabled")
-    async def create_callout(*args, **kwargs): return False, "❌ Chess system unavailable", ""
-    async def initialize_chess_leaderboard(*args): return False
-    async def register_lichess_username(*args): return False, "❌ Chess system unavailable"
-    async def record_game_result(*args): return False, "❌ Chess system unavailable"
+    print(f"⚠️  Internal chess system failed ({e}), chess disabled")
+    async def create_game_challenge(*args, **kwargs): return False, "❌ Chess system unavailable", ""
+    async def accept_game_challenge(*args, **kwargs): return False, "❌ Chess system unavailable"
+    async def record_game_result(*args, **kwargs): return False, "❌ Chess system unavailable"
+    async def initialize_chess_stats(*args): return False
     async def format_chess_stats(*args): return "❌ Chess system unavailable"
+    async def get_game_info(*args): return False, "❌ Chess system unavailable"
+    def cleanup_expired_games(): return 0
 
 # ── Revenge & Scout System ─────────────────────────────────────────────────
 try:
@@ -1327,81 +1329,42 @@ async def cmd_show_jammers(message: types.Message):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  CHESS SYSTEM - Lichess Integration
+#  CHESS SYSTEM - Internal Bot-Managed Games
 # ═══════════════════════════════════════════════════════════════════════════
-
-@dp.message(_cmd("linkchess"))
-async def cmd_linkchess(message: types.Message):
-    """Link your Lichess account to play chess challenges."""
-    if message.chat.type != "private":
-        await message.answer("🎮 Link your Lichess account in DM: `/linkchess your_lichess_username`", parse_mode="Markdown")
-        return
-    
-    args = message.text.split()
-    if len(args) < 2:
-        await message.answer(
-            "♟️ *LINK LICHESS ACCOUNT*\n━━━━━━━━━━━━━━\n\n"
-            "Usage: `/linkchess <your_lichess_username>`\n\n"
-            "Example: `/linkchess Bobby_Fischer`\n\n"
-            "[Get a free Lichess account](https://lichess.org)",
-            parse_mode="Markdown"
-        )
-        return
-    
-    lichess_username = args[1]
-    user_id = message.from_user.id
-    
-    success, msg = await register_lichess_username(user_id, lichess_username)
-    if success:
-        await message.answer(msg + "\n\n🎮 Ready to challenge! Use `/callout @player` to start a match.", parse_mode="Markdown")
-    else:
-        await message.answer(msg, parse_mode="Markdown")
-
 
 @dp.message(_cmd("callout"))
 async def cmd_callout(message: types.Message):
-    """Challenge another player to a chess match."""
+    """Challenge another player to a chess match (no Lichess account required)."""
     if message.chat.type == "private":
-        await message.answer("♟️ Use `/callout @player` in the group chat!", parse_mode="Markdown")
+        await message.answer("♟️ Use `/callout` in the group chat (reply to a player's message)!", parse_mode="Markdown")
         return
     
-    # Parse @username or reply_to_message
     challenger_id = message.from_user.id
     challenger_name = message.from_user.full_name or "Challenger"
     
-    # Check for mention
-    if message.entities:
-        for entity in message.entities:
-            if entity.type == "mention":
-                username_text = message.text[entity.offset+1:entity.offset+entity.length]
-                # Find user by username (would need to be stored in DB)
-                # For now, check reply_to_message
-                break
-    
     # Check if replying to someone
-    if message.reply_to_message:
-        opponent_id = message.reply_to_message.from_user.id
-        opponent_name = message.reply_to_message.from_user.full_name or "Opponent"
-    else:
+    if not message.reply_to_message:
         await message.answer(
-            "♟️ *CHESS CALLOUT*\n━━━━━━━━━━━━━\n\n"
-            "Reply to a player's message and use `/callout`\n\n"
-            "Or: `/callout @username`",
+            "♟️ **CHESS CALLOUT**\n━━━━━━━━━━━━━\n\n"
+            "Reply to a player's message and use `/callout` to challenge them!",
             parse_mode="Markdown"
         )
         return
+    
+    opponent_id = message.reply_to_message.from_user.id
+    opponent_name = message.reply_to_message.from_user.full_name or "Opponent"
     
     if challenger_id == opponent_id:
         await message.answer("🤔 You can't challenge yourself!", parse_mode="Markdown")
         return
     
-    # Initialize chess stats if needed
-    await initialize_chess_leaderboard(challenger_id)
-    await initialize_chess_leaderboard(opponent_id)
+    # Initialize chess stats
+    await initialize_chess_stats(challenger_id)
+    await initialize_chess_stats(opponent_id)
     
-    # Create the challenge
-    success, challenge_msg, game_link = await create_callout(
-        challenger_id, opponent_id, challenger_name, opponent_name
+    # Create challenge
+    success, challenge_msg, game_id = await create_game_challenge(
+        challenger_id, challenger_name, opponent_id, opponent_name
     )
     
     if success:
@@ -1411,37 +1374,86 @@ async def cmd_callout(message: types.Message):
         await message.answer(challenge_msg, parse_mode="Markdown")
 
 
-@dp.message(_cmd("chess_stats"))
-async def cmd_chess_stats(message: types.Message):
-    """View your chess statistics and ranking."""
+@dp.message(_cmd("accept_chess"))
+async def cmd_accept_chess(message: types.Message):
+    """Accept a chess challenge."""
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Usage: `/accept_chess <game_id>`", parse_mode="Markdown")
+        return
+    
+    game_id = args[1]
     user_id = message.from_user.id
     
-    # Initialize if needed
-    await initialize_chess_leaderboard(user_id)
+    success, msg = await accept_game_challenge(user_id, game_id)
     
+    if success:
+        # Send to group so everyone sees
+        if message.chat.type != "private":
+            await message.answer(msg, parse_mode="Markdown")
+        else:
+            await message.answer("✅ Accepted! Go to the group to see the challenge.", parse_mode="Markdown")
+    else:
+        await message.answer(msg, parse_mode="Markdown")
+
+
+@dp.message(_cmd("chess_result"))
+async def cmd_chess_result(message: types.Message):
+    """Record the result of a chess match."""
+    args = message.text.split()
+    if len(args) < 3:
+        await message.answer(
+            "Usage: `/chess_result <game_id> <win|loss|draw>`\n\n"
+            "Example: `/chess_result chess_123456_789 win`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    game_id = args[1]
+    result = args[2].lower()
+    user_id = message.from_user.id
+    
+    if result not in ["win", "loss", "draw"]:
+        await message.answer("❌ Result must be: **win**, **loss**, or **draw**", parse_mode="Markdown")
+        return
+    
+    success, msg = await record_game_result(user_id, game_id, result)
+    
+    if success:
+        # Announce to group
+        if message.chat.type != "private":
+            await message.answer(msg, parse_mode="Markdown")
+        else:
+            await message.answer(msg, parse_mode="Markdown")
+    else:
+        await message.answer(msg, parse_mode="Markdown")
+
+
+@dp.message(_cmd("chess_stats"))
+async def cmd_chess_stats(message: types.Message):
+    """View your chess statistics."""
+    user_id = message.from_user.id
+    
+    await initialize_chess_stats(user_id)
     stats = await format_chess_stats(user_id)
     await message.answer(stats, parse_mode="Markdown")
 
 
-@dp.message(_cmd("chess_leaderboard"))
-async def cmd_chess_leaderboard(message: types.Message):
-    """View the chess leaderboard rankings."""
-    board_msg = """
-♟️ **CHESS LEADERBOARD**
-━━━━━━━━━━━━━━━━━━
-🏆 Top Players by Rating
-
-_Players are ranked by their chess rating._
-_Play more games to climb the rankings!_
-
-⏳ *Leaderboard updates after each match.*
-
-Commands:
-`/chess_stats` - Your stats
-`/linkchess <username>` - Link Lichess
-`/callout` - Challenge a player
-"""
-    await message.answer(board_msg, parse_mode="Markdown")
+@dp.message(_cmd("game_info"))
+async def cmd_game_info(message: types.Message):
+    """View information about a specific game."""
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Usage: `/game_info <game_id>`", parse_mode="Markdown")
+        return
+    
+    game_id = args[1]
+    success, info = await get_game_info(game_id)
+    
+    if success:
+        await message.answer(info, parse_mode="Markdown")
+    else:
+        await message.answer(info, parse_mode="Markdown")
 
 
 @dp.message(_cmd("obelisk"))
