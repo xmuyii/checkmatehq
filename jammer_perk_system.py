@@ -27,17 +27,19 @@ PERK_DEFINITIONS = {
         "name": "⚡ SCRAMBLER",
         "description": "Scrambles your words so others can't see them",
         "icon": "⚡",
-        "cost": {"silver": 500},
+        "cost": {"bitcoin": 500},
         "duration_seconds": 300,  # 5 minutes
         "max_uses": None,  # Unlimited uses during duration
+        "sticker_id": "CAACAgQAAxkBAAFIWdVp8c9pneMXLRNI96oFHiuXKUCkzAACyBwAArhpiVP99S5kIKefXTsE",  # Jammer sticker
     },
     "anti_jammer": {
         "name": "🔓 UNSCRAMBLER",
         "description": "Reveals scrambled words from opponents",
         "icon": "🔓",
-        "cost": {"silver": 800},
+        "cost": {"bitcoin": 800},
         "duration_seconds": 300,  # 5 minutes
         "max_uses": 5,  # Can reveal 5 times
+        "sticker_id": "CAACAgQAAxkBAAFIWnVp8dQDmTlMxGLsC7QsCWB2VEF83wAC6xwAAkeokVMeUvcw2Uf57DsE",  # Anti-jammer sticker
     }
 }
 

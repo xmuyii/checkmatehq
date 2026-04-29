@@ -1168,11 +1168,19 @@ async def cmd_activate_jammer(message: types.Message):
     
     result = activate_perk(user_id, "jammer")
     if result["ok"]:
+        # Send sticker
+        jammer_sticker = PERK_DEFINITIONS.get("jammer", {}).get("sticker_id")
+        if jammer_sticker:
+            try:
+                await bot.send_sticker(message.chat.id, jammer_sticker)
+            except Exception as e:
+                print(f"[ERROR] Could not send jammer sticker: {e}")
+        
         await message.answer(
             f"✅ *Jammer Activated!*\n\n"
             f"⚡ Your words will be scrambled for 5 minutes.\n"
             f"Other players won't see what you're saying.\n\n"
-            f"_Cost: 500 Silver_\n"
+            f"_Cost: 500 Bitcoin_\n"
             f"_Active: 5 minutes_",
             parse_mode="Markdown"
         )
@@ -1196,11 +1204,19 @@ async def cmd_activate_anti_jammer(message: types.Message):
     
     result = activate_perk(user_id, "anti_jammer")
     if result["ok"]:
+        # Send sticker
+        anti_jammer_sticker = PERK_DEFINITIONS.get("anti_jammer", {}).get("sticker_id")
+        if anti_jammer_sticker:
+            try:
+                await bot.send_sticker(message.chat.id, anti_jammer_sticker)
+            except Exception as e:
+                print(f"[ERROR] Could not send anti-jammer sticker: {e}")
+        
         await message.answer(
             f"✅ *Anti-Jammer Activated!*\n\n"
             f"🔓 You can reveal 5 scrambled words from opponents.\n"
             f"See through the deception!\n\n"
-            f"_Cost: 800 Silver_\n"
+            f"_Cost: 800 Bitcoin_\n"
             f"_Active: 5 minutes_\n"
             f"_Uses: 5_",
             parse_mode="Markdown"
@@ -1231,8 +1247,8 @@ async def cmd_show_perks(message: types.Message):
         await message.answer(
             "❌ No active perks.\n\n"
             "Available perks:\n"
-            "• `/jammer` - Scramble your words (500 Silver, 5 min)\n"
-            "• `/anti_jammer` - Reveal scrambled words (800 Silver, 5 min, 5 uses)",
+            "• `/jammer` - Scramble your words (500 Bitcoin, 5 min)\n"
+            "• `/anti_jammer` - Reveal scrambled words (800 Bitcoin, 5 min, 5 uses)",
             parse_mode="Markdown"
         )
         return
