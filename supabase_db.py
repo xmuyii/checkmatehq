@@ -200,41 +200,58 @@ def save_user(user_id, data: dict):
 
 
 def register_user(user_id, username: str):
-    uid = str(user_id)
-    r = supabase.table(DB_TABLE).select('user_id, username').eq('user_id', uid).execute()
-    if r.data:
-        if r.data[0].get('username') != username:
-            supabase.table(DB_TABLE).update({'username': username}).eq('user_id', uid).execute()
-        return
-    random_base_name = random.choice(DEFAULT_BASE_NAMES)
-    supabase.table(DB_TABLE).insert({
-        'user_id': uid,
-        'username': username,
-        'all_time_points': 0,
-        'weekly_points': 0,
-        'week_start': _current_week_key(),
-        'total_words': 0,
-        'bitcoin': 0,
-        'xp': 0,
-        'level': 1,
-        'last_level': 1,
-        'backpack_slots': 5,
-        'backpack_image': 'normal_backpack',
-        'inventory': json.dumps([]),
-        'unclaimed_items': json.dumps([]),
-        'sector': None,
-        'completed_tutorial': False,
-        'base_name': random_base_name,
-        'base_resources': json.dumps({
-            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
-            'food': 0,
-            'current_streak': 0
-        }),
-        'military': json.dumps({}),
-        'traps': json.dumps({}),
-        'shield_status': 'UNPROTECTED',
-        'shield_cooldown': None,
-    }).execute()
+    """Create a fresh account. Returns True on success, False on failure."""
+    try:
+        uid = str(user_id)
+        r = supabase.table(DB_TABLE).select('user_id, username').eq('user_id', uid).execute()
+        if r.data:
+            if r.data[0].get('username') != username:
+                supabase.table(DB_TABLE).update({'username': username}).eq('user_id', uid).execute()
+            return True  # Already registered
+        
+        random_base_name = random.choice(DEFAULT_BASE_NAMES)
+        supabase.table(DB_TABLE).insert({
+            'user_id': uid,
+            'username': username,
+            'all_time_points': 0,
+            'weekly_points': 0,
+            'week_start': _current_week_key(),
+            'total_words': 0,
+            'bitcoin': 0,
+            'xp': 0,
+            'level': 1,
+            'last_level': 1,
+            'backpack_slots': 5,
+            'backpack_image': 'normal_backpack',
+            'inventory': json.dumps([]),
+            'unclaimed_items': json.dumps([]),
+            'sector': None,
+            'completed_tutorial': False,
+            'base_name': random_base_name,
+            'base_resources': json.dumps({
+                'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
+                'food': 0,
+                'current_streak': 0
+            }),
+            'military': json.dumps({}),
+            'traps': json.dumps({}),
+            'shield_status': 'UNPROTECTED',
+            'shield_cooldown': None,
+            'active_perks': json.dumps({}),
+            'chess_stats': json.dumps({
+                'rating': 1000,
+                'wins': 0,
+                'losses': 0,
+                'draws': 0,
+                'current_streak': 0,
+                'best_streak': 0,
+                'total_games': 0
+            }),
+        }).execute()
+        return True  # Registration succeeded
+    except Exception as e:
+        print(f"[REGISTER ERROR] Failed to register {user_id}: {e}")
+        return False  # Registration failed
 
 
 def ensure_bot_exists(username: str, initial_points: int = 0):

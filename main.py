@@ -1776,6 +1776,20 @@ async def on_show_weapons_inventory(callback: types.CallbackQuery):
         weapons = user.get('weapons', {})
         if not weapons or len(weapons) == 0:
             await callback.answer("🃏 You have no weapons yet. Buy some first!", show_alert=True)
+ .callback_query(lambda q: q.data == "show_weapons_inv")
+async def on_show_weapons_inventory(callback: types.CallbackQuery):
+    """Show weapons inventory from callback."""
+    try:
+        u_id = str(callback.from_user.id)
+        user = get_user(u_id)
+        
+        if not user:
+            await callback.answer("❌ User not found", show_alert=True)
+            return
+        
+        weapons = user.get('weapons', {})
+        if not weapons or len(weapons) == 0:
+            await callback.answer("🃏 You have no weapons yet. Buy some first!", show_alert=True)
             return
         
         txt = "⚔️ **YOUR WEAPONS**\n\n"
@@ -4401,47 +4415,34 @@ async def _execute_attack(attacker_id: str, target_id: str, target_display_name:
 
 @dp.chat_member()
 async def handle_new_member(event: types.ChatMemberUpdated):
-    """Auto-register new members when they join ANY group or supergroup."""
-    # Only process when someone NEW joins (status = member or restricted)
+    """Auto-register new members when they join a group."""
+    # Only process when someone joins a group
     if event.new_chat_member.status not in ["member", "restricted"]:
         return
     
-    # Skip if it's a bot joining
+    # Skip if the member is a bot
     if event.new_chat_member.user.is_bot:
         return
     
-    # Skip if user was already a member (status change only, not join)
-    if event.old_chat_member and event.old_chat_member.status in ["member", "restricted"]:
-        return
-    
     user_id = str(event.new_chat_member.user.id)
-    first_name = event.new_chat_member.user.first_name
-    username = event.new_chat_member.user.username
-    chat_name = event.chat.title or f"Group {event.chat.id}"
-    
-    # Prefer first_name, fallback to username, then generic
-    display_name = first_name or username or "Player"
+    username = event.new_chat_member.user.first_name or event.new_chat_member.user.username or "Player"
     
     try:
-        # Check if user already exists in database
+        # Check if user exists
         existing_user = get_user(user_id)
         
         if not existing_user:
-            # Brand new player - register them
-            register_user(user_id, display_name)
-            new_user = get_user(user_id)
-            if new_user:
-                print(f"✅ [AUTO-REGISTER] {display_name} ({user_id}) registered in {chat_name}")
-            else:
-                print(f"⚠️ [WARNING] Registered {display_name} but fetch failed")
+            # New member - register them
+            register_user(user_id, username)
+            print(f"✅ [AUTO-JOIN-REGISTER] {username} ({user_id}) registered")
         else:
-            # Existing player - ensure username is set
+            # Already exists, just update name if missing
             if not existing_user.get('username') or existing_user.get('username') == "Player":
-                existing_user['username'] = display_name
+                existing_user['username'] = username
                 save_user(user_id, existing_user)
-                print(f"✅ [UPDATE] {user_id} username updated to {display_name}")
+                print(f"✅ [UPDATE] {user_id} username set to {username}")
     except Exception as e:
-        print(f"❌ [ERROR] Failed to auto-register {user_id}: {str(e)}")
+        print(f"❌ [AUTO-REGISTER ERROR] {user_id}: {e}")
         import traceback
         traceback.print_exc()
 
@@ -4512,49 +4513,6 @@ Let's play! 🎮
     )
 
 
-@dp.message(_cmd("register"))
-async def cmd_register(message: types.Message):
-    """Manual registration command (fallback if auto-register fails)."""
-    u_id = str(message.from_user.id)
-    
-    # Check if already registered
-    user = get_user(u_id)
-    if user:
-        username = user.get('username', 'Player')
-        await message.answer(
-            f"✅ You're already registered as **{username}**!\n\n"
-            f"Go to the game group and type words to play!",
-            parse_mode="Markdown"
-        )
-        return
-    
-    # Register new player
-    display_name = message.from_user.first_name or message.from_user.username or "Player"
-    try:
-        register_user(u_id, display_name)
-        new_user = get_user(u_id)
-        
-        if new_user:
-            await message.answer(
-                f"🎮 **REGISTRATION SUCCESS!**\n\n"
-                f"👤 Name: **{display_name}**\n"
-                f"⭐ Level: 1\n"
-                f"💰 Bitcoin: 0\n\n"
-                f"✅ You're ready to play!\n\n"
-                f"**Go to the game group and:**\n"
-                f"• Type words to play the Fusion game\n"
-                f"• Use `!fusion` to start a round\n"
-                f"• Use `!weekly` to see leaderboard\n"
-                f"• Use `/callout @player` to challenge chess",
-                parse_mode="Markdown"
-            )
-            print(f"✅ [MANUAL REGISTER] {u_id} registered as {display_name}\"")
-        else:
-            await message.answer("⚠️ Registration failed. Please try again or contact @admin.")
-            print(f"❌ [REGISTER FAILED] Claimed success but user fetch failed for {u_id}")
-    except Exception as e:
-        await message.answer(f"❌ Registration error: {str(e)}")
-        print(f"❌ [REGISTER ERROR] {u_id}: {e}")
 @dp.callback_query(lambda q: q.data == "start_tutorial")
 async def cb_start_tutorial(callback: types.CallbackQuery):
     """Begin new player tutorial."""
@@ -7453,42 +7411,31 @@ async def on_group_message(message: types.Message):
         user = get_user(u_id)
         print(f"[USER] {user.get('username') if user else 'NOT_REGISTERED'}, eng.active={eng.active}")
 
-        # Must be registered - auto-register if missing
-        if not user:
-            display_name = message.from_user.first_name or message.from_user.username or "Player"
+        # Must be registered
+        if not user: # If user is not found, automatically register them
+            username = message.from_user.first_name or message.from_user.username or "Player"
             try:
-                # Register the user
-                register_user(u_id, display_name)
-                user = get_user(u_id)  # Re-fetch
-                print(f"✅ [AUTO-REGISTER in GAME] {u_id} as {display_name}")
-                
-                if user:
-                    await message.reply(
-                        f"🎮 **Welcome, {display_name}!**\n\n"
-                        f"✅ You're automatically registered!\n"
-                        f"Type words to play The 64 Fusion game!\n\n"
-                        f"Commands:\n"
-                        f"`!fusion` - Start a round\n"
-                        f"`!weekly` - Leaderboard\n"
-                        f"`/callout` - Challenge chess",
-                        parse_mode="Markdown"
-                    )
+                reg_success = register_user(u_id, username)
+                if reg_success:
+                    user = get_user(u_id) # Re-fetch user after registration
+                    print(f"[AUTO-REGISTER] User {u_id} ({username}) registered successfully.")
+                    await message.reply(f"✅ Welcome, {username}! You've been automatically registered. You can now play!", parse_mode="Markdown")
                 else:
-                    print(f"❌ [CRITICAL] Registration claimed success but user still None for {u_id}")
+                    print(f"[AUTO-REGISTER FAILED] Could not register {u_id} ({username})")
+                    await message.reply(f"❌ Registration failed. Please try again later or contact support.", parse_mode="Markdown")
                     return
             except Exception as e:
-                print(f"❌ [FAILED] Auto-register failed: {e}")
+                print(f"[AUTO-REGISTER ERROR] Exception during registration for {u_id}: {e}")
+                await message.reply(f"⚠️ Error during registration: {str(e)[:50]}. Please try /start", parse_mode="Markdown")
                 return
         
-        if not user:
-            # Should not happen, but safeguard
-            print(f"❌ [SKIP] User is None even after registration attempt for {u_id}")
+        if not user: # Should not happen, but as a safeguard
+            print(f"[SKIP] User {u_id} could not be registered or retrieved")
             return
 
         # Check if round is active
         if not eng.active:
-            if can_spell(guess, eng.letters) and word_in_dict(guess):
-                await message.reply("⏳ The round has already ended! Wait for the next one.")
+            print(f"[SKIP] Round not active")
             return
 
         # Validate word format (no spam check - count all valid words)
@@ -8028,6 +7975,10 @@ async def sector_status_task(bot: Bot, chat_id: int):
             # Get random sector and resource
             sector = random.choice(sector_names)
             emoji, resource, price_change = random.choice(resources)
+            
+            # Get top player (overlord) from leaderboard
+            top_players = get_weekly_leaderboard(limit=1)
+            overlchoice(resources)
             
             # Get top player (overlord) from leaderboard
             top_players = get_weekly_leaderboard(limit=1)
@@ -8628,28 +8579,4 @@ async def main():
     if status_task:
         status_task.cancel()
     if mining_task_handle:
-        mining_task_handle.cancel()
-    if sheets_sync_task:
-        sheets_sync_task.cancel()
-    if weekly_task:
-        weekly_task.cancel()
-    if bot_activity:
-        bot_activity.cancel()
-    try: await task
-    except asyncio.CancelledError: pass
-    try: await round_task
-    except asyncio.CancelledError: pass
-    if announce_task:
-        try: await announce_task
-        except asyncio.CancelledError: pass
-    if status_task:
-        try: await status_task
-        except asyncio.CancelledError: pass
-    if mining_task_handle:
-        try: await mining_task_handle
-        except asyncio.CancelledError: pass
-    await bot.session.close()
-    print("Bot stopped.")
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    
