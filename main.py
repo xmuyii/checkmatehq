@@ -5237,8 +5237,8 @@ async def cb_account_reset_confirm(callback: types.CallbackQuery):
         "base_level": 1,
         "inventory": [],
         "completed_tutorial": True,
-        "shield_status" : active
-        "unclaimed_items" : {}
+        "shield_status" : active,
+        "unclaimed_items" : {},
         "base_resources": {
             "resources": {"wood": 100, "bronze": 50, "iron": 25, "diamond": 10, "relics": 0},
             "food": 100,
