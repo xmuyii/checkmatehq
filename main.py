@@ -7338,7 +7338,7 @@ Copy the function below into main.py to replace the corrupted version.
 """
 
 
-def build_player_dashboard(player_name: str, session: dict, user_id: str = None) -> str:
+def build_player_dashboard(player_name: str, session: dict, user_id: str = None, has_jammer: bool = False) -> str:
     """Build an HTML-formatted in-text dashboard for a player's round stats."""
     last_word = session.get('last_word', '???')
     total_pts = session.get('pts', 0)
@@ -7380,7 +7380,20 @@ def build_player_dashboard(player_name: str, session: dict, user_id: str = None)
     dashboard += (
         f"🎮 <b>{player_name}</b>\n"
         f"━━━━━━━━━━━━━━━━━\n"
-        f"✅ <code>{last_word.upper()}</code>  <b>+{last_pts}</b>\n"
+    )
+    
+    # If jammer is active, show jammer visual instead of word
+    if has_jammer:
+        dashboard += (
+            f"💀 GHOST UPLINK 💀\n"
+            f"--------------------------\n"
+            f"✅ ███▓ (Data Secure)\n"
+            f"--------------------------\n"
+        )
+    else:
+        dashboard += f"✅ <code>{last_word.upper()}</code>  <b>+{last_pts}</b>\n"
+    
+    dashboard += (
         f"━━━━━━━━━━━━━━━━━\n"
         f"💰 <b>{total_pts:,}</b> pts   ⭐ <b>{total_xp:,}</b> XP\n"
     )
@@ -7470,37 +7483,20 @@ async def on_group_message(message: types.Message):
         is_valid = word_in_dict(guess)
         print(f"[CHECK] '{guess}' valid={is_valid} (dict size: {len(DICTIONARY)})")
         
-        # Check if jammer is active
+        # Check if jammer is active EARLY
         has_jammer = is_perk_active(u_id, "jammer")
         
         if not is_valid:
-            # Even invalid words get scrambled if jammer is active
-            if has_jammer:
-                scrambled_word = scramble_word(guess)
-                print(f"[JAMMER] Invalid word scrambled: {guess} -> {scrambled_word}")
-                
-                # Edit player's message to show scrambled word
-                try:
-                    await bot.edit_message_text(
-                        text=scrambled_word,
-                        chat_id=message.chat.id,
-                        message_id=message.message_id
-                    )
-                except Exception as e:
-                    print(f"[JAMMER] Could not edit message: {e}")
-                
-                # Send Game Master response with scrambled validation
-                gm_response = format_scrambled_validation(guess, is_valid=False)
-                try:
-                    await bot.send_message(
-                        message.chat.id,
-                        gm_response,
-                        parse_mode="HTML"
-                    )
-                except Exception as e:
-                    print(f"[JAMMER] Could not send GM response: {e}")
-            
+            # Invalid word - just return
             update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
+            # Delete message if jammer is active
+            if has_jammer:
+                try:
+                    await asyncio.sleep(0.2)
+                    await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+                    print(f"[JAMMER] Deleted invalid word message from {u_id}")
+                except Exception as e:
+                    print(f"[JAMMER] Could not delete message: {e}")
             return
 
         # ════════════════════════════════════════════════════════════════════
@@ -7509,6 +7505,15 @@ async def on_group_message(message: types.Message):
         
         print(f"[VALID] `{guess}` found in dictionary - processing...")
         
+        # DELETE PLAYER MESSAGE IMMEDIATELY IF JAMMER IS ACTIVE
+        if has_jammer:
+            try:
+                await asyncio.sleep(0.1)
+                await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+                print(f"[JAMMER] Deleted jammer message from {u_id}: {guess}")
+            except Exception as e:
+                print(f"[JAMMER] Could not delete message: {e}")
+        
         eng.used_words.append(guess)
         eng.msg_count += 1
         eng.words_repeated_count += 1
@@ -7516,38 +7521,6 @@ async def on_group_message(message: types.Message):
         if getattr(eng, 'words_repeated_count', 0) > 0 and eng.words_repeated_count % 4 == 0:
             extra = f" *{eng.extra_letters[0]}* *{eng.extra_letters[1]}*" if len(getattr(eng, 'extra_letters', '')) >= 2 else ""
             await bot.send_message(message.chat.id, f"🃏 *The GameMaster:* THE WORDS ARE: *{eng.word1.lower()}* *{eng.word2.lower()}*{extra}" , parse_mode="Markdown")
-        
-        # ════════════════════════════════════════════════════════════════════
-        # JAMMER PERK CHECK - Scramble word if active
-        # ════════════════════════════════════════════════════════════════════
-        
-        has_jammer = is_perk_active(u_id, "jammer")
-        scrambled_word = None
-        if has_jammer:
-            scrambled_word = scramble_word(guess)
-            print(f"[JAMMER] {u_id}: {guess} -> {scrambled_word}")
-            
-            # Edit player's message to show scrambled word
-            try:
-                await bot.edit_message_text(
-                    text=scrambled_word,
-                    chat_id=message.chat.id,
-                    message_id=message.message_id
-                )
-                print(f"[JAMMER] Edited message to show scrambled word")
-            except Exception as e:
-                print(f"[JAMMER] Could not edit message: {e}")
-            
-            # Send Game Master response with scrambled validation
-            gm_response = format_scrambled_validation(guess, is_valid=True)
-            try:
-                await bot.send_message(
-                    message.chat.id,
-                    gm_response,
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                print(f"[JAMMER] Could not send GM response: {e}")
             
         # Calculate base points
         pts = max(len(guess) - 2, 1)
@@ -7592,7 +7565,8 @@ async def on_group_message(message: types.Message):
         # ════════════════════════════════════════════════════════════════
         # PLAYER DASHBOARD — one editable message per player per round
         # ════════════════════════════════════════════════════════════════
-        xp_awarded = pts  # XP equals base pts
+        xp_awarded = pts * 2  # XP is 2x the points value
+        bitcoin_awarded = max(pts // 2, 1)  # Bitcoin is half points
 
         # Initialize session on first word
         if u_id not in eng.player_sessions:
@@ -7618,7 +7592,7 @@ async def on_group_message(message: types.Message):
         if rare_item:
             session['rare_message'] = f"🎉 <b>RARE DROP!</b> {rare_item['name']}"
 
-        dashboard_text = build_player_dashboard(db_name, session, u_id)
+        dashboard_text = build_player_dashboard(db_name, session, u_id, has_jammer=has_jammer)
 
         # Hybrid dashboard: edit for speed, reposition every 4th word
         try:
@@ -7672,8 +7646,9 @@ async def on_group_message(message: types.Message):
                 user_fresh['base_resources'] = base_res
                 save_user(u_id, user_fresh)
                 add_points(u_id, pts, db_name)
-                add_xp(u_id, xp_awarded)  # xp_awarded computed above in dashboard section
-                print(f"[DB] Saved for {db_name} - pts: {pts}, xp: {xp_awarded}")
+                add_xp(u_id, xp_awarded)  # XP is 2x points
+                add_bitcoin(u_id, bitcoin_awarded, db_name)  # Bitcoin is half points
+                print(f"[DB] Saved for {db_name} - pts: {pts}, xp: {xp_awarded}, bitcoin: {bitcoin_awarded}")
         except Exception as e:
             print(f"[DB ERROR] {e}")
         
