@@ -176,6 +176,7 @@ def save_user(user_id, data: dict):
     d.pop('metadata', None)
     d.pop('training_queue', None)
     d.pop('shield_status', None)  # Shield status is in-memory only, not in DB
+    d.pop('shield_cooldown', None)  # Shield cooldown doesn't exist in schema
     d.pop('prestige', None)  # Prestige tier is in-memory only, not in DB
     
     # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources, weapons)
@@ -236,7 +237,6 @@ def register_user(user_id, username: str):
             'military': json.dumps({}),
             'traps': json.dumps({}),
             'shield_status': 'UNPROTECTED',
-            'shield_cooldown': None,
             'active_perks': json.dumps({}),
             'chess_stats': json.dumps({
                 'rating': 1000,
@@ -248,9 +248,12 @@ def register_user(user_id, username: str):
                 'total_games': 0
             }),
         }).execute()
+        print(f"[REGISTER SUCCESS] User {uid} ({username}) registered to Supabase")
         return True  # Registration succeeded
     except Exception as e:
         print(f"[REGISTER ERROR] Failed to register {user_id}: {e}")
+        import traceback
+        traceback.print_exc()
         return False  # Registration failed
 
 
