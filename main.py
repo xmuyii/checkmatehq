@@ -53,6 +53,9 @@ from new_features import (
     setup_chess_command,
     setup_guild_handlers
 )
+# List of keys that should NEVER be overwritten by a Load/Save
+META_KEYS = ["id", "username", "game_saves", "created_at", "premium_credits", "total_words", "backpack_slots"]
+
 
 # ── GLOBAL EVENT TRACKING ──────────────────────────────────────────────────
 game_events = {
@@ -5085,30 +5088,59 @@ async def cb_account_save_menu(callback: types.CallbackQuery):
 async def cb_account_save_slot(callback: types.CallbackQuery):
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
-    slot = callback.data.split("slot")[1] # "1", "2", etc.
     
+    # Extract slot number safely (handles both 'slot1' and 'slot1_confirm')
+    raw_slot = callback.data.split("slot")[1]
+    slot = raw_slot.replace("_confirm", "")
+    is_confirmed = "_confirm" in callback.data
+
     if not user:
         await callback.answer("User not found", show_alert=True)
         return
 
-    # Initialize game_saves if it doesn't exist or is a string
-    if "game_saves" not in user or isinstance(user["game_saves"], str):
-        user["game_saves"] = {}
+    # Handle the game_saves structure
+    saves = user.get("game_saves", {})
+    if isinstance(saves, str):
+        saves = json.loads(saves)
 
-    # Create the save snapshot
-    # We exclude the 'game_saves' itself from the backup to avoid "Inception" saves
-    snapshot = {k: v for k, v in user.items() if k != "game_saves"}
+    # 1. OVERWRITE CHECK
+    if str(slot) in saves and not is_confirmed:
+        ts = saves[str(slot)].get("timestamp", 0)
+        dt = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
+        
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⚠️ YES, Overwrite", callback_data=f"account_save_slot{slot}_confirm")],
+            [InlineKeyboardButton(text="❌ Cancel", callback_data="account_save_menu")]
+        ])
+        
+        await callback.message.edit_text(
+            f"⚠️ **OVERWRITE WARNING**\n\nSlot {slot} has a save from `{dt}`.\n"
+            "Replace it with your current progress?",
+            reply_markup=markup, parse_mode="Markdown"
+        )
+        return
+
+    # 2. CREATE SNAPSHOT (Excluding meta-data and the save dictionary itself)
+    snapshot = {k: v for k, v in user.items() if k not in META_KEYS}
     
-    user["game_saves"][slot] = {
+    # Update the dictionary
+    saves[str(slot)] = {
         "timestamp": int(time.time()),
         "data": snapshot
     }
-
-    # Save only the updated game_saves column to the DB
-    save_user(u_id, {"game_saves": user["game_saves"]})
+    
+    # 3. SAVE TO DB
+    # We only update the 'game_saves' column to be safe and efficient
+    save_user(u_id, {"game_saves": saves})
     
     await callback.answer(f"✅ Saved to Slot {slot}!", show_alert=True)
-    # ... rest of your edit_text code ...
+    await callback.message.edit_text(
+        f"✅ *Game Saved to Slot {slot}*",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_account")]
+        ]),
+        parse_mode="Markdown"
+    )
 
 @dp.callback_query(lambda q: q.data == "account_load")
 async def cb_account_load(callback: types.CallbackQuery):
@@ -5143,22 +5175,29 @@ async def cb_account_load_slot(callback: types.CallbackQuery):
     if isinstance(saves, str):
         saves = json.loads(saves)
 
-    if slot not in saves:
+    if str(slot) not in saves:
         await callback.answer("❌ This slot is empty!", show_alert=True)
         return
 
-    # Extract the saved data
-    restored_data = saves[slot].get("data", {})
+    # Extract data
+    saved_payload = saves[str(slot)].get("data", {})
     
-    # Apply restored data to the current user object
-    for key, value in restored_data.items():
-        user[key] = value
-        
-    # Crucial: Push the full restored state to the DB
+    # Apply to current user object, but PROTECT meta-keys
+    for key, value in saved_payload.items():
+        if key not in META_KEYS:
+            user[key] = value
+    
+    # Save the now-restored user object back to the database
     save_user(u_id, user)
     
     await callback.answer(f"✅ Slot {slot} Restored!", show_alert=True)
-    # ... rest of your edit_text code ...
+    await callback.message.edit_text(
+        f"✅ *Slot {slot} Loaded Successfully*",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_account")]
+        ]),
+        parse_mode="Markdown"
+    )
 
 
 @dp.callback_query(lambda q: q.data == "account_reset_menu")
@@ -5182,42 +5221,39 @@ async def cb_account_reset_menu(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda q: q.data == "account_reset_confirm")
 async def cb_account_reset_confirm(callback: types.CallbackQuery):
-    """Reset the account."""
     u_id = str(callback.from_user.id)
+    user = get_user(u_id)
     
-    # Create fresh user
-    fresh_user = {
-        "id": u_id,
-        "username": callback.from_user.first_name or "Player",
+    if not user: return
+
+    # Define the starting stats
+    starting_stats = {
         "level": 1,
         "xp": 0,
-        "all_time_points": 0,
-        "weekly_points": 0,
-        "total_words": 0,
+        "bitcoin": 100,
+        "inventory": [],
         "wins": 0,
         "losses": 0,
-        "bitcoin": 1000,
-        "base_name": "Base",
         "base_level": 1,
+        "inventory": [],
+        "completed_tutorial": True
         "base_resources": {
             "resources": {"wood": 100, "bronze": 50, "iron": 25, "diamond": 10, "relics": 0},
             "food": 100,
             "current_streak": 0
         },
-        "sector": 1,
-        "inventory": [],
-        "completed_tutorial": True
+        # ... any other stats you want to reset ...
     }
-    save_user(u_id, fresh_user)
+
+    # Update current user with starting stats
+    # This leaves 'username' and 'game_saves' untouched!
+    for key, value in starting_stats.items():
+        user[key] = value
+
+    save_user(u_id, user)
     
-    await callback.answer("✅ Account reset!", show_alert=True)
-    await callback.message.edit_text(
-        "✅ *Account Reset!*\n\n"
-        "━━━━━━━━━━━━━━━━━\n"
-        "_Your account has been reset._\n\n"
-        "_Redirecting to home..._",
-        parse_mode="Markdown"
-    )
+    await callback.answer("🧹 Account reset complete.", show_alert=True)
+    await callback.message.edit_text("✅ *Account Reset Successfully*\nYour saves and name were preserved.")
 
 
 # ━━━━━ PROFILE SUBMENUS ━━━━━
