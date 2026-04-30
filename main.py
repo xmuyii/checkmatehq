@@ -4449,6 +4449,20 @@ async def handle_new_member(event: types.ChatMemberUpdated):
         import traceback
         traceback.print_exc()
 
+def register_new_user(user_id, first_name):
+    new_user = {
+        "id": str(user_id),
+        "username": first_name or "Player",
+        "level": 1,
+        "xp": 0,
+        "bitcoin": 100,
+        "shield_status": "🛡️ ACTIVE",
+        "unclaimed_items": {},
+        "completed_tutorial": False,
+        "game_saves": {} # Initialize this as an empty dict
+    }
+    save_user(user_id, new_user)
+    return new_user
 
 @dp.message(_cmd("start"))
 async def cmd_start(message: types.Message):
@@ -4461,7 +4475,15 @@ async def cmd_start(message: types.Message):
     user = get_user(u_id)
     
     # ... [Registration Logic] ...
-
+    # 🛡️ SAFETY CHECK: If user doesn't exist, register them now
+    if user is None:
+        # This calls your registration logic/function
+        user = register_new_user(u_id, message.from_user.first_name)
+        await message.answer("👋 Welcome, Operative! Your account has been initialized.")
+    
+    # Now this won't crash because 'user' is guaranteed to be a dictionary
+    username = user.get("username", "Player")
+    # ... rest of your start logic
     # 1. THE PERSISTENT KEYBOARD (Bottom of screen)
     # Note: Use EXACT text matches for your handlers below
     main_nav = ReplyKeyboardMarkup(
@@ -4529,8 +4551,32 @@ async def game_module(message: types.Message):
     await message.answer("🕹️ Loading Fusion Engine... Use /fusion in the group!")
 
 @dp.message(lambda message: message.text == "[🛍️ SHOP]")
-async def shop_module(message: types.Message):
-    await message.answer("🛠️ ARMORY OPEN. Current Stock: [JAMMER] [SCANNER]")
+async def shop_button_handler(message: types.Message):
+    # This acts as the entry point from the bottom keyboard
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    bitcoin = user.get("bitcoin", 0)
+    gold = user.get("gold", 0)
+    
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏬 GENERAL STORE", callback_data="shop_category_general")],
+        [InlineKeyboardButton(text="💀 BLACK MARKET", callback_data="shop_category_blackmarket")],
+        [InlineKeyboardButton(text="💎 PREMIUM PLAZA", callback_data="shop_category_premium")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
+    ])
+    
+    # We use .answer because this is a new message, not an edit
+    await message.answer(
+        f"🛍️ *THE NEXUS MARKETPLACE*\nBalance: {bitcoin:,} 💳"
+        f"🟡 **Gold:** {gold:,}\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"**General:** Basic supplies & resources\n"
+        f"**Black Market:** High-risk, rare illegal tech\n"
+        f"**Premium:** Special bundles & gold items\n"
+        f"━━━━━━━━━━━━━━━━━",
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
 
 @dp.message(lambda message: message.text == "[⚔️ EQUIP]")
 async def equip_module(message: types.Message):
@@ -4760,15 +4806,34 @@ async def cb_menu_profile(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda q: q.data == "menu_shop")
 async def cb_menu_shop(callback: types.CallbackQuery):
-    """Show shop menu."""
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
-    
+    bitcoin = user.get("bitcoin", 0)
+    gold = user.get("gold", 0) # Assuming you have a premium currency
     if not user:
         await callback.answer("User not found", show_alert=True)
         return
+     
+    markup1 = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏬 GENERAL STORE", callback_data="shop_category_general")],
+        [InlineKeyboardButton(text="💀 BLACK MARKET", callback_data="shop_category_blackmarket")],
+        [InlineKeyboardButton(text="💎 PREMIUM PLAZA", callback_data="shop_category_premium")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
+    ])
+    await callback.message.edit_text(
+        f"🛍️ *THE NEXUS MARKETPLACE* 🛍️\n\n"
+        f"💳 **Bitcoin:** {bitcoin:,}\n"
+        f"🟡 **Gold:** {gold:,}\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"**General:** Basic supplies & resources\n"
+        f"**Black Market:** High-risk, rare illegal tech\n"
+        f"**Premium:** Special bundles & gold items\n"
+        f"━━━━━━━━━━━━━━━━━",
+        parse_mode="Markdown",
+        reply_markup=markup1
+    )
+    await callback.answer()
     
-    bitcoin = user.get("bitcoin", 0)
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🛡️ Shields", callback_data="shop_shields")],
@@ -5237,7 +5302,7 @@ async def cb_account_reset_confirm(callback: types.CallbackQuery):
         "base_level": 1,
         "inventory": [],
         "completed_tutorial": True,
-        "shield_status" : active,
+        "shield_status" : "🛡️ ACTIVE",
         "unclaimed_items" : {},
         "base_resources": {
             "resources": {"wood": 100, "bronze": 50, "iron": 25, "diamond": 10, "relics": 0},
