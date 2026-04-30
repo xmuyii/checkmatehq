@@ -758,89 +758,6 @@ async def game_loop(chat_id: int):
         eng.active  = False
         eng.running = False
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  TRIVIA GAME LOOP
-# ═══════════════════════════════════════════════════════════════════════════
-async def trivia_game_loop(chat_id: int):
-    """Main trivia game loop: Runs for 3 minutes, edits messages to stay clean."""
-    trivia_eng = get_trivia_engine(chat_id)
-    trivia_eng.running = True
-    
-    start_time = time.time()
-    end_time = start_time + TRIVIA_ROUND_TIMEOUT
-    question_count = 0
-    game_msg = None # We will reuse this message object
-
-    try:
-        # Initial Welcome Message
-        game_msg = await bot.send_message(
-            chat_id,
-            "🧠 *TRIVIA STARTING...*\nPrepare your processors.",
-            parse_mode="Markdown"
-        )
-        await asyncio.sleep(2)
-        
-        while time.time() < end_time:
-            question_count += 1
-            trivia_eng.reset()
-            question_data = trivia_eng.pick_question()
-            trivia_eng.active = True
-            
-            time_left = int(end_time - time.time())
-            q_text = (
-                f"❓ *QUESTION {question_count}* ({time_left}s left)\n"
-                f"{divider()}\n"
-                f"{question_data['question']}\n"
-                f"{divider()}\n"
-                f"⏱️ *7 SECONDS!*"
-            )
-
-            # EDIT the previous message to show the new question
-            await game_msg.edit_text(q_text, parse_mode="Markdown")
-            
-            trivia_eng.question_start_time = time.time()
-            
-            # Wait for 7 seconds
-            for _ in range(TRIVIA_QUESTION_DURATION):
-                await asyncio.sleep(1)
-                if trivia_eng.force_stop: break
-            
-            trivia_eng.active = False
-
-            # --- Determine Winner Logic ---
-            correct_player_name = None
-            for user_id, (answer, time_taken) in trivia_eng.player_answers.items():
-                if trivia_eng.normalize_answer(answer) == trivia_eng.normalize_answer(question_data['answer']):
-                    correct_player_name = trivia_eng.scores.get(user_id, {}).get("name", "Player")
-                    # ... (points logic from previous code) ...
-                    break
-
-            # Show Result in the SAME message
-            if correct_player_name:
-                res_text = f"✅ *CORRECT!*\n🎯 {correct_player_name} got it!\n📝 Answer: {question_data['answer'].upper()}"
-            else:
-                res_text = f"⏰ *TIME'S UP!*\n📝 Correct Answer: *{question_data['answer'].upper()}*"
-
-            await game_msg.edit_text(res_text, parse_mode="Markdown")
-            
-            # Wait 3 seconds before the next loop EDITS this message again
-            await asyncio.sleep(TRIVIA_ANSWER_DISPLAY_TIME)
-
-    except Exception as e:
-        print(f"Trivia Error: {e}")
-        if game_msg:
-            await game_msg.edit_text(f"❌ *Game Error:* {e}", parse_mode="Markdown")
-    
-    finally:
-        # This block ALWAYS runs, ensuring the engine resets even if it crashes
-        trivia_eng.active = False
-        trivia_eng.running = False
-        final_scores = "🏁 *GAME OVER*\nCheck the leaderboard!"
-        if game_msg:
-            await game_msg.edit_text(final_scores, parse_mode="Markdown")
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 #  TEXT HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
@@ -929,6 +846,27 @@ def _cmd(*names):
 # ═══════════════════════════════════════════════════════════════════════════
 #  COMMAND HANDLERS  (all registered before on_group_message)
 # ═══════════════════════════════════════════════════════════════════════════
+@dp.message(_cmd("trivia"))
+async def cmd_trivia(message: types.Message):
+    if message.chat.type not in ("group", "supergroup"):
+        await message.answer(
+            "🧠 *GameMaster:* \"Trivia is a GROUP activity. Take it to the chat.\"",
+            parse_mode="Markdown"
+        )
+        return
+    trivia_eng = get_trivia_engine(message.chat.id)
+    if trivia_eng.running:
+        await message.answer(
+            "🧠 *GameMaster:* \"Trivia is ALREADY running. Pay attention.\"",
+            parse_mode="Markdown"
+        )
+        return
+    # Auto-register caller if needed
+    u_id = str(message.from_user.id)
+    if not get_user(u_id):
+        username = message.from_user.first_name or message.from_user.username or "Player"
+        register_user(u_id, username)
+    asyncio.create_task(trivia_game_loop(message.chat.id))
 
 @dp.message(_cmd("fusion"))
 async def cmd_fusion(message: types.Message):
@@ -1432,218 +1370,248 @@ async def cmd_show_jammers(message: types.Message):
     await message.answer(response, parse_mode="Markdown")
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  TRIVIA GAME LOOP
+#  TRIVIA GAME LOOP  (fixed)
 # ═══════════════════════════════════════════════════════════════════════════
 
 TRIVIA_QUESTIONS_PER_GAME = 3
-TRIVIA_QUESTION_DURATION = 7  # seconds
-TRIVIA_ANSWER_DISPLAY_TIME = 3  # seconds
-TRIVIA_ROUND_TIMEOUT = 180  # 3 minutes total per game
+TRIVIA_QUESTION_DURATION = 7   # seconds per question
+TRIVIA_ANSWER_DISPLAY_TIME = 3  # seconds to show result before next question
+TRIVIA_ROUND_TIMEOUT = 180      # 3-minute ceiling (safety net)
 
 async def trivia_game_loop(chat_id: int):
-    """Main trivia game loop: 3 questions, 7 seconds each."""
+    """
+    Main trivia game loop — 3 questions, 7 seconds each.
+
+    FIX 3: Uses reset_for_question() instead of reset() between questions
+            so accumulated scores survive across all 3 rounds.
+    FIX 4: Sends ONE dashboard message at the start, then EDITS it after
+            every question so the scoreboard is persistent (like fusion).
+    FIX 5: xp_reward is defined unconditionally before the result block.
+    """
     trivia_eng = get_trivia_engine(chat_id)
+
+    # Full reset at the START of a new game (wipes any previous game's data)
+    trivia_eng.reset()
     trivia_eng.running = True
     trivia_eng.empty_rounds = 0
-    
+
+    # This message_id tracks the ONE persistent scoreboard we edit in-place
+    dashboard_message_id = None
+
     try:
+        # ── Intro ────────────────────────────────────────────────────────
         await bot.send_message(
             chat_id,
             "🧠 *TRIVIA GAME STARTING!*\n"
             f"{divider()}\n"
             f"📋 *3 QUESTIONS* — 7 seconds each\n"
             f"✅ *CORRECT ANSWER:* +10 pts, +20 XP\n"
-            f"⚡ *TIME BONUS:* <2s: +3 pts | <3s: +2 pts | <4s: +1 pts\n"
+            f"⚡ *TIME BONUS:* <2s: +3 pts | <3s: +2 pts | <4s: +1 pt\n"
             f"🔥 *COMBO:* 3-streak: +5 bonus | 5-streak: DOUBLE POINTS\n"
-            f"👑 *BOSS ROUND:* Random chance for 30-pt boss question!\n"
+            f"👑 *BOSS ROUND:* Random chance — 30-pt question!\n"
             f"{divider()}\n\n"
             f"*Get ready...*",
             parse_mode="Markdown"
         )
-        
         await asyncio.sleep(2)
-        
-        # Main game loop: 3 questions
+
+        # ── Send the persistent scoreboard placeholder ───────────────────
+        placeholder_msg = await bot.send_message(
+            chat_id,
+            "📊 *SCOREBOARD*\n" + divider() + "\n_Waiting for first correct answer..._",
+            parse_mode="Markdown"
+        )
+        dashboard_message_id = placeholder_msg.message_id
+        trivia_eng.dashboard_msg_id = dashboard_message_id
+
+        # ── Main game loop ───────────────────────────────────────────────
         for question_num in range(1, TRIVIA_QUESTIONS_PER_GAME + 1):
             trivia_eng.question_number = question_num
-            trivia_eng.reset()
-            
-            # Pick a question
+
+            # FIX 3: Only clear per-question state; scores carry over!
+            trivia_eng.reset_for_question()
+
             question_data = trivia_eng.pick_question()
             trivia_eng.current_question = question_data
-            trivia_eng.correct_answers = set()
-            trivia_eng.player_answers = {}
             trivia_eng.active = True
-            
+
             boss_tag = "👑 *BOSS ROUND!* " if trivia_eng.is_boss_round else ""
-            
+
             # Display question
             await bot.send_message(
                 chat_id,
-                f"{boss_tag}*QUESTION {question_num}/3*\n"
+                f"{boss_tag}*QUESTION {question_num}/{TRIVIA_QUESTIONS_PER_GAME}*\n"
                 f"{divider()}\n"
                 f"❓ {question_data['question']}\n"
                 f"{divider()}\n"
-                f"⏱️ *7 SECONDS* — Answer now!",
+                f"⏱️ *{TRIVIA_QUESTION_DURATION} SECONDS* — Answer now!",
                 parse_mode="Markdown"
             )
-            
+
             trivia_eng.question_start_time = time.time()
-            
-            # Wait for 7 seconds for answers
-            for elapsed in range(TRIVIA_QUESTION_DURATION):
+
+            # Wait for answers
+            for _ in range(TRIVIA_QUESTION_DURATION):
                 await asyncio.sleep(1)
                 if trivia_eng.force_stop:
                     break
-            
-            question_end_time = time.time()
+
             trivia_eng.active = False
-            
-            # Determine who got it right (first correct answer only)
+
+            # FIX 5: xp_reward defined unconditionally so it's always in scope
+            xp_reward = 20
             correct_player = None
             correct_player_name = None
             correct_time = None
             correct_bonus_info = None
-            
+
             for user_id, (answer, time_taken) in trivia_eng.player_answers.items():
                 normalized_answer = trivia_eng.normalize_answer(answer)
                 normalized_correct = trivia_eng.normalize_answer(question_data['answer'])
-                
+
                 if normalized_answer == normalized_correct:
                     correct_player = user_id
-                    correct_player_name = trivia_eng.scores.get(user_id, {}).get("name", f"Player{user_id[:4]}")
+                    correct_player_name = trivia_eng.scores.get(user_id, {}).get(
+                        "name", f"Player{user_id[:4]}"
+                    )
                     correct_time = time_taken
-                    
-                    # Calculate points for this correct answer
-                    base_points = 10 if not trivia_eng.is_boss_round else 30
-                    xp_reward = 20
-                    
-                    correct_bonus_info = trivia_eng.add_score(user_id, correct_player_name, base_points, xp_reward, correct_time)
-                    break
-            
-            # Display result
-            if correct_player:
-                # Correct answer message
+
+                    base_points = 30 if trivia_eng.is_boss_round else 10
+                    correct_bonus_info = trivia_eng.add_score(
+                        user_id, correct_player_name, base_points, xp_reward, correct_time
+                    )
+                    break  # Only first correct answer counts per question
+
+            # ── Result message ───────────────────────────────────────────
+            if correct_player and correct_bonus_info:
                 time_display = f"{correct_time:.1f}"
                 streak_str = f" (Streak: {correct_bonus_info['streak']})"
-                
+
                 result_msg = (
                     f"✅ *CORRECT!*\n"
                     f"{divider()}\n"
-                    f"🎯 *{correct_player_name}* answered correctly in *{time_display}s*!\n"
-                    f"+{correct_bonus_info['total_points']} points (Base: {correct_bonus_info['base_points']}"
+                    f"🎯 *{correct_player_name}* answered in *{time_display}s*!\n"
+                    f"+{correct_bonus_info['total_points']} pts "
+                    f"(Base: {correct_bonus_info['base_points']}"
                 )
-                
                 if correct_bonus_info['time_bonus'] > 0:
                     result_msg += f" + {correct_bonus_info['time_bonus']} time"
-                
                 if correct_bonus_info['streak_bonus'] > 0:
                     result_msg += f" + {correct_bonus_info['streak_bonus']} streak"
-                
                 result_msg += f")\n+{xp_reward} XP{streak_str}\n"
-                
                 if correct_bonus_info['streak_msg']:
                     result_msg += f"🔥 {correct_bonus_info['streak_msg']}\n"
-                
-                result_msg += f"{divider()}"
+                result_msg += divider()
             else:
-                # Time's up, no correct answer
+                # Nobody answered correctly — reset all streaks
+                for user_id in trivia_eng.scores.keys():
+                    trivia_eng.reset_streak(user_id)
+
                 result_msg = (
                     f"⏰ *TIME'S UP!*\n"
                     f"{divider()}\n"
-                    f"❌ No one answered correctly!\n\n"
-                    f"📝 The correct answer is: *{question_data['answer'].upper()}*\n"
+                    f"❌ No one answered correctly.\n\n"
+                    f"📝 Answer: *{question_data['answer'].upper()}*\n"
                     f"{divider()}"
                 )
-                
-                # Reset streaks for all players
-                for user_id in trivia_eng.scores.keys():
-                    trivia_eng.reset_streak(user_id)
-            
+
             await bot.send_message(chat_id, result_msg, parse_mode="Markdown")
-            
-            # Display dashboard after each question
-            sorted_scores = sorted(trivia_eng.scores.items(), key=lambda x: x[1]['pts'], reverse=True)
+
+            # ── FIX 4: EDIT the persistent scoreboard in-place ──────────
+            sorted_scores = sorted(
+                trivia_eng.scores.items(), key=lambda x: x[1]['pts'], reverse=True
+            )
+            medals = ["🥇", "🥈", "🥉"]
+            board_text = f"📊 *SCOREBOARD — Q{question_num}/{TRIVIA_QUESTIONS_PER_GAME}*\n{divider()}\n"
+
             if sorted_scores:
-                dashboard_msg = f"📊 *LEADERBOARD AFTER QUESTION {question_num}/3*\n{divider()}\n"
-                medals = ["🥇", "🥈", "🥉"]
-                
-                for i, (user_id, scores) in enumerate(sorted_scores):
+                for i, (uid, s) in enumerate(sorted_scores):
                     medal = medals[i] if i < 3 else f"{i+1}."
-                    fire = "🔥" * min(scores['streak'], 5) if scores['streak'] > 0 else ""
-                    dashboard_msg += f"{medal} *{scores['name']}* — {scores['pts']} pts | {scores['xp']} XP | Answers: {scores['answers']} {fire}\n"
-                
-                dashboard_msg += f"{divider()}"
-                await bot.send_message(chat_id, dashboard_msg, parse_mode="Markdown")
-            
-            # Show answer for 3 seconds if there was a correct answer
-            if correct_player:
-                await asyncio.sleep(TRIVIA_ANSWER_DISPLAY_TIME)
+                    fire = "🔥" * min(s['streak'], 5) if s['streak'] > 0 else ""
+                    board_text += (
+                        f"{medal} *{s['name']}* — {s['pts']} pts | "
+                        f"{s['xp']} XP | ✅ {s['answers']} {fire}\n"
+                    )
             else:
-                await asyncio.sleep(2)
-        
-        # Game over - display results
+                board_text += "_No scores yet_\n"
+
+            board_text += divider()
+
+            try:
+                await bot.edit_message_text(
+                    board_text,
+                    chat_id=chat_id,
+                    message_id=dashboard_message_id,
+                    parse_mode="Markdown"
+                )
+            except Exception as edit_err:
+                # If edit fails (e.g. message too old), send fresh and track it
+                print(f"[TRIVIA] Dashboard edit failed: {edit_err} — sending fresh")
+                fresh = await bot.send_message(chat_id, board_text, parse_mode="Markdown")
+                dashboard_message_id = fresh.message_id
+                trivia_eng.dashboard_msg_id = dashboard_message_id
+
+            # Brief pause before next question
+            await asyncio.sleep(TRIVIA_ANSWER_DISPLAY_TIME if correct_player else 2)
+
+        # ── Game over ────────────────────────────────────────────────────
         trivia_eng.running = False
-        
-        # Sort scores and display leaderboard
-        sorted_scores = sorted(trivia_eng.scores.items(), key=lambda x: x[1]['pts'], reverse=True)
-        
+        sorted_scores = sorted(
+            trivia_eng.scores.items(), key=lambda x: x[1]['pts'], reverse=True
+        )
+
         if not sorted_scores:
-            result = (
+            final_result = (
                 f"🧠 *TRIVIA GAME OVER*\n"
                 f"{divider()}\n"
                 f"😑 Nobody scored. Pathetic.\n"
                 f"{divider()}"
             )
         else:
-            medals = ["🥇", "🥈", "🥉"]
-            result = f"🧠 *TRIVIA GAME OVER*\n{divider()}\n*FINAL LEADERBOARD*\n\n"
-            
-            for i, (user_id, scores) in enumerate(sorted_scores):
+            final_result = f"🧠 *TRIVIA GAME OVER*\n{divider()}\n*FINAL LEADERBOARD*\n\n"
+            for i, (uid, s) in enumerate(sorted_scores):
                 medal = medals[i] if i < 3 else f"{i+1}."
-                result += f"{medal} *{scores['name']}* — {scores['pts']} pts ({scores['xp']} XP)\n"
-            
-            result += f"\n{divider()}\n`!weekly` | `!trivia` for another round"
-        
-        await bot.send_message(chat_id, result, parse_mode="Markdown")
-        
-        # Update player stats in database
+                final_result += f"{medal} *{s['name']}* — {s['pts']} pts ({s['xp']} XP)\n"
+            final_result += f"\n{divider()}\n`/weekly` | `/trivia` for another round"
+
+        # Edit the scoreboard one final time with FINAL label
         try:
-            for user_id, scores in sorted_scores:
+            await bot.edit_message_text(
+                final_result,
+                chat_id=chat_id,
+                message_id=dashboard_message_id,
+                parse_mode="Markdown"
+            )
+        except Exception:
+            await bot.send_message(chat_id, final_result, parse_mode="Markdown")
+
+        # ── Persist scores to database ───────────────────────────────────
+        try:
+            for user_id, s in sorted_scores:
                 user = get_user(user_id)
                 if user:
-                    # Add points using the standard add_points function
-                    # This automatically updates weekly_points and all_time_points
-                    add_points(user_id, scores['pts'], scores['name'])
-                    
-                    # Add XP and check for level ups
-                    user['xp'] = user.get('xp', 0) + scores['xp']
-                    
-                    # Update level based on XP
+                    add_points(user_id, s['pts'], s['name'])
+                    user['xp'] = user.get('xp', 0) + s['xp']
                     new_level = (user['xp'] // 100) + 1
                     old_level = user.get('level', 1)
                     if new_level > old_level:
                         user['level'] = new_level
-                        # Notify level up
                         try:
                             await bot.send_message(
                                 chat_id,
-                                f"🎊 *LEVEL UP!* 🎊\n"
-                                f"{divider()}\n"
-                                f"*{scores['name']}* has reached *LEVEL {new_level}*!\n"
-                                f"🧠 *GameMaster:* \"Congratulations on the mediocre achievement.\"\n"
+                                f"🎊 *LEVEL UP!*\n{divider()}\n"
+                                f"*{s['name']}* reached *LEVEL {new_level}*!\n"
                                 f"{divider()}",
                                 parse_mode="Markdown"
                             )
-                        except:
+                        except Exception:
                             pass
-                    
                     save_user(user_id, user)
         except Exception as e:
             print(f"[ERROR] Updating trivia scores: {e}")
             import traceback
             traceback.print_exc()
-    
+
     except asyncio.CancelledError:
         pass
     except Exception as e:
@@ -1651,8 +1619,12 @@ async def trivia_game_loop(chat_id: int):
         import traceback
         traceback.print_exc()
         try:
-            await bot.send_message(chat_id, f"❌ *ERROR:* {e}\n\nType `/trivia` to start a new game.", parse_mode="Markdown")
-        except:
+            await bot.send_message(
+                chat_id,
+                f"❌ *ERROR:* {e}\n\nType `/trivia` to start a new game.",
+                parse_mode="Markdown"
+            )
+        except Exception:
             pass
     finally:
         trivia_eng.active = False

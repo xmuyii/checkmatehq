@@ -9,7 +9,7 @@ Features:
   - Time-based bonuses: <2s: +3, <3s: +2, <4s: +1
   - Combo system: 3 streak = +5 bonus, 5 streak = DOUBLE POINTS
   - Boss round (random, worth 30 points)
-  - Leaderboard updates after each round
+  - Leaderboard updates after each round (EDITS one persistent message)
   - Only accepts correct answers once per player per round
 """
 
@@ -116,20 +116,32 @@ class TriviaEngine:
         
         self.current_question = None
         self.question_number = 0
-        self.scores = {}  # {user_id: {"name": str, "pts": int, "xp": int, "streak": int}}
+        self.scores = {}  # {user_id: {"name": str, "pts": int, "xp": int, "streak": int, "answers": int}}
         self.correct_answers = set()  # Prevent multiple correct answers same question
         self.player_answers = {}  # {user_id: (answer, time_taken)}
         self.is_boss_round = False
         self.empty_rounds = 0
         self.question_start_time = 0
-        
+
+        # FIX: Persistent scoreboard message ID — edited in-place each question
+        self.dashboard_msg_id = None
+
+    def reset_for_question(self):
+        """Reset ONLY per-question state — scores persist across questions."""
+        # BUG WAS HERE: old reset() wiped self.scores every question.
+        # Now we only clear the per-question answer tracking.
+        self.correct_answers = set()
+        self.player_answers = {}
+        self.current_question = None
+
     def reset(self):
-        """Reset game state between rounds."""
+        """Full reset between complete game sessions (not between questions)."""
         self.scores = {}
         self.correct_answers = set()
         self.player_answers = {}
         self.current_question = None
-        
+        self.dashboard_msg_id = None
+
     def pick_question(self) -> dict:
         """Pick a random trivia question (10% chance for boss)."""
         self.is_boss_round = random.random() < 0.10
@@ -138,7 +150,6 @@ class TriviaEngine:
     
     def normalize_answer(self, text: str) -> str:
         """Normalize user answer for comparison - handles variations."""
-        # Remove extra whitespace and convert to lowercase
         text = text.strip().lower()
         
         # Remove common filler words
@@ -173,18 +184,16 @@ class TriviaEngine:
         bonus_pts = 0
         
         if streak >= 5:
-            # Double points
             bonus_pts = base_points
             bonus_msg = "🔥🔥 5-STREAK! DOUBLE POINTS!"
         elif streak >= 3:
-            # +5 bonus
             bonus_pts = 5
             bonus_msg = "🔥 3-STREAK! +5 BONUS!"
         
         return bonus_pts, bonus_msg
     
     def add_score(self, user_id: str, username: str, points: int, xp: int, time_taken: float = 0):
-        """Add score for a player."""
+        """Add score for a player. Creates player entry if first answer."""
         if user_id not in self.scores:
             self.scores[user_id] = {
                 "name": username,
@@ -194,21 +203,15 @@ class TriviaEngine:
                 "answers": 0
             }
         
-        # Increment streak
         self.scores[user_id]["streak"] += 1
         self.scores[user_id]["answers"] += 1
         
-        # Calculate time bonus
         time_bonus = self.calculate_bonus(time_taken)
-        
-        # Calculate streak bonus
         current_streak = self.scores[user_id]["streak"]
         streak_bonus, streak_msg = self.calculate_streak_bonus(current_streak, points)
         
-        # Total points: base + time bonus + streak bonus
         total_pts = points + time_bonus + streak_bonus
         
-        # Boss round doubles points
         if self.is_boss_round:
             total_pts = total_pts * 2
         
