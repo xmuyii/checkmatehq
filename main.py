@@ -5236,7 +5236,7 @@ async def cb_account_reset_confirm(callback: types.CallbackQuery):
         "losses": 0,
         "base_level": 1,
         "inventory": [],
-        "completed_tutorial": True
+        "completed_tutorial": True,
         "base_resources": {
             "resources": {"wood": 100, "bronze": 50, "iron": 25, "diamond": 10, "relics": 0},
             "food": 100,
