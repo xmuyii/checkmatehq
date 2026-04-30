@@ -41,6 +41,9 @@ from formatting import (
     level_up_announcement, battle_result, shield_status_visual, countdown_timer,
     military_deployment, territory_claimed, achievement_unlocked, loading_bar, sector_status
 )
+# ── Trivia System ─────────────────────────────────────────────────────────
+from trivia_system import TriviaEngine, get_trivia_engine, TRIVIA_QUESTIONS, BOSS_QUESTIONS
+
 from new_features import (
     get_shop_items,
     generate_daily_quests,
@@ -757,6 +760,128 @@ async def game_loop(chat_id: int):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  TRIVIA GAME LOOP
+# ═══════════════════════════════════════════════════════════════════════════
+import time
+import asyncio
+
+# Updated Constants
+TRIVIA_QUESTION_DURATION = 7  # seconds
+TRIVIA_ANSWER_DISPLAY_TIME = 3  # seconds
+TRIVIA_ROUND_TIMEOUT = 180  # 3 minutes (180 seconds)
+
+async def trivia_game_loop(chat_id: int):
+    """Main trivia game loop: Runs for 3 minutes, unlimited questions."""
+    trivia_eng = get_trivia_engine(chat_id)
+    trivia_eng.running = True
+    trivia_eng.empty_rounds = 0
+    
+    # Track time
+    start_time = time.time()
+    end_time = start_time + TRIVIA_ROUND_TIMEOUT
+    question_count = 0
+
+    try:
+        await bot.send_message(
+            chat_id,
+            "🧠 *TOPIC: TRIVIA*\n"
+            f"{divider()}\n"
+            f"⏱️ *DURATION:* 3 MINUTES\n"
+            f"📋 *UNLIMITED QUESTIONS* — 7 seconds each\n"
+            f"✅ *CORRECT ANSWER:* +10 pts, +20 XP\n"
+            f"🔥 *STREAKS:* Keep answering for bonus points!\n"
+            f"{divider()}\n\n"
+            f"*Starting the clock... Get ready!*",
+            parse_mode="Markdown"
+        )
+        
+        await asyncio.sleep(2)
+        
+        # MAIN LOOP: Run until time is up
+        while time.time() < end_time:
+            question_count += 1
+            trivia_eng.question_number = question_count
+            trivia_eng.reset()
+            
+            # Pick a question
+            question_data = trivia_eng.pick_question()
+            trivia_eng.current_question = question_data
+            trivia_eng.correct_answers = set()
+            trivia_eng.player_answers = {}
+            trivia_eng.active = True
+            
+            boss_tag = "👑 *BOSS ROUND!* " if trivia_eng.is_boss_round else ""
+            
+            # Display question
+            time_left = int(end_time - time.time())
+            await bot.send_message(
+                chat_id,
+                f"{boss_tag}*QUESTION {question_count}*\n"
+                f"⏳ *Time Left:* {time_left}s\n"
+                f"{divider()}\n"
+                f"❓ {question_data['question']}\n"
+                f"{divider()}\n"
+                f"⏱️ *7 SECONDS* — Answer now!",
+                parse_mode="Markdown"
+            )
+            
+            trivia_eng.question_start_time = time.time()
+            
+            # Wait for answers (7 seconds)
+            for _ in range(TRIVIA_QUESTION_DURATION):
+                await asyncio.sleep(1)
+                if trivia_eng.force_stop:
+                    break
+            
+            if trivia_eng.force_stop: break
+
+            trivia_eng.active = False
+            
+            # --- Logic to check correct answers (Same as your original code) ---
+            correct_player = None
+            correct_player_name = None
+            correct_time = None
+            correct_bonus_info = None
+            
+            for user_id, (answer, time_taken) in trivia_eng.player_answers.items():
+                if trivia_eng.normalize_answer(answer) == trivia_eng.normalize_answer(question_data['answer']):
+                    correct_player = user_id
+                    correct_player_name = trivia_eng.scores.get(user_id, {}).get("name", f"Player{user_id[:4]}")
+                    correct_time = time_taken
+                    base_points = 10 if not trivia_eng.is_boss_round else 30
+                    xp_reward = 20
+                    correct_bonus_info = trivia_eng.add_score(user_id, correct_player_name, base_points, xp_reward, correct_time)
+                    break
+            
+            # Result Message
+            if correct_player:
+                result_msg = (
+                    f"✅ *CORRECT!*\n"
+                    f"🎯 *{correct_player_name}* (+{correct_bonus_info['total_points']} pts)\n"
+                    f"🔥 Streak: {correct_bonus_info['streak']}"
+                )
+            else:
+                result_msg = f"⏰ *TIME'S UP!*\n📝 Answer: *{question_data['answer'].upper()}*"
+                for user_id in trivia_eng.scores.keys():
+                    trivia_eng.reset_streak(user_id)
+            
+            await bot.send_message(chat_id, result_msg, parse_mode="Markdown")
+
+            # Dashboard (Slightly more compact for high-speed rounds)
+            sorted_scores = sorted(trivia_eng.scores.items(), key=lambda x: x[1]['pts'], reverse=True)
+            if sorted_scores:
+                leaderboard = "\n".join([f"• {s['name']}: {s['pts']} pts" for u, s in sorted_scores[:3]])
+                await bot.send_message(chat_id, f"📊 *TOP 3:*\n{leaderboard}", parse_mode="Markdown")
+            
+            # Short pause before next question
+            await asyncio.sleep(TRIVIA_ANSWER_DISPLAY_TIME)
+
+        # --- Game Over Logic (Same as your original code) ---
+        trivia_eng.running = False
+        # ... [Rest of your score saving and final leaderboard logic] ...
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  TEXT HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1345,6 +1470,233 @@ async def cmd_show_jammers(message: types.Message):
     response += "_In a real game, this would show players with jammer active in this chat._"
     
     await message.answer(response, parse_mode="Markdown")
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  TRIVIA GAME LOOP
+# ═══════════════════════════════════════════════════════════════════════════
+
+TRIVIA_QUESTIONS_PER_GAME = 3
+TRIVIA_QUESTION_DURATION = 7  # seconds
+TRIVIA_ANSWER_DISPLAY_TIME = 3  # seconds
+TRIVIA_ROUND_TIMEOUT = 180  # 3 minutes total per game
+
+async def trivia_game_loop(chat_id: int):
+    """Main trivia game loop: 3 questions, 7 seconds each."""
+    trivia_eng = get_trivia_engine(chat_id)
+    trivia_eng.running = True
+    trivia_eng.empty_rounds = 0
+    
+    try:
+        await bot.send_message(
+            chat_id,
+            "🧠 *TRIVIA GAME STARTING!*\n"
+            f"{divider()}\n"
+            f"📋 *3 QUESTIONS* — 7 seconds each\n"
+            f"✅ *CORRECT ANSWER:* +10 pts, +20 XP\n"
+            f"⚡ *TIME BONUS:* <2s: +3 pts | <3s: +2 pts | <4s: +1 pts\n"
+            f"🔥 *COMBO:* 3-streak: +5 bonus | 5-streak: DOUBLE POINTS\n"
+            f"👑 *BOSS ROUND:* Random chance for 30-pt boss question!\n"
+            f"{divider()}\n\n"
+            f"*Get ready...*",
+            parse_mode="Markdown"
+        )
+        
+        await asyncio.sleep(2)
+        
+        # Main game loop: 3 questions
+        for question_num in range(1, TRIVIA_QUESTIONS_PER_GAME + 1):
+            trivia_eng.question_number = question_num
+            trivia_eng.reset()
+            
+            # Pick a question
+            question_data = trivia_eng.pick_question()
+            trivia_eng.current_question = question_data
+            trivia_eng.correct_answers = set()
+            trivia_eng.player_answers = {}
+            trivia_eng.active = True
+            
+            boss_tag = "👑 *BOSS ROUND!* " if trivia_eng.is_boss_round else ""
+            
+            # Display question
+            await bot.send_message(
+                chat_id,
+                f"{boss_tag}*QUESTION {question_num}/3*\n"
+                f"{divider()}\n"
+                f"❓ {question_data['question']}\n"
+                f"{divider()}\n"
+                f"⏱️ *7 SECONDS* — Answer now!",
+                parse_mode="Markdown"
+            )
+            
+            trivia_eng.question_start_time = time.time()
+            
+            # Wait for 7 seconds for answers
+            for elapsed in range(TRIVIA_QUESTION_DURATION):
+                await asyncio.sleep(1)
+                if trivia_eng.force_stop:
+                    break
+            
+            question_end_time = time.time()
+            trivia_eng.active = False
+            
+            # Determine who got it right (first correct answer only)
+            correct_player = None
+            correct_player_name = None
+            correct_time = None
+            correct_bonus_info = None
+            
+            for user_id, (answer, time_taken) in trivia_eng.player_answers.items():
+                normalized_answer = trivia_eng.normalize_answer(answer)
+                normalized_correct = trivia_eng.normalize_answer(question_data['answer'])
+                
+                if normalized_answer == normalized_correct:
+                    correct_player = user_id
+                    correct_player_name = trivia_eng.scores.get(user_id, {}).get("name", f"Player{user_id[:4]}")
+                    correct_time = time_taken
+                    
+                    # Calculate points for this correct answer
+                    base_points = 10 if not trivia_eng.is_boss_round else 30
+                    xp_reward = 20
+                    
+                    correct_bonus_info = trivia_eng.add_score(user_id, correct_player_name, base_points, xp_reward, correct_time)
+                    break
+            
+            # Display result
+            if correct_player:
+                # Correct answer message
+                time_display = f"{correct_time:.1f}"
+                streak_str = f" (Streak: {correct_bonus_info['streak']})"
+                
+                result_msg = (
+                    f"✅ *CORRECT!*\n"
+                    f"{divider()}\n"
+                    f"🎯 *{correct_player_name}* answered correctly in *{time_display}s*!\n"
+                    f"+{correct_bonus_info['total_points']} points (Base: {correct_bonus_info['base_points']}"
+                )
+                
+                if correct_bonus_info['time_bonus'] > 0:
+                    result_msg += f" + {correct_bonus_info['time_bonus']} time"
+                
+                if correct_bonus_info['streak_bonus'] > 0:
+                    result_msg += f" + {correct_bonus_info['streak_bonus']} streak"
+                
+                result_msg += f")\n+{xp_reward} XP{streak_str}\n"
+                
+                if correct_bonus_info['streak_msg']:
+                    result_msg += f"🔥 {correct_bonus_info['streak_msg']}\n"
+                
+                result_msg += f"{divider()}"
+            else:
+                # Time's up, no correct answer
+                result_msg = (
+                    f"⏰ *TIME'S UP!*\n"
+                    f"{divider()}\n"
+                    f"❌ No one answered correctly!\n\n"
+                    f"📝 The correct answer is: *{question_data['answer'].upper()}*\n"
+                    f"{divider()}"
+                )
+                
+                # Reset streaks for all players
+                for user_id in trivia_eng.scores.keys():
+                    trivia_eng.reset_streak(user_id)
+            
+            await bot.send_message(chat_id, result_msg, parse_mode="Markdown")
+            
+            # Display dashboard after each question
+            sorted_scores = sorted(trivia_eng.scores.items(), key=lambda x: x[1]['pts'], reverse=True)
+            if sorted_scores:
+                dashboard_msg = f"📊 *LEADERBOARD AFTER QUESTION {question_num}/3*\n{divider()}\n"
+                medals = ["🥇", "🥈", "🥉"]
+                
+                for i, (user_id, scores) in enumerate(sorted_scores):
+                    medal = medals[i] if i < 3 else f"{i+1}."
+                    fire = "🔥" * min(scores['streak'], 5) if scores['streak'] > 0 else ""
+                    dashboard_msg += f"{medal} *{scores['name']}* — {scores['pts']} pts | {scores['xp']} XP | Answers: {scores['answers']} {fire}\n"
+                
+                dashboard_msg += f"{divider()}"
+                await bot.send_message(chat_id, dashboard_msg, parse_mode="Markdown")
+            
+            # Show answer for 3 seconds if there was a correct answer
+            if correct_player:
+                await asyncio.sleep(TRIVIA_ANSWER_DISPLAY_TIME)
+            else:
+                await asyncio.sleep(2)
+        
+        # Game over - display results
+        trivia_eng.running = False
+        
+        # Sort scores and display leaderboard
+        sorted_scores = sorted(trivia_eng.scores.items(), key=lambda x: x[1]['pts'], reverse=True)
+        
+        if not sorted_scores:
+            result = (
+                f"🧠 *TRIVIA GAME OVER*\n"
+                f"{divider()}\n"
+                f"😑 Nobody scored. Pathetic.\n"
+                f"{divider()}"
+            )
+        else:
+            medals = ["🥇", "🥈", "🥉"]
+            result = f"🧠 *TRIVIA GAME OVER*\n{divider()}\n*FINAL LEADERBOARD*\n\n"
+            
+            for i, (user_id, scores) in enumerate(sorted_scores):
+                medal = medals[i] if i < 3 else f"{i+1}."
+                result += f"{medal} *{scores['name']}* — {scores['pts']} pts ({scores['xp']} XP)\n"
+            
+            result += f"\n{divider()}\n`!weekly` | `!trivia` for another round"
+        
+        await bot.send_message(chat_id, result, parse_mode="Markdown")
+        
+        # Update player stats in database
+        try:
+            for user_id, scores in sorted_scores:
+                user = get_user(user_id)
+                if user:
+                    # Add points using the standard add_points function
+                    # This automatically updates weekly_points and all_time_points
+                    add_points(user_id, scores['pts'], scores['name'])
+                    
+                    # Add XP and check for level ups
+                    user['xp'] = user.get('xp', 0) + scores['xp']
+                    
+                    # Update level based on XP
+                    new_level = (user['xp'] // 100) + 1
+                    old_level = user.get('level', 1)
+                    if new_level > old_level:
+                        user['level'] = new_level
+                        # Notify level up
+                        try:
+                            await bot.send_message(
+                                chat_id,
+                                f"🎊 *LEVEL UP!* 🎊\n"
+                                f"{divider()}\n"
+                                f"*{scores['name']}* has reached *LEVEL {new_level}*!\n"
+                                f"🧠 *GameMaster:* \"Congratulations on the mediocre achievement.\"\n"
+                                f"{divider()}",
+                                parse_mode="Markdown"
+                            )
+                        except:
+                            pass
+                    
+                    save_user(user_id, user)
+        except Exception as e:
+            print(f"[ERROR] Updating trivia scores: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    except asyncio.CancelledError:
+        pass
+    except Exception as e:
+        print(f"[ERROR] Trivia game loop failed: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            await bot.send_message(chat_id, f"❌ *ERROR:* {e}\n\nType `/trivia` to start a new game.", parse_mode="Markdown")
+        except:
+            pass
+    finally:
+        trivia_eng.active = False
+        trivia_eng.running = False
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -7556,6 +7908,41 @@ async def on_group_message(message: types.Message):
         if text.startswith("!") or text.startswith("/"): 
             print(f"[SKIP] Command detected")
             return
+    # ─────────────────────────────────────────────────────────────────────
+    # TRIVIA GAME HANDLING
+    # ─────────────────────────────────────────────────────────────────────
+    trivia_eng = get_trivia_engine(message.chat.id)
+    
+    if trivia_eng.active:
+        # During trivia, capture player answers
+        user = get_user(u_id)
+        if not user:
+            return
+        
+        username = user.get("username", message.from_user.first_name)
+        answer = text.strip()
+        time_taken = time.time() - trivia_eng.question_start_time
+        
+        # Only process if player hasn't answered yet
+        if u_id not in trivia_eng.player_answers:
+            trivia_eng.player_answers[u_id] = (answer, time_taken)
+            print(f"[TRIVIA] {username} answered: {answer} in {time_taken:.1f}s")
+            
+            # Validate answer immediately using normalized comparison
+            normalized_answer = trivia_eng.normalize_answer(answer)
+            correct_answer_raw = trivia_eng.current_question['answer']
+            # Normalize the correct answer too for flexible matching
+            normalized_correct = trivia_eng.normalize_answer(correct_answer_raw)
+            
+            if normalized_answer == normalized_correct:
+                # Correct answer!
+                response = f"✅ {username} got it in {time_taken:.1f}s!"
+                await message.reply(response)
+        else:
+            # Player already answered this question, ignore
+            pass
+        return  # Trivia is active, skip fusion logic
+
 
         # Get game engine and user
         eng = get_engine(message.chat.id)
