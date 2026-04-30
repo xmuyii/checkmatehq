@@ -87,35 +87,40 @@ def get_sector_display(sector_id, sectors=None) -> str:
 # ── User registration ──────────────────────────────────────────────────────
 
 def register_user(user_id, username):
-    """Create a fresh account.  Does NOT overwrite an existing one."""
-    all_data = load_data()
-    uid = str(user_id)
-    if uid in all_data:
-        # Already exists – only update the username if it changed
-        if all_data[uid].get("username") != username:
-            all_data[uid]["username"] = username
-            save_data(all_data)
-        return  # ← key fix: never wipe an existing account
+    """Create a fresh account.  Does NOT overwrite an existing one. Returns True on success."""
+    try:
+        all_data = load_data()
+        uid = str(user_id)
+        if uid in all_data:
+            # Already exists – only update the username if it changed
+            if all_data[uid].get("username") != username:
+                all_data[uid]["username"] = username
+                save_data(all_data)
+            return True  # ← already registered
 
-    all_data[uid] = {
-        "username":          username,
-        "all_time_points":   0,
-        "weekly_points":     0,
-        "week_start":        get_current_week_start().isoformat(),
-        "total_words":       0,
-        "silver":            0,
-        "xp":                0,
-        "level":             1,
-        "backpack_slots":    5,
-        "backpack_image":    "normal_backpack",
-        "inventory":         [],
-        "unclaimed_items":   [],
-        "sector":            None,
-        "registered":        True,
-        "completed_tutorial": False,
-        "last_level":        1,
-    }
-    save_data(all_data)
+        all_data[uid] = {
+            "username":          username,
+            "all_time_points":   0,
+            "weekly_points":     0,
+            "week_start":        get_current_week_start().isoformat(),
+            "total_words":       0,
+            "silver":            0,
+            "xp":                0,
+            "level":             1,
+            "backpack_slots":    5,
+            "backpack_image":    "normal_backpack",
+            "inventory":         [],
+            "unclaimed_items":   [],
+            "sector":            None,
+            "registered":        True,
+            "completed_tutorial": False,
+            "last_level":        1,
+        }
+        save_data(all_data)
+        return True  # ← registration succeeded
+    except Exception as e:
+        print(f"[REGISTER ERROR] Failed to register {user_id}: {e}")
+        return False  # ← registration failed
 
 
 def get_current_week_start() -> datetime:

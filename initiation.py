@@ -186,7 +186,21 @@ async def capture_username(message: types.Message, state: FSMContext):
     user_id  = str(message.from_user.id)
 
     # register_user is now safe — it won't overwrite existing accounts
-    register_user(user_id, username)
+    try:
+        reg_success = register_user(user_id, username)
+        if not reg_success:
+            await message.answer(
+                "🃏 *GameMaster:* \"Something went wrong with your registration. Try again.\"",
+                parse_mode="Markdown"
+            )
+            return
+    except Exception as e:
+        print(f"[TRIAL REGISTER ERROR] Failed to register {user_id}: {e}")
+        await message.answer(
+            f"⚠️ Registration error: {str(e)[:50]}",
+            parse_mode="Markdown"
+        )
+        return
 
     await state.update_data(username=username, scores_list=[])
     await message.answer(
