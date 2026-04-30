@@ -5083,101 +5083,82 @@ async def cb_account_save_menu(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda q: q.data.startswith("account_save_slot"))
 async def cb_account_save_slot(callback: types.CallbackQuery):
-    """Save game to slot."""
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
-    slot = callback.data.split("slot")[1]
+    slot = callback.data.split("slot")[1] # "1", "2", etc.
     
     if not user:
         await callback.answer("User not found", show_alert=True)
         return
+
+    # Initialize game_saves if it doesn't exist or is a string
+    if "game_saves" not in user or isinstance(user["game_saves"], str):
+        user["game_saves"] = {}
+
+    # Create the save snapshot
+    # We exclude the 'game_saves' itself from the backup to avoid "Inception" saves
+    snapshot = {k: v for k, v in user.items() if k != "game_saves"}
     
-    # Save to database (or file)
-    save_key = f"save_slot_{slot}"
-    user[save_key] = {
+    user["game_saves"][slot] = {
         "timestamp": int(time.time()),
-        "data": dict(user)
+        "data": snapshot
     }
-    save_user(u_id, user)
+
+    # Save only the updated game_saves column to the DB
+    save_user(u_id, {"game_saves": user["game_saves"]})
     
     await callback.answer(f"✅ Saved to Slot {slot}!", show_alert=True)
-    await callback.message.edit_text(
-        f"✅ *Game Saved!*\n\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"**Slot {slot}:** Checkpoint created\n"
-        f"━━━━━━━━━━━━━━━━━",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_account")],
-        ])
-    )
-
+    # ... rest of your edit_text code ...
 
 @dp.callback_query(lambda q: q.data == "account_load")
 async def cb_account_load(callback: types.CallbackQuery):
-    """Show load menu."""
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     
-    if not user:
-        await callback.answer("User not found", show_alert=True)
-        return
-    
+    # Handle JSON string issue from earlier
+    saves = user.get("game_saves", {})
+    if isinstance(saves, str):
+        saves = json.loads(saves)
+
     buttons = []
     for i in range(1, 5):
-        save_key = f"save_slot_{i}"
-        if save_key in user and user[save_key]:
-            ts = user[save_key].get("timestamp", 0)
-            dt = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
-            buttons.append([InlineKeyboardButton(text=f"📂 Slot {i} - {dt}", callback_data=f"account_load_slot{i}")])
+        slot_key = str(i)
+        if slot_key in saves:
+            ts = saves[slot_key].get("timestamp", 0)
+            dt = datetime.fromtimestamp(ts).strftime("%m/%d %H:%M")
+            buttons.append([InlineKeyboardButton(text=f"📂 Slot {i} ({dt})", callback_data=f"account_load_slot{i}")])
         else:
             buttons.append([InlineKeyboardButton(text=f"📂 Slot {i} - Empty", callback_data=f"account_load_slot{i}")])
-    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="menu_account")])
     
-    await callback.message.edit_text(
-        "📂 *LOAD GAME*\n\n"
-        "━━━━━━━━━━━━━━━━━\n"
-        "_Select a save slot._",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-    )
-    await callback.answer()
-
+    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="menu_account")])
+    await callback.message.edit_text("📂 *LOAD GAME*", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons), parse_mode="Markdown")
 
 @dp.callback_query(lambda q: q.data.startswith("account_load_slot"))
 async def cb_account_load_slot(callback: types.CallbackQuery):
-    """Load from save slot."""
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     slot = callback.data.split("slot")[1]
     
-    if not user:
-        await callback.answer("User not found", show_alert=True)
+    saves = user.get("game_saves", {})
+    if isinstance(saves, str):
+        saves = json.loads(saves)
+
+    if slot not in saves:
+        await callback.answer("❌ This slot is empty!", show_alert=True)
         return
+
+    # Extract the saved data
+    restored_data = saves[slot].get("data", {})
     
-    save_key = f"save_slot_{slot}"
-    if save_key not in user or not user[save_key]:
-        await callback.answer("❌ No save found in this slot!", show_alert=True)
-        return
-    
-    # Restore from backup
-    saved_data = user[save_key].get("data", {})
-    for key, value in saved_data.items():
-        if not key.startswith("save_slot_"):
-            user[key] = value
+    # Apply restored data to the current user object
+    for key, value in restored_data.items():
+        user[key] = value
+        
+    # Crucial: Push the full restored state to the DB
     save_user(u_id, user)
     
-    await callback.answer(f"✅ Loaded Slot {slot}!", show_alert=True)
-    await callback.message.edit_text(
-        f"✅ *Game Loaded!*\n\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"**Slot {slot}:** Restored\n"
-        f"━━━━━━━━━━━━━━━━━",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_account")],
-        ])
-    )
+    await callback.answer(f"✅ Slot {slot} Restored!", show_alert=True)
+    # ... rest of your edit_text code ...
 
 
 @dp.callback_query(lambda q: q.data == "account_reset_menu")
