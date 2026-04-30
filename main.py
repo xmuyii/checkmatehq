@@ -7849,7 +7849,7 @@ def build_player_dashboard(player_name: str, session: dict, user_id: str = None,
         dashboard += f"\n\n{rare_msg}"
     return dashboard
 
-# ═══════════════════════════════════════════════════════════════════════════
+# # ═══════════════════════════════════════════════════════════════════════════
 #  WORD-GUESS CATCH-ALL  ←── MUST BE THE LAST @dp.message HANDLER
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -7862,89 +7862,79 @@ async def on_group_message(message: types.Message):
         
         text = message.text.strip()
         u_id = str(message.from_user.id)
-        print(f"[MSG] '{text}' from {u_id}")
+        # print(f"[MSG] '{text}' from {u_id}")
 
         # Commands not matched above — skip silently
         if text.startswith("!") or text.startswith("/"): 
-            print(f"[SKIP] Command detected")
             return
-    # ─────────────────────────────────────────────────────────────────────
-    # TRIVIA GAME HANDLING
-    # ─────────────────────────────────────────────────────────────────────
-    trivia_eng = get_trivia_engine(message.chat.id)
-    
-    if trivia_eng.active:
-        # During trivia, capture player answers
-        user = get_user(u_id)
-        if not user:
-            return
-        
-        username = user.get("username", message.from_user.first_name)
-        answer = text.strip()
-        time_taken = time.time() - trivia_eng.question_start_time
-        
-        # Only process if player hasn't answered yet
-        if u_id not in trivia_eng.player_answers:
-            trivia_eng.player_answers[u_id] = (answer, time_taken)
-            print(f"[TRIVIA] {username} answered: {answer} in {time_taken:.1f}s")
-            
-            # Validate answer immediately using normalized comparison
-            normalized_answer = trivia_eng.normalize_answer(answer)
-            correct_answer_raw = trivia_eng.current_question['answer']
-            # Normalize the correct answer too for flexible matching
-            normalized_correct = trivia_eng.normalize_answer(correct_answer_raw)
-            
-            if normalized_answer == normalized_correct:
-                # Correct answer!
-                response = f"✅ {username} got it in {time_taken:.1f}s!"
-                await message.reply(response)
-        else:
-            # Player already answered this question, ignore
-            pass
-        return  # Trivia is active, skip fusion logic
 
+        # ─────────────────────────────────────────────────────────────────────
+        # TRIVIA GAME HANDLING
+        # ─────────────────────────────────────────────────────────────────────
+        trivia_eng = get_trivia_engine(message.chat.id)
+        
+        if trivia_eng.active:
+            user = get_user(u_id)
+            if not user:
+                # Optional: Auto-register for trivia too
+                username = message.from_user.first_name or "Player"
+                register_user(u_id, username)
+                user = get_user(u_id)
+            
+            username = user.get("username", message.from_user.first_name)
+            answer = text.strip()
+            time_taken = time.time() - trivia_eng.question_start_time
+            
+            # Only process if player hasn't answered yet
+            if u_id not in trivia_eng.player_answers:
+                trivia_eng.player_answers[u_id] = (answer, time_taken)
+                
+                # Validate answer
+                normalized_answer = trivia_eng.normalize_answer(answer)
+                normalized_correct = trivia_eng.normalize_answer(trivia_eng.current_question['answer'])
+                
+                if normalized_answer == normalized_correct:
+                    await message.reply(f"✅ {username} got it in {time_taken:.1f}s!")
+                
+                # Keep chat clean: Delete player's answer message
+                try:
+                    await asyncio.sleep(0.5)
+                    await message.delete()
+                except:
+                    pass
+            return  # Exit here so trivia answers don't trigger fusion logic
 
-        # Get game engine and user
+        # ─────────────────────────────────────────────────────────────────────
+        # FUSION GAME HANDLING
+        # ─────────────────────────────────────────────────────────────────────
         eng = get_engine(message.chat.id)
-        user = get_user(u_id)
-        print(f"[USER] {user.get('username') if user else 'NOT_REGISTERED'}, eng.active={eng.active}")
+        
+        # Check if round is active
+        if not eng.active:
+            return
 
-        # Must be registered
-        if not user: # If user is not found, automatically register them
+        user = get_user(u_id)
+        # Auto-Register Logic
+        if not user:
             username = message.from_user.first_name or message.from_user.username or "Player"
             try:
                 reg_success = register_user(u_id, username)
                 if reg_success:
-                    user = get_user(u_id) # Re-fetch user after registration
-                    print(f"[AUTO-REGISTER] User {u_id} ({username}) registered successfully.")
-                    await message.reply(f"✅ Welcome, {username}! You've been automatically registered. You can now play!", parse_mode="Markdown")
+                    user = get_user(u_id)
+                    await message.reply(f"✅ Welcome, {username}! You've been automatically registered.", parse_mode="Markdown")
                 else:
-                    print(f"[AUTO-REGISTER FAILED] Could not register {u_id} ({username})")
-                    await message.reply(f"❌ Registration failed. Please try again later or contact support.", parse_mode="Markdown")
                     return
             except Exception as e:
-                print(f"[AUTO-REGISTER ERROR] Exception during registration for {u_id}: {e}")
-                await message.reply(f"⚠️ Error during registration: {str(e)[:50]}. Please try /start", parse_mode="Markdown")
+                print(f"[AUTO-REGISTER ERROR] {e}")
                 return
-        
-        if not user: # Should not happen, but as a safeguard
-            print(f"[SKIP] User {u_id} could not be registered or retrieved")
-            return
 
-        # Check if round is active
-        if not eng.active:
-            print(f"[SKIP] Round not active")
-            return
-
-        # Validate word format (no spam check - count all valid words)
+        # Validate word format
         guess = text.lower().strip()
         if len(guess) < 3: 
-            print(f"[SKIP] Too short: {len(guess)} chars")
             return
         
         # Check if already used
         if guess in eng.used_words:
-            print(f"[SKIP] Already used this round")
             update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
             await message.reply(f"❌ `{guess.upper()}` was already guessed!", parse_mode="Markdown")
             return
@@ -7953,210 +7943,117 @@ async def on_group_message(message: types.Message):
         if not can_spell(guess, eng.letters):
             return
 
-        # ════════════════════════════════════════════════════════════════════
-        # WORD VALIDATION
-        # ════════════════════════════════════════════════════════════════════
-        
+        # Word Validation
         is_valid = word_in_dict(guess)
-        print(f"[CHECK] '{guess}' valid={is_valid} (dict size: {len(DICTIONARY)})")
-        
-        # Check if jammer is active EARLY
         has_jammer = is_perk_active(u_id, "jammer")
         
         if not is_valid:
-            # Invalid word - just return
             update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
-            # Delete message if jammer is active
             if has_jammer:
                 try:
-                    await asyncio.sleep(0.2)
-                    await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-                    print(f"[JAMMER] Deleted invalid word message from {u_id}")
-                except Exception as e:
-                    print(f"[JAMMER] Could not delete message: {e}")
+                    await message.delete()
+                except: pass
             return
 
-        # ════════════════════════════════════════════════════════════════════
-        # VALID WORD - Award points and process
-        # ════════════════════════════════════════════════════════════════════
-        
-        print(f"[VALID] `{guess}` found in dictionary - processing...")
-        
-        # DELETE PLAYER MESSAGE IMMEDIATELY IF JAMMER IS ACTIVE
+        # Processing Valid Word
         if has_jammer:
             try:
-                await asyncio.sleep(0.1)
-                await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-                print(f"[JAMMER] Deleted jammer message from {u_id}: {guess}")
-            except Exception as e:
-                print(f"[JAMMER] Could not delete message: {e}")
+                await message.delete()
+            except: pass
         
         eng.used_words.append(guess)
         eng.msg_count += 1
-        eng.words_repeated_count += 1
+        eng.words_repeated_count = getattr(eng, 'words_repeated_count', 0) + 1
         
-        if getattr(eng, 'words_repeated_count', 0) > 0 and eng.words_repeated_count % 4 == 0:
+        # Reminder of words every 4 successful guesses
+        if eng.words_repeated_count % 4 == 0:
             extra = f" *{eng.extra_letters[0]}* *{eng.extra_letters[1]}*" if len(getattr(eng, 'extra_letters', '')) >= 2 else ""
             await bot.send_message(message.chat.id, f"🃏 *The GameMaster:* THE WORDS ARE: *{eng.word1.lower()}* *{eng.word2.lower()}*{extra}" , parse_mode="Markdown")
             
-        # Calculate base points
+        # Calculate rewards
         pts = max(len(guess) - 2, 1)
         db_name = user.get("username", message.from_user.first_name)
         word_len = len(guess)
         
-        # Addictive Mechanics - DISABLED to prevent inflated XP
-        # login_result = handle_daily_login(u_id)
-        # if login_result["success"]:
-        #     daily_bonus = login_result["bonus"]
-        #     pts += daily_bonus // 10  # Reduced from // 5
-        #     print(f"[STREAK] {db_name}: Day {login_result['streak']}, +{login_result['bonus']} bonus")
-        
-        # combo = increment_combo(u_id)  # DISABLED - multiplier was inflating scores
-        # combo_mult = combo["multiplier"]
-        # combo_mult = min(combo_mult, 1.5)
-        # pts = int(pts * combo_mult)  # NO MULTIPLIER - base points only
-        
-        # Resources
         resources_awarded = {}
-        if word_len == 4:
-            resources_awarded = {'wood': 1}
-        elif word_len == 5:
-            resources_awarded = {'bronze': 1}
-        elif word_len == 6:
-            resources_awarded = {'iron': 1}
-        elif word_len == 7:
-            resources_awarded = {'diamond': 1}
+        resource_map = {4: 'wood', 5: 'bronze', 6: 'iron', 7: 'diamond'}
+        if word_len in resource_map:
+            resources_awarded[resource_map[word_len]] = 1
         elif word_len >= 8:
-            resources_awarded = {'relics': 1}
+            resources_awarded['relics'] = 1
         
-        # Streak/food
         streak_info = update_streak_and_award_food(u_id, correct=True, username=db_name)
-        
-        # Rare items
         rare_item = check_rare_drop()
-        rare_message = ""
+        
         if rare_item:
             add_unclaimed_item(u_id, rare_item["key"], 1)
-            rare_message = f"\n\n🎉 {format_rare_drop_notification(rare_item)}"
-        
-        # ════════════════════════════════════════════════════════════════
-        # PLAYER DASHBOARD — one editable message per player per round
-        # ════════════════════════════════════════════════════════════════
-        xp_awarded = pts * 2  # XP is 2x the points value
-        bitcoin_awarded = max(pts // 2, 1)  # Bitcoin is half points
 
-        # Initialize session on first word
+        # Update Session and Dashboard
+        xp_awarded = pts * 2
+        bitcoin_awarded = max(pts // 2, 1)
+
         if u_id not in eng.player_sessions:
             eng.player_sessions[u_id] = {
                 'pts': 0, 'xp': 0, 'word_count': 0,
                 'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
-                'food': 0, 'streak': 0,
-                'last_word': '', 'last_pts': 0, 'rare_message': ''
+                'food': 0, 'streak': 0, 'last_word': '', 'last_pts': 0, 'rare_message': ''
             }
 
         session = eng.player_sessions[u_id]
-        session['pts'] += pts
-        session['xp'] += xp_awarded
-        session['word_count'] += 1
-        session['last_word'] = guess
-        session['last_pts'] = pts
-        session['streak'] = streak_info.get('streak', 0)
-        session['food'] += streak_info.get('food_awarded', 0)
+        session.update({
+            'pts': session['pts'] + pts,
+            'xp': session['xp'] + xp_awarded,
+            'word_count': session['word_count'] + 1,
+            'last_word': guess,
+            'last_pts': pts,
+            'streak': streak_info.get('streak', 0),
+            'food': session['food'] + streak_info.get('food_awarded', 0)
+        })
+        
         for res_type, amount in resources_awarded.items():
-            session['resources'][res_type] = session['resources'].get(res_type, 0) + amount
+            session['resources'][res_type] += amount
 
-        # Rare drop (HTML-safe)
         if rare_item:
             session['rare_message'] = f"🎉 <b>RARE DROP!</b> {rare_item['name']}"
 
         dashboard_text = build_player_dashboard(db_name, session, u_id, has_jammer=has_jammer)
 
-        # Hybrid dashboard: edit for speed, reposition every 4th word
-        try:
-            word_num = session['word_count']
-            if u_id in eng.dashboard_msgs and word_num % 4 != 0:
-                # Fast edit (keeps position but instant)
-                try:
-                    await bot.edit_message_text(
-                        dashboard_text,
-                        chat_id=message.chat.id,
-                        message_id=eng.dashboard_msgs[u_id],
-                        parse_mode="HTML"
-                    )
-                except Exception:
-                    # Edit failed — send fresh
-                    msg = await bot.send_message(message.chat.id, dashboard_text, parse_mode="HTML")
-                    eng.dashboard_msgs[u_id] = msg.message_id
-            else:
-                # Every 4th word (or first word): delete old + send new at bottom
-                if u_id in eng.dashboard_msgs:
-                    try:
-                        await bot.delete_message(chat_id=message.chat.id, message_id=eng.dashboard_msgs[u_id])
-                    except Exception:
-                        pass
+        # Dashboard Edit/Send Logic
+        word_num = session['word_count']
+        if u_id in eng.dashboard_msgs and word_num % 4 != 0:
+            try:
+                await bot.edit_message_text(dashboard_text, chat_id=message.chat.id, message_id=eng.dashboard_msgs[u_id], parse_mode="HTML")
+            except:
                 msg = await bot.send_message(message.chat.id, dashboard_text, parse_mode="HTML")
                 eng.dashboard_msgs[u_id] = msg.message_id
-        except Exception as dash_err:
-            # Fallback to simple text
-            fb = f"✅ {guess.upper()} +{pts:,} pts ⭐ +{xp_awarded:,} XP"
-            await message.reply(fb)
-        print(f"[SENT] Dashboard to {db_name}")
+        else:
+            if u_id in eng.dashboard_msgs:
+                try: await bot.delete_message(chat_id=message.chat.id, message_id=eng.dashboard_msgs[u_id])
+                except: pass
+            msg = await bot.send_message(message.chat.id, dashboard_text, parse_mode="HTML")
+            eng.dashboard_msgs[u_id] = msg.message_id
         
-        # Save to database (background)
+        # Save to DB
         try:
+            add_points(u_id, pts, db_name)
+            add_xp(u_id, xp_awarded)
+            add_bitcoin(u_id, bitcoin_awarded, db_name)
+            # Update resources in background
             user_fresh = get_user(u_id)
             if user_fresh:
-                # Initialize base_resources if needed
-                if 'base_resources' not in user_fresh:
-                    user_fresh['base_resources'] = {'resources': {}, 'food': 0, 'current_streak': 0}
-                
-                base_res = user_fresh['base_resources']
-                if 'resources' not in base_res:
-                    base_res['resources'] = {}
-                
-                # Add resources
-                res_dict = base_res['resources']
-                for res_type, amount in resources_awarded.items():
-                    res_dict[res_type] = res_dict.get(res_type, 0) + amount
-                
-                # Save
+                base_res = user_fresh.get('base_resources', {'resources': {}})
+                res_dict = base_res.get('resources', {})
+                for rt, am in resources_awarded.items():
+                    res_dict[rt] = res_dict.get(rt, 0) + am
                 user_fresh['base_resources'] = base_res
                 save_user(u_id, user_fresh)
-                add_points(u_id, pts, db_name)
-                add_xp(u_id, xp_awarded)  # XP is 2x points
-                add_bitcoin(u_id, bitcoin_awarded, db_name)  # Bitcoin is half points
-                print(f"[DB] Saved for {db_name} - pts: {pts}, xp: {xp_awarded}, bitcoin: {bitcoin_awarded}")
         except Exception as e:
             print(f"[DB ERROR] {e}")
-        
-        # Update scores
-        if u_id not in eng.scores:
-            eng.scores[u_id] = {"pts": 0, "name": db_name, "user_id": u_id}
-        eng.scores[u_id]["pts"] += pts
-        
-        # (decoy logic moved to on_reaction)
-        
-        # Track word pattern in memory only (no DB column for this)
-        try:
-            word_pattern = detect_word_pattern(guess)
-            if u_id in eng.scores:
-                if 'word_patterns' not in eng.scores[u_id]:
-                    eng.scores[u_id]['word_patterns'] = {}
-                eng.scores[u_id]['word_patterns'][word_pattern] = eng.scores[u_id]['word_patterns'].get(word_pattern, 0) + 1
-        except Exception as e:
-            pass  # Pattern tracking is non-critical
-    
+
     except Exception as e:
-        print(f"[HANDLER ERROR] {type(e).__name__}: {e}")
+        print(f"[HANDLER ERROR] {e}")
         import traceback
         traceback.print_exc()
-        try:
-            await message.reply("That round is over!", parse_mode="Markdown")
-        except:
-            pass
-
-
-
 
 
 
