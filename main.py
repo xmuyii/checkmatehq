@@ -4457,22 +4457,21 @@ async def cmd_start(message: types.Message):
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     
-    # ... [Registration Logic Remains the Same] ...
+    # ... [Registration Logic] ...
 
-    # 1. THE PERSISTENT KEYBOARD (Replaces the phone keyboard)
-    # This stays at the bottom of the screen at all times.
+    # 1. THE PERSISTENT KEYBOARD (Bottom of screen)
+    # Note: Use EXACT text matches for your handlers below
     main_nav = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🎮 GAME"), KeyboardButton(text="⚔️ EQUIP")],
-            [KeyboardButton(text="🧬 RESEARCH"), KeyboardButton(text="🛍️ SHOP")],
-            [KeyboardButton(text="⚙️ OPTIONS")]
+            [KeyboardButton(text="[🎮 GAME]")], [KeyboardButton(text="[⚔️ EQUIP]")],
+            [KeyboardButton(text="[🧬 RESEARCH]")], [KeyboardButton(text="[🛍️ SHOP]")],
+            [KeyboardButton(text="[⚙️ OPTIONS]")]
         ],
-        resize_keyboard=True, # Makes the buttons fit nicely
+        resize_keyboard=True,
         input_field_placeholder="Select Module..."
     )
 
-    # 2. THE  INLINE KEYBOARD (Above the text)
-    # These are for specific data-driven actions.
+    # 2. THE INLINE KEYBOARD (Attached to the HUD message)
     inline_stats = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="👤 PROFILE", callback_data="menu_profile"),
@@ -4484,14 +4483,14 @@ async def cmd_start(message: types.Message):
         ]
     ])
 
-    # Data for the HUD
+    # HUD Data
     username = user.get("username", "Player")
     level = user.get("level", 1)
     bitcoin = user.get("bitcoin", 0)
     sector = user.get("sector", "Sector 64")
 
     hud_text = (
-        f"🃏[COMMAND CENTER V.64]\n"
+        f"🃏 <b>[COMMAND CENTER V.64]</b>\n"
         f"<code>--------------------------</code>\n"
         f"<b>OPERATIVE:</b> {username.upper()}\n"
         f"<b>STATUS:</b> ONLINE\n"
@@ -4499,20 +4498,62 @@ async def cmd_start(message: types.Message):
         f"<code>--------------------------</code>\n"
         f"⭐ <b>Level:</b> {level}\n"
         f"💰 <b>Bitcoin:</b> {bitcoin:,}\n\n"
-        f"<i> Select a module below.</i>"
+        f"<i>Select a module below.</i>"
     )
-
+    
+    # FIX: Attach the INLINE keyboard here, and the REPLY keyboard here.
+    # Telegram allows one message to carry both!
     await message.answer(
         hud_text,
         parse_mode="HTML",
-        reply_markup=main_nav # This attaches the bottom keyboard
+        reply_markup=main_nav # This sets the bottom keyboard
     )
     
-    # Send the stats/inline buttons as a second part or attached to the first
-    # To keep it "Godot-style", we send them together in the first message
-    await message.edit_reply_markup(reply_markup=inline_stats)
+    # Since a message can only have ONE reply_markup, 
+    # we send a second "status" message with the inline buttons
+    # or just combine them. To make it clean:
+    await message.answer(
+        "⚡ <b>SYSTEM HUD</b>",
+        parse_mode="HTML",
+        reply_markup=inline_stats # These are the buttons above the text
+    )
 
+# --- CORRECTED HANDLERS ---
+# Note: These MUST match the text inside the [ ] exactly.
 
+@dp.message(lambda message: message.text == "[🎮 GAME]")
+async def game_module(message: types.Message):
+    await message.answer("🕹️ Loading Fusion Engine... Use /fusion in the group!")
+
+@dp.message(lambda message: message.text == "[🛍️ SHOP]")
+async def shop_module(message: types.Message):
+    await message.answer("🛠️ ARMORY OPEN. Current Stock: [JAMMER] [SCANNER]")
+
+@dp.message(lambda message: message.text == "[⚔️ EQUIP]")
+async def equip_module(message: types.Message):
+    await message.answer("⚔️ LOADOUT: Select your active stickers/items.")
+
+@dp.message(lambda message: message.text == "[🧬 RESEARCH]")
+async def research_module(message: types.Message):
+    await message.answer("🧬 LAB: Researching new 4D encryption protocols...")
+
+@dp.message(lambda message: message.text == "[⚙️ OPTIONS]")
+async def options_module(message: types.Message):
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    
+    if not user:
+        await message.answer("❌ Error: Operative profile not found.")
+        return
+
+    text, markup = get_account_management_ui()
+    
+    # We use .answer() here because we are responding to a new message
+    await message.answer(
+        text,
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
 @dp.callback_query(lambda q: q.data == "start_tutorial")
 async def cb_start_tutorial(callback: types.CallbackQuery):
     """Begin new player tutorial."""
@@ -4745,17 +4786,10 @@ async def cb_menu_shop(callback: types.CallbackQuery):
     )
     await callback.answer()
 
+#this is a function for the menu account so that reply keyboard and inline keyboard can call it 
 
-@dp.callback_query(lambda q: q.data == "menu_account")
-async def cb_menu_account(callback: types.CallbackQuery):
-    """Show account management (save/load/reset)."""
-    u_id = str(callback.from_user.id)
-    user = get_user(u_id)
-    
-    if not user:
-        await callback.answer("User not found", show_alert=True)
-        return
-    
+def get_account_management_ui():
+    """Returns the text and markup for the Account Management screen."""
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💾 Save", callback_data="account_save_menu")],
         [InlineKeyboardButton(text="📂 Load", callback_data="account_load")],
@@ -4763,19 +4797,34 @@ async def cb_menu_account(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
     ])
     
-    await callback.message.edit_text(
+    text = (
         f"💎 *ACCOUNT MANAGEMENT*\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"*Manage your game saves and resets.*\n\n"
         f"**Save:** Create a checkpoint\n"
         f"**Load:** Restore from a save\n"
         f"**Reset:** Start fresh (⚠️ Careful!)\n"
-        f"━━━━━━━━━━━━━━━━━",
+        f"━━━━━━━━━━━━━━━━━"
+    )
+    return text, markup
+@dp.callback_query(lambda q: q.data == "menu_account")
+async def cb_menu_account(callback: types.CallbackQuery):
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    
+    if not user:
+        await callback.answer("User not found", show_alert=True)
+        return
+
+    text, markup = get_account_management_ui()
+    
+    # We use .edit_text() here to keep the Godot-style 'scene transition'
+    await callback.message.edit_text(
+        text,
         parse_mode="Markdown",
         reply_markup=markup
     )
     await callback.answer()
-
 
 @dp.callback_query(lambda q: q.data == "menu_map")
 async def cb_menu_map(callback: types.CallbackQuery):
@@ -4866,14 +4915,14 @@ async def cb_menu_back(callback: types.CallbackQuery):
     gold = user.get("gold", 0) if user else 0
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏰 Base", callback_data="menu_base"),
-         InlineKeyboardButton(text="🪵 Resources", callback_data="menu_resources")],
-        [InlineKeyboardButton(text="👤 Profile", callback_data="menu_profile"),
-         InlineKeyboardButton(text="🛍️ Shop", callback_data="menu_shop")],
-        [InlineKeyboardButton(text="⚔️ Guild", callback_data="menu_guild"),
-         InlineKeyboardButton(text="🗺️ Map", callback_data="menu_map")],
-        [InlineKeyboardButton(text="💎 Account", callback_data="menu_account"),
-         InlineKeyboardButton(text="🎒 Inventory", callback_data="menu_inventory")],
+        [InlineKeyboardButton(text="[🏰 BASE]", callback_data="menu_base"),
+         InlineKeyboardButton(text="[🪵 RESOURCES]", callback_data="menu_resources")],
+        [InlineKeyboardButton(text="[👤 PROFILE]", callback_data="menu_profile"),
+         InlineKeyboardButton(text="[🛍️ SHOP]", callback_data="menu_shop")],
+        [InlineKeyboardButton(text="[⚔️ ALLIANCE]", callback_data="menu_guild"),
+         InlineKeyboardButton(text="[🗺️ MAP]", callback_data="menu_map")],
+        [InlineKeyboardButton(text="[💎 ACCOUNT]", callback_data="menu_account"),
+         InlineKeyboardButton(text="[🎒 INVENTORY]", callback_data="menu_inventory")],
     ])
     
     await callback.message.edit_text(
@@ -4896,16 +4945,21 @@ async def cb_menu_back(callback: types.CallbackQuery):
 async def cb_shop_shields(callback: types.CallbackQuery):
     """Show shields for sale."""
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛡️ Iron Shield - 500₿₿", callback_data="buy_shield_iron")],
-        [InlineKeyboardButton(text="🛡️ Bronze Shield - 1000₿₿", callback_data="buy_shield_bronze")],
-        [InlineKeyboardButton(text="🛡️ Diamond Shield - 5000₿₿", callback_data="buy_shield_diamond")],
+        [InlineKeyboardButton(text="🛡️ 1-Hour Shield - 200₿", callback_data="buy_1hshield")],
+        [InlineKeyboardButton(text="🛡️ 3-Hour Shield- 500₿", callback_data="buy_3hshield")],
+        [InlineKeyboardButton(text="🛡️ 12-Hour Shield - 700₿", callback_data="buy_12hshield")],
+        [InlineKeyboardButton(text="🛡️ 1-Day Shield - 1000₿", callback_data="buy_1dshield")],
+        [InlineKeyboardButton(text="🛡️ 3-Day Shield - 2500₿", callback_data="buy_3dshield")],
+        [InlineKeyboardButton(text="🛡️ 7-Day Shield - 5000₿", callback_data="buy_7dshield")],
+        [InlineKeyboardButton(text="🛡️ Name Shield - 800₿", callback_data="buy_nameshield")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_shop")],
     ])
+            
     
     await callback.message.edit_text(
-        "🛡️ *SHIELDS*\n\n"
-        "━━━━━━━━━━━━━━━\n"
-        "*Protect your base from raids*",
+        "🛡️ [*SHIELDS*]\n\n"
+        "━━━━━━━━━━━━━━━━━━━\n"
+        "*Use shield for protections*",
         parse_mode="Markdown",
         reply_markup=markup
     )
