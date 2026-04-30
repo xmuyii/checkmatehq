@@ -5237,23 +5237,8 @@ async def cb_account_reset_confirm(callback: types.CallbackQuery):
         "base_level": 1,
         "inventory": [],
         "completed_tutorial": True,
-        "sector_captures": {},       # {sector_id: {"captured_at": timestamp, "troops_left": int}}
-        "enemies_defeated": 0,
-        "current_challenge": None,
-        "highest_streak": 0,
-        "gold": 0,
-        "bitcoin": 100,
-        "shield_status": "🛡️ ACTIVE",
-        "premium_credits": 0,
-        "total_words": 0,
-        "is_admin": False,
-        "is_vip": False,
-        "is_muted": False,
-        "mute_expiry": 0,
-        "active_perks": {},          # {"scrambler": {"expiry": timestamp, "duration": int, "type": "scrambler"}}
-        "shop_offers": {},
-        "active_daily_quests": {},
-        "unclaimed_items": {}, 
+        "shield_status" : active
+        "unclaimed_items" : {}
         "base_resources": {
             "resources": {"wood": 100, "bronze": 50, "iron": 25, "diamond": 10, "relics": 0},
             "food": 100,
