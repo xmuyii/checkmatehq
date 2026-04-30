@@ -237,7 +237,7 @@ def register_user(user_id, username: str):
             'military': json.dumps({}),
             'traps': json.dumps({}),
             'shield_status': 'UNPROTECTED',
-            'active_perks': json.dumps({}),
+            'active_perks': {},
             'chess_stats': json.dumps({
                 'rating': 1000,
                 'wins': 0,
