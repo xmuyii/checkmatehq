@@ -11,7 +11,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 # Try Supabase first, fall back to JSON for local development
 try:
     from supabase_db import (
-        get_user, register_user, add_silver, set_sector,
+        get_user, register_user, add_bitcoin, set_sector,
         add_inventory_item, get_profile, add_xp, save_user, load_sectors,
         add_unclaimed_item, get_sector_display, get_unclaimed_items
     )
@@ -20,7 +20,7 @@ except Exception as e:
     print(f"⚠️  Supabase connection failed: {e}")
     print("Fallback: Using JSON database")
     from database import (
-        get_user, register_user, add_silver, set_sector,
+        get_user, register_user, add_bitcoin, set_sector,
         add_inventory_item, get_profile, add_xp, save_user, load_sectors,
         add_unclaimed_item, get_sector_display, get_unclaimed_items
     )
@@ -307,11 +307,11 @@ async def end_trial_round(message: types.Message, state: FSMContext):
             f"10\\. *{username} — {score} pts*\n\n"
             f"🃏 *GameMaster:* \"HIGHEST SCORE\\. LOWEST RANK\\. "
             f"How *absurdly pathetic*\\! But I admire the cosmic joke\\. "
-            f"Take 100 silver\\.\""
+            f"Take 100 bitcoin\\.\""
         )
         await message.answer(lead_text, parse_mode="MarkdownV2")
         await asyncio.sleep(2)
-        add_silver(str(message.from_user.id), 100, username)
+        add_bitcoin(str(message.from_user.id), 100, username)
         await state.update_data(scores_list=scores_list)
         await show_backpack_choice(message, state)
     else:
@@ -337,7 +337,7 @@ async def show_backpack_choice(message: types.Message, state: FSMContext):
         [InlineKeyboardButton(text="🎒 Normal Backpack (FREE)",            callback_data="backpack_default")],
     ])
     await message.answer(
-        "💰 *100 SILVER AWARDED*\n\n"
+        "💰 *100 bitcoin AWARDED*\n\n"
         "🎒 *Choose your vessel:*\n"
         "• Queen's Satchel: 20 inventory slots (900 ₦) — *payment system coming soon*\n"
         "• Normal Backpack: 5 inventory slots (FREE)",
@@ -419,8 +419,8 @@ async def backpack_choice_handler(callback: types.CallbackQuery, state: FSMConte
         add_unclaimed_item(user_id, crate_type, amount=1, xp_reward=xp)
     add_unclaimed_item(user_id, "teleport", 1)
     
-    # Add starting silver
-    add_silver(user_id, 100, user.get("username", "Unknown"))
+    # Add starting bitcoin
+    add_bitcoin(user_id, 100, user.get("username", "Unknown"))
 
     item_count = len(get_unclaimed_items(user_id))
 
