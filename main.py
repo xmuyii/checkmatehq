@@ -1641,6 +1641,25 @@ async def trivia_game_loop(chat_id: int):
     finally:
         trivia_eng.running = False
 
+@dp.message(_cmd("leaderboard"))
+async def cmd_leaderboard(message: types.Message):
+    # Determine which game the user wants to see
+    # You can check if they are in the Trivia topic or Fusion topic
+    game = "trivia" if message.message_thread_id == 36623 else "fusion"
+    
+    players = get_game_weekly_leaderboard(game_type=game)
+    
+    text = f"🏆 *{game.upper()} WEEKLY TOP 10*\n{divider()}\n"
+    for i, p in enumerate(players):
+        text += f"{i+1}. {p['username']} — {p['points']} pts\n"
+    
+    await bot.send_message(
+        message.chat.id, 
+        text, 
+        parse_mode="Markdown",
+        message_thread_id=LEADERBOARDS_TOPIC_ID # Sends it to the Leaderboard section
+    )
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  CHESS SYSTEM - Internal Bot-Managed Games

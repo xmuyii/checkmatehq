@@ -236,7 +236,7 @@ def register_user(user_id, username: str):
             }),
             'military': json.dumps({}),
             'traps': json.dumps({}),
-            'shield_status': 'UNPROTECTED',
+            'shield_status': '⚠️ UNPROTECTED',
             'active_perks': {},
             'chess_stats': json.dumps({
                 'rating': 1000,
@@ -255,7 +255,36 @@ def register_user(user_id, username: str):
         import traceback
         traceback.print_exc()
         return False  # Registration failed
+def get_game_weekly_leaderboard(game_type="fusion", limit=10):
+    """Fetch weekly points for a specific game from Supabase."""
+    field = f"{game_type}_weekly_points"
+    # Query players where the specific game points are > 0
+    response = supabase.table("users").select(f"id, username, {field}")\
+        .gt(field, 0).order(field, desc=True).limit(limit).execute()
+    
+    players = []
+    for row in response.data:
+        players.append({
+            "id": str(row['id']),
+            "username": row.get('username', 'Unknown'),
+            "points": row.get(field, 0)
+        })
+    return players
 
+def get_game_alltime_leaderboard(game_type="fusion", limit=10):
+    """Fetch all-time points for a specific game from Supabase."""
+    field = f"{game_type}_all_time_points"
+    response = supabase.table("users").select(f"id, username, {field}")\
+        .gt(field, 0).order(field, desc=True).limit(limit).execute()
+    
+    players = []
+    for row in response.data:
+        players.append({
+            "id": str(row['id']),
+            "username": row.get('username', 'Unknown'),
+            "points": row.get(field, 0)
+        })
+    return players
 
 def ensure_bot_exists(username: str, initial_points: int = 0):
     """Ensure a bot account exists in the database. Returns user_id."""

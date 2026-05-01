@@ -113,7 +113,7 @@ def register_user(user_id, username):
             "trivia_all_time_points": 0,
             "trivia_week_start":      get_current_week_start().isoformat(),
             # ── Inventory/Items ────────────────────────────────────────
-            "silver":            0,
+            "bitcoin":            0,
             "xp":                0,
             "level":             1,
             "backpack_slots":    5,
@@ -142,7 +142,7 @@ def get_current_week_start() -> datetime:
     return week_sunday.replace(hour=23, minute=59, second=0, microsecond=0)
 
 
-# ── Points / XP / Silver ──────────────────────────────────────────────────
+# ── Points / XP / bitcoin ──────────────────────────────────────────────────
 
 def add_points(user_id, points, username, game_type="fusion"):
     """
@@ -197,21 +197,21 @@ def use_xp(user_id, amount) -> bool:
     save_user(user_id, user)
     return True
 
-def add_silver(user_id, amount, username=""):
+def add_bitcoin(user_id, amount, username=""):
     user = get_user(user_id)
     if not user:
         register_user(user_id, username)
         user = get_user(user_id)
-    user["silver"] = user.get("silver", 0) + amount
+    user["bitcoin"] = user.get("bitcoin", 0) + amount
     save_user(user_id, user)
 
-def use_silver(user_id, amount) -> bool:
+def use_bitcoin(user_id, amount) -> bool:
     user = get_user(user_id)
     if not user:
         return False
-    if user.get("silver", 0) < amount:
+    if user.get("bitcoin", 0) < amount:
         return False
-    user["silver"] -= amount
+    user["bitcoin"] -= amount
     save_user(user_id, user)
     return True
 
@@ -237,8 +237,8 @@ def update_username(user_id, new_username) -> bool:
 
 def upgrade_backpack(user_id) -> bool:
     user = get_user(user_id)
-    if user and user.get("silver", 0) >= 900:
-        user["silver"]         -= 900
+    if user and user.get("bitcoin", 0) >= 900:
+        user["bitcoin"]         -= 900
         user["backpack_slots"]  = 20
         user["backpack_image"]  = "queens_satchel"
         save_user(user_id, user)
@@ -392,7 +392,7 @@ def get_profile(user_id) -> dict | None:
         "level":           level,
         "xp_progress":     xp - xp_base,
         "xp_needed":       xp_next - xp_base,
-        "silver":          user.get("silver", 0),
+        "bitcoin":          user.get("bitcoin", 0),
         "sector":          user.get("sector"),
         "sector_display":  get_sector_display(user.get("sector")),
         "weekly_points":   user.get("weekly_points", 0),
@@ -477,17 +477,17 @@ def award_powerful_locked_item(user_id):
 # 3 letters = +1 wood
 # 4 letters = +1 bronze  
 # 5 letters = +1 iron
-# 6 letters = +1 silver (currency)
+# 6 letters = +1 diamond (currency)
 # 7+ letters = +1 relic
 
-RESOURCE_BY_LENGTH = {3: "wood", 4: "bronze", 5: "iron", 6: "silver_res", 7: "relics"}
+RESOURCE_BY_LENGTH = {3: "wood", 4: "bronze", 5: "iron", 6: "bitcoin_res", 7: "relics"}
 
 def add_resources_from_word_length(user_id, word_len: int, username: str = "") -> dict:
     user = get_user(user_id)
     if not user:
         return {}
     res_key = RESOURCE_BY_LENGTH.get(min(word_len, 7), "relics")
-    resources = user.get("resources", {"wood": 0, "bronze": 0, "iron": 0, "silver_res": 0, "relics": 0, "food": 0})
+    resources = user.get("resources", {"wood": 0, "bronze": 0, "iron": 0, "bitcoin_res": 0, "relics": 0, "food": 0})
     resources[res_key] = resources.get(res_key, 0) + 1
     user["resources"] = resources
     save_user(user_id, user)
