@@ -11,6 +11,11 @@ Set ENVIRONMENT environment variable to 'prod' or 'test' before running.
 
 import os
 from dotenv import load_dotenv
+GAME_TOPICS = {
+    "trivia": 36623,      # Topic ID for trivia
+    "fusion": 36621,      # Topic ID for fusion
+    "leaderboards": 36626  # Topic ID for leaderboards
+}
 
 # Load environment variables from .env file
 load_dotenv()

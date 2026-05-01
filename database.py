@@ -104,6 +104,15 @@ def register_user(user_id, username):
             "weekly_points":     0,
             "week_start":        get_current_week_start().isoformat(),
             "total_words":       0,
+            # ── Fusion Game Stats ──────────────────────────────────────
+            "fusion_weekly_points":   0,
+            "fusion_all_time_points": 0,
+            "fusion_week_start":      get_current_week_start().isoformat(),
+            # ── Trivia Game Stats ──────────────────────────────────────
+            "trivia_weekly_points":   0,
+            "trivia_all_time_points": 0,
+            "trivia_week_start":      get_current_week_start().isoformat(),
+            # ── Inventory/Items ────────────────────────────────────────
             "silver":            0,
             "xp":                0,
             "level":             1,
@@ -135,7 +144,11 @@ def get_current_week_start() -> datetime:
 
 # ── Points / XP / Silver ──────────────────────────────────────────────────
 
-def add_points(user_id, points, username):
+def add_points(user_id, points, username, game_type="fusion"):
+    """
+    Add points to player. game_type can be 'fusion' or 'trivia'.
+    By default adds to general/fusion points for backwards compatibility.
+    """
     all_data = load_data()
     uid = str(user_id)
     if uid not in all_data:
@@ -144,13 +157,26 @@ def add_points(user_id, points, username):
 
     user = all_data[uid]
     current_week = get_current_week_start().isoformat()
+    
+    # Reset weekly points if week changed
     if user.get("week_start") != current_week:
         user["weekly_points"] = 0
-        user["week_start"]    = current_week
+        user["week_start"] = current_week
+    
+    # Reset game-specific weekly points if week changed
+    if user.get(f"{game_type}_week_start") != current_week:
+        user[f"{game_type}_weekly_points"] = 0
+        user[f"{game_type}_week_start"] = current_week
 
+    # Add to all-time and weekly totals (generic)
     user["all_time_points"] = user.get("all_time_points", 0) + points
-    user["weekly_points"]   = user.get("weekly_points",   0) + points
-    user["total_words"]     = user.get("total_words",     0) + 1
+    user["weekly_points"] = user.get("weekly_points", 0) + points
+    user["total_words"] = user.get("total_words", 0) + 1
+    
+    # Add to game-specific totals
+    user[f"{game_type}_all_time_points"] = user.get(f"{game_type}_all_time_points", 0) + points
+    user[f"{game_type}_weekly_points"] = user.get(f"{game_type}_weekly_points", 0) + points
+    
     save_data(all_data)
 
 def add_xp(user_id, amount) -> bool:
@@ -397,6 +423,32 @@ def get_alltime_leaderboard() -> list:
         for uid, d in all_data.items()
     ]
     return sorted(players, key=lambda x: x["points"], reverse=True)[:10]
+
+
+# ── Game-Specific Leaderboards ────────────────────────────────────────────
+
+def get_game_weekly_leaderboard(game_type="fusion", limit=10) -> list:
+    """Get weekly leaderboard for a specific game (fusion or trivia)."""
+    all_data = load_data()
+    field = f"{game_type}_weekly_points"
+    players = [
+        {"id": uid, "username": d.get("username","Unknown"), "points": d.get(field, 0)}
+        for uid, d in all_data.items()
+        if d.get(field, 0) > 0  # Only include players with points
+    ]
+    return sorted(players, key=lambda x: x["points"], reverse=True)[:limit]
+
+
+def get_game_alltime_leaderboard(game_type="fusion", limit=10) -> list:
+    """Get all-time leaderboard for a specific game (fusion or trivia)."""
+    all_data = load_data()
+    field = f"{game_type}_all_time_points"
+    players = [
+        {"id": uid, "username": d.get("username","Unknown"), "points": d.get(field, 0)}
+        for uid, d in all_data.items()
+        if d.get(field, 0) > 0  # Only include players with points
+    ]
+    return sorted(players, key=lambda x: x["points"], reverse=True)[:limit]
 
 
 # ── Powerful locked items ─────────────────────────────────────────────────
