@@ -259,7 +259,7 @@ def get_game_weekly_leaderboard(game_type="fusion", limit=10):
     """Fetch weekly points for a specific game from Supabase."""
     field = f"{game_type}_weekly_points"
     # Query players where the specific game points are > 0
-    response = supabase.table("users").select(f"id, username, {field}")\
+    response = supabase.table("players").select(f"id, username, {field}")\
         .gt(field, 0).order(field, desc=True).limit(limit).execute()
     
     players = []
@@ -274,7 +274,7 @@ def get_game_weekly_leaderboard(game_type="fusion", limit=10):
 def get_game_alltime_leaderboard(game_type="fusion", limit=10):
     """Fetch all-time points for a specific game from Supabase."""
     field = f"{game_type}_all_time_points"
-    response = supabase.table("users").select(f"id, username, {field}")\
+    response = supabase.table("players").select(f"id, username, {field}")\
         .gt(field, 0).order(field, desc=True).limit(limit).execute()
     
     players = []

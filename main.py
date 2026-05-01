@@ -7874,6 +7874,12 @@ async def on_group_message(message: types.Message):
         # TRIVIA GAME HANDLING
         # ─────────────────────────────────────────────────────────────────────
         trivia_eng = get_trivia_engine(message.chat.id)
+        # Change line 7896 in main.py to this:
+        if trivia_eng.active and trivia_eng.current_question:
+            normalized_correct = trivia_eng.normalize_answer(trivia_eng.current_question['answer'])
+            # ... rest of validation logic ...
+        else:
+            return # Ignore the message if no question is active
         
         if trivia_eng.active:
             user = get_user(u_id)
