@@ -330,8 +330,9 @@ def ensure_bot_exists(username: str, initial_points: int = 0):
 
 # ── Points (weekly + all-time) ─────────────────────────────────────────────
 
-def add_points(user_id, points: int, username: str = ''):
-    """Accumulate points. Resets weekly bucket if the week has turned over."""
+def add_points(user_id, points: int, username: str = '', game_type: str = 'fusion'):
+    """Accumulate points. Resets weekly bucket if the week has turned over.
+    game_type can be 'fusion' or 'trivia'."""
     uid = str(user_id)
     user = get_user(uid)
     if not user:
@@ -340,20 +341,34 @@ def add_points(user_id, points: int, username: str = ''):
 
     this_week = _current_week_key()
     last_week = user.get('week_start', '')
-    
+
     # Compare dates explicitly - extract just the date portion for both
     last_week_date = last_week.split('T')[0] if last_week else ''
-    
+
     if last_week_date != this_week:
         # New week — wipe weekly bucket and update week marker
         user['weekly_points'] = 0
         user['week_start'] = this_week
         print(f"[POINTS] Week boundary for {username}: {last_week_date} → {this_week}")
-    
-    # Add the points (whether it's a new week or not)
+
+    # Add to general totals
     user['all_time_points'] = user.get('all_time_points', 0) + points
     user['weekly_points']   = user.get('weekly_points',   0) + points
     user['total_words']     = user.get('total_words',     0) + 1
+
+    # Add to game-specific totals (fusion_weekly_points / trivia_weekly_points etc.)
+    # These columns may not exist yet on all rows — use get() with 0 default
+    game_weekly_key  = f"{game_type}_weekly_points"
+    game_alltime_key = f"{game_type}_all_time_points"
+    game_week_key    = f"{game_type}_week_start"
+
+    if user.get(game_week_key, '').split('T')[0] != this_week:
+        user[game_weekly_key] = 0
+        user[game_week_key]   = this_week
+
+    user[game_weekly_key]  = user.get(game_weekly_key, 0) + points
+    user[game_alltime_key] = user.get(game_alltime_key, 0) + points
+
     save_user(uid, user)
 
 

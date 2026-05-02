@@ -159,28 +159,48 @@ def deactivate_perk(user_id: str, perk_type: str) -> dict:
 import json
 
 def check_and_cleanup_expired_perks(user_id):
+    """Deactivate any perks whose timer has run out and save the result."""
     user = get_user(user_id)
     if not user or "active_perks" not in user:
         return
 
     perks = user["active_perks"]
 
-    # FIX: If the database returned a string, convert it to a dictionary
+    # Deserialise if the DB returned a JSON string
     if isinstance(perks, str):
         try:
-            # Handle empty strings or 'none' placeholders
-            if not perks or perks.lower() == "none":
-                perks = {}
-            else:
-                perks = json.loads(perks)
+            perks = {} if (not perks or perks.lower() == "none") else json.loads(perks)
         except Exception:
             perks = {}
 
-    # Now .items() will work because 'perks' is a dictionary
-    expired_found = False
+    now = datetime.utcnow()
+    changed = False
+
     for perk_type, perk_data in perks.items():
-        # ... (your existing expiration logic) ...
-        pass
+        if not isinstance(perk_data, dict):
+            continue
+        if not perk_data.get("active"):
+            continue
+
+        # Check wall-clock expiry
+        try:
+            expires_at = datetime.fromisoformat(perk_data["expires_at"])
+            if now >= expires_at:
+                perk_data["active"] = False
+                changed = True
+                print(f"[PERK] {perk_type} expired for {user_id}")
+        except Exception:
+            pass
+
+        # Check use-count exhaustion
+        uses = perk_data.get("uses_remaining")
+        if uses is not None and uses <= 0:
+            perk_data["active"] = False
+            changed = True
+
+    if changed:
+        user["active_perks"] = perks
+        save_user(user_id, user)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

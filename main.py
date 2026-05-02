@@ -28,6 +28,7 @@ import asyncio
 import random
 import time
 import json
+import html as _html
 from datetime import datetime, timedelta
 import httpx
 import os
@@ -581,7 +582,8 @@ async def game_loop(chat_id: int):
                     f"🃏 You are to use the letters from these words to make new words: *{eng.word1}* + *{eng.word2}*.\n"
                     f"🃏 There are {possible_words_count} possible words.\n"
                     f"{crate_note}\n\n⏱️ *Game on* — Go hard.",
-                    parse_mode="Markdown"
+                    parse_mode="Markdown",
+                    message_thread_id=FUSION_TOPIC_ID
                 )
 
                 crate_dropped = False
@@ -605,7 +607,8 @@ async def game_loop(chat_id: int):
                         m = await bot.send_message(
                             chat_id,
                             crate_label,
-                            parse_mode="Markdown"
+                            parse_mode="Markdown",
+                            message_thread_id=FUSION_TOPIC_ID
                         )
                         eng.crate_msg_id   = m.message_id
                         eng.crate_claimers = []
@@ -621,7 +624,8 @@ async def game_loop(chat_id: int):
                         
                         await bot.send_message(
                             chat_id,
-                            f"🃏 *The GameMaster:* *THE WORDS ARE:* \n\n\n`{eng.word1}` + `{eng.word2}`\n\n", parse_mode="Markdown")
+                            f"🃏 *The GameMaster:* *THE WORDS ARE:* \n\n\n`{eng.word1}` + `{eng.word2}`\n\n", parse_mode="Markdown",
+                            message_thread_id=FUSION_TOPIC_ID)
 
                         # After sending word pair, wait a bit then send extra letters
                         await asyncio.sleep(0.1)
@@ -630,7 +634,8 @@ async def game_loop(chat_id: int):
                             f"🃏 *The GameMaster:* You can add these extra letters as well \n `{eng.extra_letters[0]}` `{eng.extra_letters[1]}`\n\n"
                             f"🃏 There are now {new_possible_count} possible words\n\n"
                             f"🃏 The round will end in 60 seconds.",
-                            parse_mode="Markdown"
+                            parse_mode="Markdown",
+                            message_thread_id=FUSION_TOPIC_ID
                         )
 
                 eng.active = False
@@ -1522,124 +1527,160 @@ TRIVIA_TOPIC_ID = 36623  # Get from group settings
 FUSION_TOPIC_ID = 36621  # Get from group settings
 LEADERBOARDS_TOPIC_ID = 36626
 async def trivia_game_loop(chat_id: int):
+    import traceback as _tb
     trivia_eng = get_trivia_engine(chat_id)
-    trivia_eng.reset()
+    trivia_eng.reset()           # clears scores, player_answers, dashboard_msg_id
     trivia_eng.running = True
-    trivia_eng.empty_rounds = 0
-    dashboard_message_id = None
 
     try:
-        # --- Load Winners Logic ---
-        last_winners = []
-        # ... (Your existing file loading logic is fine here) ...
-
-        winners_text = ""
-        if last_winners:
-            winners_text = "🏆 *LAST WEEK'S TOP TRIVIA PLAYERS* 🏆\n"
-            for i, p in enumerate(last_winners[:3]):
-                medal = ["🥇", "🥈", "🥉"][i]
-                safe_name = p.get('username', 'Unknown').replace("_", "\\_")
-                winners_text += f"{medal} {safe_name} — {p.get('points', 0):,} pts\n"
-            winners_text += f"{divider()}\n\n"
-
         # --- Intro Message ---
         await bot.send_message(
             chat_id,
-            f"{winners_text}🧠 *TRIVIA GAME STARTING!*\n"
-            f"{divider()}\n📋 *10 QUESTIONS* — 10s each\n"
-            f"✅ *CORRECT:* +10 pts, +20 XP\n{divider()}\n*Get ready...*",
-            parse_mode="Markdown",
+            f"🧠 <b>TRIVIA GAME STARTING!</b>\n"
+            f"━━━━━━━━━━━━━━━━━\n"
+            f"📋 <b>{TRIVIA_QUESTIONS_PER_GAME} QUESTIONS</b> — {TRIVIA_QUESTION_DURATION}s each\n"
+            f"⚡ First correct answer wins!\n"
+            f"✅ Normal: +10 pts | 👑 Boss: +20 pts\n"
+            f"🔥 3-streak: +5 bonus | 🔥🔥 5-streak: DOUBLE POINTS\n"
+            f"⏱️ Speed bonuses: &lt;2s +3 | &lt;3s +2 | &lt;4s +1\n"
+            f"━━━━━━━━━━━━━━━━━\n<i>Get ready...</i>",
+            parse_mode="HTML",
             message_thread_id=TRIVIA_TOPIC_ID
         )
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
 
-        # --- Scoreboard Placeholder ---
+        # --- Persistent scoreboard placeholder (will be edited each question) ---
         placeholder_msg = await bot.send_message(
             chat_id,
-            "📊 *SCOREBOARD*\n" + divider() + "\n_Waiting for first correct answer..._",
-            parse_mode="Markdown",
+            "📊 <b>SCOREBOARD</b>\n━━━━━━━━━━━━━━━━━\n<i>Waiting for first correct answer...</i>",
+            parse_mode="HTML",
             message_thread_id=TRIVIA_TOPIC_ID
         )
-        dashboard_message_id = placeholder_msg.message_id
+        # dashboard_msg_id is the correct attribute on TriviaEngine
+        trivia_eng.dashboard_msg_id = placeholder_msg.message_id
 
-        # --- Main Loop ---
+        # --- Main question loop ---
         for question_num in range(1, TRIVIA_QUESTIONS_PER_GAME + 1):
+            if trivia_eng.force_stop:
+                break
+
             trivia_eng.question_number = question_num
-            trivia_eng.reset_for_question()
+            trivia_eng.reset_for_question()   # clears player_answers & correct_answers only
             question_data = trivia_eng.pick_question()
+            trivia_eng.current_question = question_data   # on_group_message reads this
             trivia_eng.active = True
 
-            # Delay message (sent to TRIVIA TOPIC)
+            # Inter-question delay (skip before Q1)
             if question_num > 1:
-                delay = random.choice([5, 10, 20])
+                delay = random.choice([5, 8, 10])
                 await bot.send_message(
-                    chat_id, 
-                    f"⏳ Next question in *{delay}* seconds...", 
-                    parse_mode="Markdown",
+                    chat_id,
+                    f"⏳ Next question in <b>{delay}s</b>...",
+                    parse_mode="HTML",
                     message_thread_id=TRIVIA_TOPIC_ID
                 )
                 await asyncio.sleep(delay)
 
-            # Question Display
-            boss_tag = "👑 *BOSS ROUND!* " if trivia_eng.is_boss_round else ""
+            # Send question
+            boss_tag = "👑 <b>BOSS ROUND!</b> " if trivia_eng.is_boss_round else ""
+            q_text = _html.escape(question_data['question'])
             await bot.send_message(
                 chat_id,
-                f"{boss_tag}*QUESTION {question_num}/{TRIVIA_QUESTIONS_PER_GAME}*\n"
-                f"{divider()}\n❓ {question_data['question']}\n{divider()}",
-                parse_mode="Markdown",
+                f"{boss_tag}<b>QUESTION {question_num}/{TRIVIA_QUESTIONS_PER_GAME}</b>\n"
+                f"━━━━━━━━━━━━━━━━━\n"
+                f"❓ {q_text}\n"
+                f"━━━━━━━━━━━━━━━━━",
+                parse_mode="HTML",
                 message_thread_id=TRIVIA_TOPIC_ID
             )
 
             trivia_eng.question_start_time = time.time()
+
+            # Tick through the question timer; on_group_message handles answers in real time
             for _ in range(TRIVIA_QUESTION_DURATION):
                 await asyncio.sleep(1)
-                if trivia_eng.force_stop: break
-            
+                if trivia_eng.force_stop:
+                    break
+
             trivia_eng.active = False
-            
-            # --- Result Calculation ---
-            correct_player_id = None
-            # (Insert your logic here to find the first correct player from player_answers)
-            # For this example, I'm assuming you find 'correct_player_id' and 'bonus_data'
-            
-            if correct_player_id:
-                result_msg = f"✅ *CORRECT!*\n🎯 *Someone* got it!" # Simplify for brevity
+            trivia_eng.current_question = None
+
+            # --- Time-up reveal ---
+            correct_ans = _html.escape(question_data['answer'].upper())
+            # player_answers stores (raw_answer, time_taken) 2-tuples (set by on_group_message)
+            # correct_answers is the set of uids who answered correctly
+            first_correct_uid = None
+            best_time = float('inf')
+            for uid in trivia_eng.correct_answers:
+                if uid in trivia_eng.player_answers:
+                    t = trivia_eng.player_answers[uid][1]
+                    if t < best_time:
+                        best_time = t
+                        first_correct_uid = uid
+
+            if first_correct_uid:
+                winner_name = _safe_name(
+                    trivia_eng.scores.get(first_correct_uid, {}).get('name', 'Someone')
+                )
+                result_msg = (
+                    f"⏰ <b>TIME'S UP!</b>\n"
+                    f"✅ <b>{winner_name}</b> was first correct ({best_time:.1f}s)\n"
+                    f"📝 Answer: <b>{correct_ans}</b>"
+                )
             else:
-                result_msg = f"⏰ *TIME'S UP!*\n📝 Answer: *{question_data['answer'].upper()}*"
+                result_msg = (
+                    f"⏰ <b>TIME'S UP!</b>\n"
+                    f"❌ Nobody got it!\n"
+                    f"📝 Answer: <b>{correct_ans}</b>"
+                )
 
             await bot.send_message(
-                chat_id, 
-                result_msg, 
-                parse_mode="Markdown", 
+                chat_id, result_msg,
+                parse_mode="HTML",
                 message_thread_id=TRIVIA_TOPIC_ID
             )
 
-            # --- Update Scoreboard ---
-            board_text = f"📊 *SCOREBOARD — Q{question_num}/{TRIVIA_QUESTIONS_PER_GAME}*\n{divider()}\n"
-            # ... (Logic to build board_text from trivia_eng.scores) ...
+            # Update persistent scoreboard after each question
+            await _update_trivia_scoreboard(chat_id, trivia_eng)
 
-            try:
-                await bot.edit_message_text(
-                    board_text,
-                    chat_id=chat_id,
-                    message_id=dashboard_message_id,
-                    parse_mode="Markdown"
+        # --- Game over ---
+        trivia_eng.active = False
+        if trivia_eng.scores:
+            sorted_scores = sorted(trivia_eng.scores.items(), key=lambda x: x[1]['pts'], reverse=True)
+            final_text = "🏆 <b>TRIVIA GAME OVER — FINAL RESULTS</b>\n━━━━━━━━━━━━━━━━━\n"
+            medals = ["🥇", "🥈", "🥉"]
+            for i, (uid, data) in enumerate(sorted_scores[:10]):
+                medal = medals[i] if i < 3 else f"{i + 1}."
+                # TriviaEngine.add_score() uses 'answers' key, not 'correct'
+                correct_count = data.get('answers', data.get('correct', 0))
+                final_text += (
+                    f"{medal} <b>{_safe_name(data['name'])}</b> — "
+                    f"{data['pts']} pts ({correct_count} correct)\n"
                 )
-            except Exception:
-                # If edit fails, send a new one in the TOPIC
-                new_dash = await bot.send_message(
-                    chat_id, 
-                    board_text, 
-                    parse_mode="Markdown",
-                    message_thread_id=TRIVIA_TOPIC_ID
-                )
-                dashboard_message_id = new_dash.message_id
+                if i < 3:
+                    try:
+                        add_unclaimed_item(uid, "super_crate", 1)
+                    except Exception:
+                        pass
+            await bot.send_message(
+                chat_id, final_text, parse_mode="HTML",
+                message_thread_id=TRIVIA_TOPIC_ID
+            )
+        else:
+            await bot.send_message(
+                chat_id,
+                "🧠 <b>Trivia ended!</b>\nNo correct answers this game. Try harder next time!",
+                parse_mode="HTML",
+                message_thread_id=TRIVIA_TOPIC_ID
+            )
 
     except Exception as e:
-        print(f"Loop Error: {e}")
-        traceback.print_exc()
+        print(f"[TRIVIA LOOP ERROR] {e}")
+        _tb.print_exc()
     finally:
         trivia_eng.running = False
+        trivia_eng.active = False
+        trivia_eng.current_question = None
 
 @dp.message(_cmd("leaderboard"))
 async def cmd_leaderboard(message: types.Message):
@@ -7775,11 +7816,19 @@ async def _do_claim_all(target, user_id: str, edit: bool = False, is_command: bo
 
 
 
-"""
-Clean on_group_message handler for main.py
-This file contains a working version of the word validation handler.
-Copy the function below into main.py to replace the corrupted version.
-"""
+import html as _html
+
+# ── Safe username helper ─────────────────────────────────────────────────
+def _safe_name(name: str) -> str:
+    """Escape HTML special chars and strip emojis that break HTML parse mode."""
+    if not name:
+        return "Player"
+    try:
+        # Escape HTML entities first
+        escaped = _html.escape(str(name))
+        return escaped
+    except Exception:
+        return "Player"
 
 
 def build_player_dashboard(player_name: str, session: dict, user_id: str = None, has_jammer: bool = False) -> str:
@@ -7794,14 +7843,14 @@ def build_player_dashboard(player_name: str, session: dict, user_id: str = None,
     last_pts = session.get('last_pts', 0)
     rare_msg = session.get('rare_message', '')
 
-    # Resource line - only show resources that have been earned
+    safe_player_name = _safe_name(player_name)
+
     res_parts = []
     for key, emoji in [('wood','🪵'),('bronze','🧱'),('iron','⛓️'),('diamond','💎'),('relics','🏺')]:
         val = resources.get(key, 0)
         if val > 0:
             res_parts.append(f"{emoji}{val}")
 
-    # Extras: resources, food, streak
     extras = []
     if res_parts:
         extras.append("  ".join(res_parts))
@@ -7811,22 +7860,20 @@ def build_player_dashboard(player_name: str, session: dict, user_id: str = None,
         extras.append(f"🔥x{streak}")
     extras_line = "  ".join(extras)
 
-    # Build dashboard with active perks if user_id provided
     dashboard = ""
     if user_id:
         try:
             active_perks = format_active_perks(user_id)
             if active_perks:
-                dashboard += f"{active_perks}\n━━━━━━━━━━━━━━━━━\n"
+                dashboard += f"{_html.escape(active_perks)}\n━━━━━━━━━━━━━━━━━\n"
         except Exception as e:
             print(f"[ERROR] Failed to format perks in dashboard: {e}")
-    
+
     dashboard += (
-        f"🎮 <b>{player_name}</b>\n"
+        f"🎮 <b>{safe_player_name}</b>\n"
         f"━━━━━━━━━━━━━━━━━\n"
     )
-    
-    # If jammer is active, show jammer visual instead of word
+
     if has_jammer:
         dashboard += (
             f"💀 GHOST UPLINK 💀\n"
@@ -7835,8 +7882,9 @@ def build_player_dashboard(player_name: str, session: dict, user_id: str = None,
             f"--------------------------\n"
         )
     else:
-        dashboard += f"✅ <code>{last_word.upper()}</code>  <b>+{last_pts}</b>\n"
-    
+        safe_word = _html.escape(last_word.upper())
+        dashboard += f"✅ <code>{safe_word}</code>  <b>+{last_pts}</b>\n"
+
     dashboard += (
         f"━━━━━━━━━━━━━━━━━\n"
         f"💰 <b>{total_pts:,}</b> pts   ⭐ <b>{total_xp:,}</b> XP\n"
@@ -7851,212 +7899,279 @@ def build_player_dashboard(player_name: str, session: dict, user_id: str = None,
         dashboard += f"\n\n{rare_msg}"
     return dashboard
 
-# # ═══════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  WORD-GUESS CATCH-ALL  ←── MUST BE THE LAST @dp.message HANDLER
 # ═══════════════════════════════════════════════════════════════════════════
 
-@dp.message(F.chat.type.in_({"group","supergroup"}))
+@dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def on_group_message(message: types.Message):
-    """Catch-all handler for word guesses during active fusion rounds."""
+    """Catch-all handler for word guesses during active fusion and trivia rounds."""
     try:
-        if not message.text: 
+        if not message.text:
             return
-        
+
         text = message.text.strip()
         u_id = str(message.from_user.id)
-        # print(f"[MSG] '{text}' from {u_id}")
+        current_topic = message.message_thread_id
 
-        # Commands not matched above — skip silently
-        if text.startswith("!") or text.startswith("/"): 
+        # Skip commands — they have their own handlers
+        if text.startswith("!") or text.startswith("/"):
             return
 
-        # ─────────────────────────────────────────────────────────────────────
-        # TRIVIA GAME HANDLING
-        # ─────────────────────────────────────────────────────────────────────
-        trivia_eng = get_trivia_engine(message.chat.id)
-        # Change line 7896 in main.py to this:
-        if trivia_eng.active and trivia_eng.current_question:
-            normalized_correct = trivia_eng.normalize_answer(trivia_eng.current_question['answer'])
-            # ... rest of validation logic ...
-        else:
-            return # Ignore the message if no question is active
-        
-        if trivia_eng.active:
+        # ─────────────────────────────────────────────────────────────────
+        # TRIVIA TOPIC — only process answers in the trivia thread
+        # ─────────────────────────────────────────────────────────────────
+        if current_topic == TRIVIA_TOPIC_ID:
+            trivia_eng = get_trivia_engine(message.chat.id)
+            if not trivia_eng.active or not trivia_eng.current_question:
+                return  # no active question — ignore
+
+            # Get / auto-register user
             user = get_user(u_id)
             if not user:
-                # Optional: Auto-register for trivia too
-                username = message.from_user.first_name or "Player"
+                username = message.from_user.first_name or message.from_user.username or "Player"
                 register_user(u_id, username)
                 user = get_user(u_id)
-            
-            username = user.get("username", message.from_user.first_name)
-            answer = text.strip()
-            time_taken = time.time() - trivia_eng.question_start_time
-            
-            # Only process if player hasn't answered yet
-            if u_id not in trivia_eng.player_answers:
-                trivia_eng.player_answers[u_id] = (answer, time_taken)
-                
-                # Validate answer
-                normalized_answer = trivia_eng.normalize_answer(answer)
-                normalized_correct = trivia_eng.normalize_answer(trivia_eng.current_question['answer'])
-                
-                if normalized_answer == normalized_correct:
-                    await message.reply(f"✅ {username} got it in {time_taken:.1f}s!")
-                
-                # Keep chat clean: Delete player's answer message
-                try:
-                    await asyncio.sleep(0.5)
-                    await message.delete()
-                except:
-                    pass
-            return  # Exit here so trivia answers don't trigger fusion logic
-
-        # ─────────────────────────────────────────────────────────────────────
-        # FUSION GAME HANDLING
-        # ─────────────────────────────────────────────────────────────────────
-        eng = get_engine(message.chat.id)
-        
-        # Check if round is active
-        if not eng.active:
-            return
-
-        user = get_user(u_id)
-        # Auto-Register Logic
-        if not user:
-            username = message.from_user.first_name or message.from_user.username or "Player"
-            try:
-                reg_success = register_user(u_id, username)
-                if reg_success:
-                    user = get_user(u_id)
-                    await message.reply(f"✅ Welcome, {username}! You've been automatically registered.", parse_mode="Markdown")
-                else:
-                    return
-            except Exception as e:
-                print(f"[AUTO-REGISTER ERROR] {e}")
+            if not user:
                 return
 
-        # Validate word format
-        guess = text.lower().strip()
-        if len(guess) < 3: 
-            return
-        
-        # Check if already used
-        if guess in eng.used_words:
-            update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
-            await message.reply(f"❌ `{guess.upper()}` was already guessed!", parse_mode="Markdown")
-            return
-        
-        # Check if can spell from letters
-        if not can_spell(guess, eng.letters):
+            # Use DB username; fall back to Telegram display name safely
+            username = user.get("username") or message.from_user.first_name or "Player"
+            answer = text.strip()
+            time_taken = time.time() - trivia_eng.question_start_time
+
+            # Always delete the player's message to keep chat clean
+            try:
+                await message.delete()
+            except Exception:
+                pass
+
+            # Each player gets one attempt per question
+            if u_id in trivia_eng.player_answers:
+                return
+
+            # Store attempt as (raw_answer, time_taken) — 2-tuple matching TriviaEngine design
+            trivia_eng.player_answers[u_id] = (answer, time_taken)
+
+            normalized_answer = trivia_eng.normalize_answer(answer)
+            normalized_correct = trivia_eng.normalize_answer(trivia_eng.current_question['answer'])
+            is_correct = (normalized_answer == normalized_correct)
+
+            if is_correct:
+                # Mark as correct in the engine's set (used by game loop for time-up reveal)
+                trivia_eng.correct_answers.add(u_id)
+
+                # Use TriviaEngine.add_score() — handles streak, time bonus, boss multiplier
+                base_pts = 20 if trivia_eng.is_boss_round else 10
+                base_xp  = base_pts * 2
+                score_result = trivia_eng.add_score(u_id, username, base_pts, base_xp, time_taken)
+                total_pts = score_result['total_points']
+
+                # Persist to DB
+                try:
+                    add_points(u_id, total_pts, username, game_type="trivia")
+                    add_xp(u_id, base_xp)
+                except Exception as e:
+                    print(f"[TRIVIA DB ERROR] {e}")
+
+                # Build immediate feedback line
+                safe_username = _safe_name(username)
+                feedback_parts = [f"✅ <b>{safe_username}</b> — <b>+{total_pts} pts</b> ({time_taken:.1f}s)"]
+                if score_result['time_bonus'] > 0:
+                    feedback_parts.append(f"⚡ Speed bonus: +{score_result['time_bonus']}")
+                if score_result['streak_msg']:
+                    feedback_parts.append(score_result['streak_msg'])
+                if trivia_eng.is_boss_round:
+                    feedback_parts.append("👑 Boss round x2!")
+
+                try:
+                    await bot.send_message(
+                        message.chat.id,
+                        "\n".join(feedback_parts),
+                        parse_mode="HTML",
+                        message_thread_id=TRIVIA_TOPIC_ID
+                    )
+                except Exception as e:
+                    print(f"[TRIVIA SEND ERROR] {e}")
+
+                # Update the persistent scoreboard immediately
+                await _update_trivia_scoreboard(message.chat.id, trivia_eng)
+            else:
+                # Wrong answer — reset streak
+                trivia_eng.reset_streak(u_id)
             return
 
-        # Word Validation
-        is_valid = word_in_dict(guess)
-        has_jammer = is_perk_active(u_id, "jammer")
-        
-        if not is_valid:
-            update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
+        # ─────────────────────────────────────────────────────────────────
+        # FUSION TOPIC — only process words in the fusion thread
+        # ─────────────────────────────────────────────────────────────────
+        if current_topic == FUSION_TOPIC_ID:
+            eng = get_engine(message.chat.id)
+            if not eng.active:
+                return
+
+            user = get_user(u_id)
+            if not user:
+                username = message.from_user.first_name or message.from_user.username or "Player"
+                try:
+                    reg_success = register_user(u_id, username)
+                    if reg_success:
+                        user = get_user(u_id)
+                        await message.reply(f"✅ Welcome, {username}! You've been automatically registered.")
+                    else:
+                        return
+                except Exception as e:
+                    print(f"[AUTO-REGISTER ERROR] {e}")
+                    return
+            if not user:
+                return
+
+            guess = text.lower().strip()
+            if len(guess) < 3:
+                return
+
+            if guess in eng.used_words:
+                update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
+                await message.reply(f"❌ `{guess.upper()}` was already guessed!", parse_mode="Markdown")
+                return
+
+            if not can_spell(guess, eng.letters):
+                return
+
+            is_valid = word_in_dict(guess)
+            has_jammer = is_perk_active(u_id, "jammer")
+
+            if not is_valid:
+                update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
+                if has_jammer:
+                    try:
+                        await message.delete()
+                    except Exception:
+                        pass
+                return
+
+            # ── Valid word ──────────────────────────────────────────────
             if has_jammer:
                 try:
                     await message.delete()
-                except: pass
+                except Exception:
+                    pass
+
+            eng.used_words.append(guess)
+            eng.msg_count += 1
+            eng.words_repeated_count = getattr(eng, 'words_repeated_count', 0) + 1
+
+            if eng.words_repeated_count % 4 == 0:
+                extra = (
+                    f" *{eng.extra_letters[0]}* *{eng.extra_letters[1]}*"
+                    if len(getattr(eng, 'extra_letters', '')) >= 2 else ""
+                )
+                await bot.send_message(
+                    message.chat.id,
+                    f"🃏 *The GameMaster:* THE WORDS ARE: *{eng.word1.lower()}* *{eng.word2.lower()}*{extra}",
+                    parse_mode="Markdown",
+                    message_thread_id=FUSION_TOPIC_ID
+                )
+
+            pts = max(len(guess) - 2, 1)
+            db_name = user.get("username", message.from_user.first_name or "Player")
+            word_len = len(guess)
+
+            resources_awarded = {}
+            resource_map = {4: 'wood', 5: 'bronze', 6: 'iron', 7: 'diamond'}
+            if word_len in resource_map:
+                resources_awarded[resource_map[word_len]] = 1
+            elif word_len >= 8:
+                resources_awarded['relics'] = 1
+
+            streak_info = update_streak_and_award_food(u_id, correct=True, username=db_name)
+            rare_item = check_rare_drop()
+            if rare_item:
+                add_unclaimed_item(u_id, rare_item["key"], 1)
+
+            xp_awarded = pts * 2
+            bitcoin_awarded = max(pts // 2, 1)
+
+            if u_id not in eng.player_sessions:
+                eng.player_sessions[u_id] = {
+                    'pts': 0, 'xp': 0, 'word_count': 0,
+                    'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
+                    'food': 0, 'streak': 0, 'last_word': '', 'last_pts': 0, 'rare_message': ''
+                }
+
+            session = eng.player_sessions[u_id]
+            session.update({
+                'pts': session['pts'] + pts,
+                'xp': session['xp'] + xp_awarded,
+                'word_count': session['word_count'] + 1,
+                'last_word': guess,
+                'last_pts': pts,
+                'streak': streak_info.get('streak', 0),
+                'food': session['food'] + streak_info.get('food_awarded', 0)
+            })
+            for res_type, amount in resources_awarded.items():
+                session['resources'][res_type] += amount
+            if rare_item:
+                session['rare_message'] = f"🎉 <b>RARE DROP!</b> {_html.escape(rare_item['name'])}"
+
+            dashboard_text = build_player_dashboard(db_name, session, u_id, has_jammer=has_jammer)
+            word_num = session['word_count']
+
+            if u_id in eng.dashboard_msgs and word_num % 4 != 0:
+                try:
+                    await bot.edit_message_text(
+                        dashboard_text,
+                        chat_id=message.chat.id,
+                        message_id=eng.dashboard_msgs[u_id],
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    msg = await bot.send_message(
+                        message.chat.id, dashboard_text,
+                        parse_mode="HTML",
+                        message_thread_id=FUSION_TOPIC_ID
+                    )
+                    eng.dashboard_msgs[u_id] = msg.message_id
+            else:
+                if u_id in eng.dashboard_msgs:
+                    try:
+                        await bot.delete_message(chat_id=message.chat.id, message_id=eng.dashboard_msgs[u_id])
+                    except Exception:
+                        pass
+                msg = await bot.send_message(
+                    message.chat.id, dashboard_text,
+                    parse_mode="HTML",
+                    message_thread_id=FUSION_TOPIC_ID
+                )
+                eng.dashboard_msgs[u_id] = msg.message_id
+
+            # Also update eng.scores so end-of-round summary works
+            if u_id not in eng.scores:
+                eng.scores[u_id] = {'name': db_name, 'pts': 0, 'user_id': u_id, 'leveled_up': False}
+            eng.scores[u_id]['pts'] += pts
+
+            # Save to DB
+            try:
+                add_points(u_id, pts, db_name, game_type="fusion")
+                add_xp(u_id, xp_awarded)
+                add_bitcoin(u_id, bitcoin_awarded, db_name)
+                user_fresh = get_user(u_id)
+                if user_fresh:
+                    base_res = user_fresh.get('base_resources', {'resources': {}})
+                    if not isinstance(base_res, dict):
+                        base_res = {'resources': {}}
+                    res_dict = base_res.get('resources', {})
+                    for rt, am in resources_awarded.items():
+                        res_dict[rt] = res_dict.get(rt, 0) + am
+                    base_res['resources'] = res_dict
+                    user_fresh['base_resources'] = base_res
+                    save_user(u_id, user_fresh)
+            except Exception as e:
+                print(f"[DB ERROR] {e}")
             return
 
-        # Processing Valid Word
-        if has_jammer:
-            try:
-                await message.delete()
-            except: pass
-        
-        eng.used_words.append(guess)
-        eng.msg_count += 1
-        eng.words_repeated_count = getattr(eng, 'words_repeated_count', 0) + 1
-        
-        # Reminder of words every 4 successful guesses
-        if eng.words_repeated_count % 4 == 0:
-            extra = f" *{eng.extra_letters[0]}* *{eng.extra_letters[1]}*" if len(getattr(eng, 'extra_letters', '')) >= 2 else ""
-            await bot.send_message(message.chat.id, f"🃏 *The GameMaster:* THE WORDS ARE: *{eng.word1.lower()}* *{eng.word2.lower()}*{extra}" , parse_mode="Markdown")
-            
-        # Calculate rewards
-        pts = max(len(guess) - 2, 1)
-        db_name = user.get("username", message.from_user.first_name)
-        word_len = len(guess)
-        
-        resources_awarded = {}
-        resource_map = {4: 'wood', 5: 'bronze', 6: 'iron', 7: 'diamond'}
-        if word_len in resource_map:
-            resources_awarded[resource_map[word_len]] = 1
-        elif word_len >= 8:
-            resources_awarded['relics'] = 1
-        
-        streak_info = update_streak_and_award_food(u_id, correct=True, username=db_name)
-        rare_item = check_rare_drop()
-        
-        if rare_item:
-            add_unclaimed_item(u_id, rare_item["key"], 1)
-
-        # Update Session and Dashboard
-        xp_awarded = pts * 2
-        bitcoin_awarded = max(pts // 2, 1)
-
-        if u_id not in eng.player_sessions:
-            eng.player_sessions[u_id] = {
-                'pts': 0, 'xp': 0, 'word_count': 0,
-                'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
-                'food': 0, 'streak': 0, 'last_word': '', 'last_pts': 0, 'rare_message': ''
-            }
-
-        session = eng.player_sessions[u_id]
-        session.update({
-            'pts': session['pts'] + pts,
-            'xp': session['xp'] + xp_awarded,
-            'word_count': session['word_count'] + 1,
-            'last_word': guess,
-            'last_pts': pts,
-            'streak': streak_info.get('streak', 0),
-            'food': session['food'] + streak_info.get('food_awarded', 0)
-        })
-        
-        for res_type, amount in resources_awarded.items():
-            session['resources'][res_type] += amount
-
-        if rare_item:
-            session['rare_message'] = f"🎉 <b>RARE DROP!</b> {rare_item['name']}"
-
-        dashboard_text = build_player_dashboard(db_name, session, u_id, has_jammer=has_jammer)
-
-        # Dashboard Edit/Send Logic
-        word_num = session['word_count']
-        if u_id in eng.dashboard_msgs and word_num % 4 != 0:
-            try:
-                await bot.edit_message_text(dashboard_text, chat_id=message.chat.id, message_id=eng.dashboard_msgs[u_id], parse_mode="HTML")
-            except:
-                msg = await bot.send_message(message.chat.id, dashboard_text, parse_mode="HTML")
-                eng.dashboard_msgs[u_id] = msg.message_id
-        else:
-            if u_id in eng.dashboard_msgs:
-                try: await bot.delete_message(chat_id=message.chat.id, message_id=eng.dashboard_msgs[u_id])
-                except: pass
-            msg = await bot.send_message(message.chat.id, dashboard_text, parse_mode="HTML")
-            eng.dashboard_msgs[u_id] = msg.message_id
-        
-        # Save to DB
-        try:
-            add_points(u_id, pts, db_name, game_type="fusion")
-            add_xp(u_id, xp_awarded)
-            add_bitcoin(u_id, bitcoin_awarded, db_name)
-            # Update resources in background
-            user_fresh = get_user(u_id)
-            if user_fresh:
-                base_res = user_fresh.get('base_resources', {'resources': {}})
-                res_dict = base_res.get('resources', {})
-                for rt, am in resources_awarded.items():
-                    res_dict[rt] = res_dict.get(rt, 0) + am
-                user_fresh['base_resources'] = base_res
-                save_user(u_id, user_fresh)
-        except Exception as e:
-            print(f"[DB ERROR] {e}")
+        # ── Messages outside any game topic — ignore ──────────────────
+        return
 
     except Exception as e:
         print(f"[HANDLER ERROR] {e}")
@@ -8064,31 +8179,46 @@ async def on_group_message(message: types.Message):
         traceback.print_exc()
 
 
+async def _update_trivia_scoreboard(chat_id: int, trivia_eng) -> None:
+    """Edit the single persistent trivia scoreboard message in-place."""
+    if not trivia_eng.scores:
+        return
 
+    sorted_scores = sorted(trivia_eng.scores.items(), key=lambda x: x[1]['pts'], reverse=True)
+    q_num = getattr(trivia_eng, 'question_number', '?')
+    board = f"📊 <b>SCOREBOARD — Q{q_num}/{TRIVIA_QUESTIONS_PER_GAME}</b>\n━━━━━━━━━━━━━━━━━\n"
+    medals = ["🥇", "🥈", "🥉"]
 
+    for i, (uid, data) in enumerate(sorted_scores[:10]):
+        medal = medals[i] if i < 3 else f"{i + 1}."
+        safe_name = _safe_name(data['name'])
+        # TriviaEngine.add_score() stores correct count in 'answers' key
+        correct_count = data.get('answers', data.get('correct', 0))
+        streak = data.get('streak', 0)
+        streak_display = f" 🔥{streak}" if streak >= 3 else ""
+        board += f"{medal} <b>{safe_name}</b> — {data['pts']} pts ({correct_count}✓){streak_display}\n"
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    try:
+        # dashboard_msg_id is the correct attribute name on TriviaEngine
+        msg_id = getattr(trivia_eng, 'dashboard_msg_id', None)
+        if msg_id:
+            await bot.edit_message_text(
+                board,
+                chat_id=chat_id,
+                message_id=msg_id,
+                parse_mode="HTML"
+            )
+        else:
+            m = await bot.send_message(
+                chat_id, board, parse_mode="HTML",
+                message_thread_id=TRIVIA_TOPIC_ID
+            )
+            trivia_eng.dashboard_msg_id = m.message_id
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            print(f"[SCOREBOARD UPDATE ERROR] {e}")
+    except Exception as e:
+        print(f"[SCOREBOARD UPDATE ERROR] {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

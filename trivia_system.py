@@ -151,21 +151,28 @@ class TriviaEngine:
     def normalize_answer(self, text: str) -> str:
         """Normalize user answer for comparison - handles variations."""
         text = text.strip().lower()
-        
-        # Remove common filler words
-        text = text.replace(" chakra", "").replace(" the ", " ").strip()
-        text = text.replace("the ", "").replace(" the", "")
-        
-        # Handle common abbreviations/variations
-        text = text.replace("3rd ", "").replace("third ", "")
-        text = text.replace("solar plexus", "solplexus")
-        text = text.replace("heart chakra", "heart").replace("heart", "heart")
+
+        # Strip leading 'the'
+        if text.startswith("the "):
+            text = text[4:]
+        text = text.replace(" the ", " ").strip()
+
+        # Chakra shorthand — normalize both player and correct answer identically
+        text = text.replace("solar plexus chakra", "solarplexus")
+        text = text.replace("solar plexus", "solarplexus")
+        text = text.replace("third eye chakra", "thirdeye")
+        text = text.replace("third eye", "thirdeye")
+        text = text.replace("3rd eye", "thirdeye")
+        text = text.replace("heart chakra", "heart")
         text = text.replace("crown chakra", "crown")
         text = text.replace("root chakra", "root")
-        text = text.replace("third eye", "thirdeye")
         text = text.replace("throat chakra", "throat")
         text = text.replace("sacral chakra", "sacral")
-        
+        text = text.replace(" chakra", "")
+
+        # Strip stray spaces left by replacements
+        text = " ".join(text.split())
+
         return text
     
     def calculate_bonus(self, time_taken: float) -> int:
