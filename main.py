@@ -569,9 +569,9 @@ async def game_loop(chat_id: int):
                         winners_text += f"{medal} {p.get('username', 'Unknown')} — {p.get('points', 0):,} pts\n"
                     winners_text += f"{divider()}\n"
 
-                # Send new round sticker
+                # Send new round sticker to fusion topic
                 try:
-                    await bot.send_sticker(chat_id, STICKER_NEW_ROUND)
+                    await bot.send_sticker(chat_id, STICKER_NEW_ROUND, message_thread_id=FUSION_TOPIC_ID)
                 except Exception:
                     pass
 
@@ -598,9 +598,9 @@ async def game_loop(chat_id: int):
                         crate_dropped = True
                         # 50% chance for monkey trap decoy
                         is_monkey_trap = random.random() < 0.50
-                        # Send crate sticker instead of text
+                        # Send crate sticker to fusion topic
                         try:
-                            await bot.send_sticker(chat_id, STICKER_CRATE_DROP)
+                            await bot.send_sticker(chat_id, STICKER_CRATE_DROP, message_thread_id=FUSION_TOPIC_ID)
                         except Exception:
                             pass
                         crate_label = "🐵 *CRATE DROP!*" if is_monkey_trap else "⚡ *CRATE DROP!*"
@@ -1570,15 +1570,9 @@ async def trivia_game_loop(chat_id: int):
             trivia_eng.current_question = question_data   # on_group_message reads this
             trivia_eng.active = True
 
-            # Inter-question delay (skip before Q1)
+            # Inter-question silent delay (random, no announcement so players can't game it)
             if question_num > 1:
-                delay = random.choice([5, 8, 10])
-                await bot.send_message(
-                    chat_id,
-                    f"⏳ Next question in <b>{delay}s</b>...",
-                    parse_mode="HTML",
-                    message_thread_id=TRIVIA_TOPIC_ID
-                )
+                delay = random.randint(2, 8)  # random 2-8 seconds, no message
                 await asyncio.sleep(delay)
 
             # Send question
@@ -1634,14 +1628,27 @@ async def trivia_game_loop(chat_id: int):
                     f"📝 Answer: <b>{correct_ans}</b>"
                 )
 
-            await bot.send_message(
-                chat_id, result_msg,
-                parse_mode="HTML",
-                message_thread_id=TRIVIA_TOPIC_ID
-            )
+            # Send TIME'S UP message, then delete it after 4s so answer isn't visible
+            _timeup_msg = None
+            try:
+                _timeup_msg = await bot.send_message(
+                    chat_id, result_msg,
+                    parse_mode="HTML",
+                    message_thread_id=TRIVIA_TOPIC_ID
+                )
+            except Exception:
+                pass
 
-            # Update persistent scoreboard after each question
+            # Update persistent scoreboard BEFORE deleting time-up message
             await _update_trivia_scoreboard(chat_id, trivia_eng)
+
+            # Delete the time-up message after a short window (hides the answer)
+            await asyncio.sleep(4)
+            if _timeup_msg:
+                try:
+                    await bot.delete_message(chat_id, _timeup_msg.message_id)
+                except Exception:
+                    pass
 
         # --- Game over ---
         trivia_eng.active = False
@@ -4821,81 +4828,406 @@ def register_new_user(user_id, first_name):
 
 @dp.message(_cmd("start"))
 async def cmd_start(message: types.Message):
-    """Command Center with Persistent Navigation."""
-    if message.chat.type != "private":
-        await _send_access_denied_sticker(message)
-        return
-    
+    """
+    COMMAND CENTER — the single entry point for all bot interaction.
+    Works in group AND private. In group: sends DM link. In private: full HUD.
+    """
     u_id = str(message.from_user.id)
+
+    # In group chat: just nudge them to DM
+    if message.chat.type in ("group", "supergroup"):
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="🃏 Open Command Center", url=f"https://t.me/{(await bot.get_me()).username}?start=hq")
+        ]])
+        await message.reply(
+            "🃏 <b>GameMaster:</b> <i>Your Command Center awaits in private.</i>",
+            parse_mode="HTML", reply_markup=kb
+        )
+        return
+
+    # Private chat — full HUD
     user = get_user(u_id)
-    
-    # ... [Registration Logic] ...
-    # 🛡️ SAFETY CHECK: If user doesn't exist, register them now
     if user is None:
-        # This calls your registration logic/function
         user = register_new_user(u_id, message.from_user.first_name)
-        await message.answer("👋 Welcome, Operative! Your account has been initialized.")
-    
-    # Now this won't crash because 'user' is guaranteed to be a dictionary
-    username = user.get("username", "Player")
-    # ... rest of your start logic
-    # 1. THE PERSISTENT KEYBOARD (Bottom of screen)
-    # Note: Use EXACT text matches for your handlers below
-    main_nav = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="[🎮 GAME]")], [KeyboardButton(text="[⚔️ EQUIP]")],
-            [KeyboardButton(text="[🧬 RESEARCH]")], [KeyboardButton(text="[🛍️ SHOP]")],
-            [KeyboardButton(text="[⚙️ OPTIONS]")]
-        ],
-        resize_keyboard=True,
-        input_field_placeholder="Select Module..."
+
+    username   = _safe_name(user.get("username") or message.from_user.first_name or "Operative")
+    level      = user.get("level", 1)
+    xp         = user.get("xp", 0)
+    bitcoin    = user.get("bitcoin", 0)
+    sector     = user.get("sector", "—")
+    base_name  = user.get("base_name") or "No Base"
+    shield_st  = user.get("shield_status", "⚠️ UNPROTECTED")
+    unclaimed  = len(user.get("unclaimed_items", []))
+    inv_count  = len(user.get("inventory", []))
+    inv_slots  = user.get("backpack_slots", 5)
+    xp_bar_pct = min(100, int((xp % 100)))
+    filled     = xp_bar_pct // 10
+    xp_bar     = "█" * filled + "░" * (10 - filled)
+
+    shield_icon = "🛡️" if "ACTIVE" in shield_st else ("💥" if "DISRUPTED" in shield_st else "⚠️")
+    claims_warn = f"  ⚡ <b>{unclaimed} UNCLAIMED</b>" if unclaimed > 0 else ""
+
+    hud = (
+        f"╔═══════════════════════════╗\n"
+        f"║  🃏  <b>CHECKMATE HQ</b>  🃏  ║\n"
+        f"╠═══════════════════════════╣\n"
+        f"║  👤 <b>{username[:18]}</b>\n"
+        f"║  ⭐ Level <b>{level}</b>   💰 <b>{bitcoin:,}</b> BTC\n"
+        f"║  [{xp_bar}] {xp_bar_pct}%\n"
+        f"║  📍 Sector: <b>{sector}</b>\n"
+        f"║  🏰 <b>{base_name[:20]}</b>\n"
+        f"║  {shield_icon} Shield: <b>{shield_st}</b>\n"
+        f"║  🎒 Inv: <b>{inv_count}/{inv_slots}</b>{claims_warn}\n"
+        f"╚═══════════════════════════╝"
     )
 
-    # 2. THE INLINE KEYBOARD (Attached to the HUD message)
-    inline_stats = InlineKeyboardMarkup(inline_keyboard=[
+    kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="👤 PROFILE", callback_data="menu_profile"),
-            InlineKeyboardButton(text="📊 STATS", callback_data="menu_stats")
+            InlineKeyboardButton(text="👤 Profile",    callback_data="menu_profile"),
+            InlineKeyboardButton(text="🏰 My Base",    callback_data="menu_base"),
         ],
         [
-            InlineKeyboardButton(text="💰 VAULT", callback_data="menu_vault"),
-            InlineKeyboardButton(text="🎒 INVENTORY", callback_data="menu_inventory")
+            InlineKeyboardButton(text="🎒 Inventory",  callback_data="menu_inventory"),
+            InlineKeyboardButton(text="🎁 Claims",     callback_data="menu_claims"),
+        ],
+        [
+            InlineKeyboardButton(text="🛍️ Shop",       callback_data="menu_shop"),
+            InlineKeyboardButton(text="⚔️ Battle",     callback_data="menu_battle"),
+        ],
+        [
+            InlineKeyboardButton(text="🏆 Leaderboards", callback_data="menu_leaderboards"),
+            InlineKeyboardButton(text="🗺️ Map/Sectors",  callback_data="menu_map"),
+        ],
+        [
+            InlineKeyboardButton(text="🧬 Research Lab", callback_data="menu_research"),
+            InlineKeyboardButton(text="⚙️ Account",      callback_data="menu_account"),
+        ],
+        [
+            InlineKeyboardButton(text="🎮 Fusion Game",  callback_data="menu_fusion_info"),
+            InlineKeyboardButton(text="🧠 Trivia Game",  callback_data="menu_trivia_info"),
+        ],
+    ])
+
+    await message.answer(hud, parse_mode="HTML", reply_markup=kb)
+
+
+@dp.callback_query(lambda q: q.data == "menu_leaderboards")
+async def cb_menu_leaderboards(callback: types.CallbackQuery):
+    """Leaderboard hub — shows all game leaderboards with inline tabs."""
+    await callback.answer()
+    u_id = str(callback.from_user.id)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🃏 Fusion Weekly",   callback_data="lb_fusion_weekly"),
+            InlineKeyboardButton(text="🃏 Fusion All-Time",  callback_data="lb_fusion_alltime"),
+        ],
+        [
+            InlineKeyboardButton(text="🧠 Trivia Weekly",   callback_data="lb_trivia_weekly"),
+            InlineKeyboardButton(text="🧠 Trivia All-Time",  callback_data="lb_trivia_alltime"),
+        ],
+        [
+            InlineKeyboardButton(text="🏆 Overall Weekly",  callback_data="lb_overall_weekly"),
+            InlineKeyboardButton(text="🏆 Overall All-Time", callback_data="lb_overall_alltime"),
+        ],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
+    ])
+
+    await callback.message.edit_text(
+        "🏆 <b>LEADERBOARDS</b>\n━━━━━━━━━━━━━━━━━\n"
+        "<i>Select a leaderboard to view:</i>",
+        parse_mode="HTML", reply_markup=kb
+    )
+
+
+async def _render_leaderboard(game_type: str, scope: str) -> str:
+    """Render a leaderboard as HTML text."""
+    medals = ["🥇", "🥈", "🥉"]
+    try:
+        if scope == "weekly":
+            lb = get_game_weekly_leaderboard(game_type=game_type, limit=10)
+        else:
+            lb = get_game_alltime_leaderboard(game_type=game_type, limit=10)
+    except Exception as e:
+        try:
+            if scope == "weekly":
+                lb = get_weekly_leaderboard(limit=10)
+            else:
+                lb = get_alltime_leaderboard(limit=10)
+        except Exception:
+            return f"❌ Could not fetch leaderboard: {e}"
+
+    if not lb:
+        return "No scores yet. Play some games first!"
+
+    game_icons = {"fusion": "🃏", "trivia": "🧠", "overall": "🏆"}
+    icon = game_icons.get(game_type, "🏆")
+    scope_label = "WEEKLY" if scope == "weekly" else "ALL-TIME"
+
+    txt = f"{icon} <b>{game_type.upper()} {scope_label}</b>\n━━━━━━━━━━━━━━━━━\n"
+    for i, p in enumerate(lb):
+        medal = medals[i] if i < 3 else f"  {i+1}."
+        name = _safe_name(p.get("username", "Unknown"))
+        pts  = p.get("points", 0)
+        txt += f"{medal} <b>{name}</b> — {pts:,} pts\n"
+    return txt
+
+
+@dp.callback_query(lambda q: q.data.startswith("lb_"))
+async def cb_leaderboard_view(callback: types.CallbackQuery):
+    """Render the requested leaderboard tab."""
+    await callback.answer()
+    parts = callback.data.split("_")  # e.g. lb_fusion_weekly
+    if len(parts) < 3:
+        return
+    game_type = parts[1]   # fusion | trivia | overall
+    scope     = parts[2]   # weekly | alltime
+
+    text = await _render_leaderboard(game_type, scope)
+
+    back_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🔄 Refresh",    callback_data=callback.data),
+            InlineKeyboardButton(text="⬅️ Back",       callback_data="menu_leaderboards"),
         ]
     ])
 
-    # HUD Data
-    username = user.get("username", "Player")
-    level = user.get("level", 1)
-    bitcoin = user.get("bitcoin", 0)
-    sector = user.get("sector", "Sector 64")
+    try:
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_kb)
+    except TelegramBadRequest:
+        pass
 
-    hud_text = (
-        f"🃏 <b>[COMMAND CENTER V.64]</b>\n"
-        f"<code>--------------------------</code>\n"
-        f"<b>OPERATIVE:</b> {username.upper()}\n"
-        f"<b>STATUS:</b> ONLINE\n"
-        f"<b>SECTOR:</b> {sector}\n"
-        f"<code>--------------------------</code>\n"
-        f"⭐ <b>Level:</b> {level}\n"
-        f"💰 <b>Bitcoin:</b> {bitcoin:,}\n\n"
-        f"<i>Select a module below.</i>"
-    )
-    
-    # FIX: Attach the INLINE keyboard here, and the REPLY keyboard here.
-    # Telegram allows one message to carry both!
-    await message.answer(
-        hud_text,
+
+@dp.callback_query(lambda q: q.data == "menu_claims")
+async def cb_menu_claims_shortcut(callback: types.CallbackQuery):
+    """Shortcut from HUD to claims."""
+    await callback.answer()
+    u_id = str(callback.from_user.id)
+    unclaimed = get_unclaimed_items(u_id)
+    if not unclaimed:
+        await callback.message.edit_text(
+            "🎁 <b>No unclaimed items.</b>\n<i>Play games to earn rewards!</i>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+                InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")
+            ]])
+        )
+        return
+    # Trigger the existing claims flow
+    rows = [[InlineKeyboardButton(text="⚡ AUTO-CLAIM ALL", callback_data="claim_all")]]
+    for item in unclaimed[:8]:
+        iid  = str(item.get("id", 0))
+        itype = item.get("type", "?").upper()
+        xp   = item.get("xp_reward", 0)
+        lbl  = f"🎁 {itype}" + (f" (+{xp} XP)" if xp else "")
+        rows.append([
+            InlineKeyboardButton(text=lbl,    callback_data=f"claim_{iid}"),
+            InlineKeyboardButton(text="🗑️",   callback_data=f"discard_claim_{iid}"),
+        ])
+    rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")])
+    await callback.message.edit_text(
+        f"🎁 <b>UNCLAIMED REWARDS</b> ({len(unclaimed)} items)\n━━━━━━━━━━━━━━━━━",
         parse_mode="HTML",
-        reply_markup=main_nav # This sets the bottom keyboard
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
     )
-    
-    # Since a message can only have ONE reply_markup, 
-    # we send a second "status" message with the inline buttons
-    # or just combine them. To make it clean:
-    await message.answer(
-        "⚡ <b>SYSTEM HUD</b>",
+
+
+@dp.callback_query(lambda q: q.data == "menu_battle")
+async def cb_menu_battle(callback: types.CallbackQuery):
+    """Battle hub."""
+    await callback.answer()
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered", show_alert=True); return
+
+    bitcoin = user.get("bitcoin", 0)
+    wins    = user.get("wins", 0)
+    losses  = user.get("losses", 0)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="⚔️ Attack Player",   callback_data="battle_attack_menu"),
+            InlineKeyboardButton(text="🔍 Scout Player",    callback_data="battle_scout_menu"),
+        ],
+        [
+            InlineKeyboardButton(text="💀 Revenge",         callback_data="battle_revenge"),
+            InlineKeyboardButton(text="🛡️ Shield Status",  callback_data="battle_shield"),
+        ],
+        [
+            InlineKeyboardButton(text="🔫 Weapons Shop",    callback_data="shop_weapons"),
+            InlineKeyboardButton(text="⚔️ Battle Items",    callback_data="battle_items_inline"),
+        ],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
+    ])
+
+    await callback.message.edit_text(
+        f"⚔️ <b>BATTLE COMMAND</b>\n━━━━━━━━━━━━━━━━━\n"
+        f"💰 Bitcoin: <b>{bitcoin:,}</b>\n"
+        f"📊 Record: <b>{wins}W</b> / <b>{losses}L</b>\n\n"
+        f"<i>Choose your action:</i>",
+        parse_mode="HTML", reply_markup=kb
+    )
+
+
+@dp.callback_query(lambda q: q.data == "battle_shield")
+async def cb_battle_shield(callback: types.CallbackQuery):
+    """Shield management from battle hub."""
+    await callback.answer()
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        return
+    shield_st = user.get("shield_status", "⚠️ UNPROTECTED")
+    is_active = "ACTIVE" in shield_st
+
+    kb_rows = []
+    if is_active:
+        kb_rows.append([InlineKeyboardButton(text="🔴 Deactivate Shield", callback_data="shield_deactivate")])
+    else:
+        kb_rows.append([InlineKeyboardButton(text="🟢 Activate Shield",   callback_data="shield_activate")])
+    kb_rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="menu_battle")])
+
+    icon = "🛡️" if is_active else "⚠️"
+    await callback.message.edit_text(
+        f"{icon} <b>SHIELD STATUS</b>\n━━━━━━━━━━━━━━━━━\n"
+        f"Current: <b>{shield_st}</b>\n\n"
+        f"{'Your base is protected.' if is_active else 'Your base is VULNERABLE to attacks!'}",
         parse_mode="HTML",
-        reply_markup=inline_stats # These are the buttons above the text
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+    )
+
+
+@dp.callback_query(lambda q: q.data in ("shield_activate", "shield_deactivate"))
+async def cb_shield_toggle(callback: types.CallbackQuery):
+    """Toggle shield on/off."""
+    u_id = str(callback.from_user.id)
+    if callback.data == "shield_activate":
+        ok, msg = activate_shield(u_id)
+    else:
+        ok, msg = deactivate_shield(u_id)
+    await callback.answer(msg, show_alert=True)
+    # Refresh shield view
+    await cb_battle_shield(callback)
+
+
+@dp.callback_query(lambda q: q.data == "menu_fusion_info")
+async def cb_menu_fusion_info(callback: types.CallbackQuery):
+    """Fusion game info and quick-start."""
+    await callback.answer()
+    chat_id_str = str(CHECKMATE_HQ_GROUP_ID).lstrip("-100") if CHECKMATE_HQ_GROUP_ID else ""
+    fusion_link  = f"https://t.me/c/{chat_id_str}/{FUSION_TOPIC_ID}" if chat_id_str else "the group"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🃏 Go to Fusion Topic", url=fusion_link)],
+        [
+            InlineKeyboardButton(text="🏆 Fusion Weekly",   callback_data="lb_fusion_weekly"),
+            InlineKeyboardButton(text="📊 Fusion All-Time", callback_data="lb_fusion_alltime"),
+        ],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
+    ])
+    await callback.message.edit_text(
+        "🃏 <b>FUSION WORD GAME</b>\n━━━━━━━━━━━━━━━━━\n"
+        "📖 <b>How to play:</b>\n"
+        "Two 6-letter words are shown. Use their letters to form new words!\n\n"
+        "📏 <b>Scoring:</b>\n"
+        "• 3 letters = 1 pt  • 4 = 2 pts  • 5 = 3 pts\n"
+        "• 6 = 4 pts  • 7 = 5 pts  • 8+ = 6 pts\n\n"
+        "🔥 <b>Streak bonus:</b> 3+ correct in a row = food bonus\n"
+        "🎁 <b>Crate drops:</b> React to claim mid-round crates!\n\n"
+        "<i>Type /fusion in the Fusion Topic to start a game.</i>",
+        parse_mode="HTML", reply_markup=kb
+    )
+
+
+@dp.callback_query(lambda q: q.data == "menu_trivia_info")
+async def cb_menu_trivia_info(callback: types.CallbackQuery):
+    """Trivia game info and quick-start."""
+    await callback.answer()
+    chat_id_str = str(CHECKMATE_HQ_GROUP_ID).lstrip("-100") if CHECKMATE_HQ_GROUP_ID else ""
+    trivia_link  = f"https://t.me/c/{chat_id_str}/{TRIVIA_TOPIC_ID}" if chat_id_str else "the group"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🧠 Go to Trivia Topic", url=trivia_link)],
+        [
+            InlineKeyboardButton(text="🏆 Trivia Weekly",   callback_data="lb_trivia_weekly"),
+            InlineKeyboardButton(text="📊 Trivia All-Time", callback_data="lb_trivia_alltime"),
+        ],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
+    ])
+    await callback.message.edit_text(
+        "🧠 <b>TRIVIA GAME</b>\n━━━━━━━━━━━━━━━━━\n"
+        "📖 <b>How to play:</b>\n"
+        "Questions appear every round. Type your answer — fastest wins!\n\n"
+        "⚡ <b>Speed bonuses:</b>\n"
+        "• Answer in &lt;2s → +3 pts  • &lt;3s → +2 pts  • &lt;4s → +1 pt\n\n"
+        "🔥 <b>Streak combos:</b>\n"
+        "• 3 correct in a row → +5 bonus\n"
+        "• 5 in a row → DOUBLE POINTS!\n\n"
+        "👑 <b>Boss rounds:</b> Random — worth 20 pts × 2 multiplier!\n\n"
+        "<i>Type /trivia in the Trivia Topic to start a game.</i>",
+        parse_mode="HTML", reply_markup=kb
+    )
+
+
+@dp.callback_query(lambda q: q.data == "menu_research")
+async def cb_menu_research(callback: types.CallbackQuery):
+    """Research lab shortcut."""
+    await callback.answer()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔬 Open Lab",   callback_data="menu_back")],
+        [InlineKeyboardButton(text="⬅️ Back",       callback_data="menu_back")],
+    ])
+    await callback.message.edit_text(
+        "🧬 <b>RESEARCH LAB</b>\n━━━━━━━━━━━━━━━━━\n"
+        "Spend resources to unlock powerful army and base upgrades.\n\n"
+        "Use <code>/lab</code> in private chat for the full research menu.",
+        parse_mode="HTML", reply_markup=kb
+    )
+
+
+@dp.callback_query(lambda q: q.data == "battle_items_inline")
+async def cb_battle_items_inline(callback: types.CallbackQuery):
+    """Quick battle items listing from HUD."""
+    await callback.answer()
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        return
+
+    bitcoin = user.get("bitcoin", 0)
+    level   = user.get("level", 1)
+
+    quick_items = [
+        ("🛡️ 1-Day Shield",  200,  1),
+        ("🛡️ 3-Day Shield",  500,  1),
+        ("🛡️ 7-Day Shield",  1000, 10),
+        ("🔐 Name Shield",   800,  5),
+        ("📸 Scout",         600,  6),
+        ("📴 Anti-Scout",    500,  5),
+        ("⚫ Blackout",      2000, 10),
+    ]
+
+    rows = []
+    for name, price, req_lvl in quick_items:
+        can_buy = bitcoin >= price and level >= req_lvl
+        icon    = "✅" if can_buy else ("🔒" if level < req_lvl else "❌")
+        rows.append([InlineKeyboardButton(
+            text=f"{icon} {name} — {price:,}₿",
+            callback_data="menu_battle"  # placeholder — full buy via /buy command
+        )])
+
+    rows.append([
+        InlineKeyboardButton(text="💰 Full Shop (/buy)", callback_data="menu_shop"),
+        InlineKeyboardButton(text="⬅️ Back",             callback_data="menu_battle"),
+    ])
+
+    await callback.message.edit_text(
+        f"⚔️ <b>BATTLE ITEMS</b>\n━━━━━━━━━━━━━━━━━\n"
+        f"💰 Your Bitcoin: <b>{bitcoin:,}</b>  |  Level: <b>{level}</b>\n"
+        f"<i>Use /buy &lt;item&gt; in private to purchase</i>\n━━━━━━━━━━━━━━━━━",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
     )
 
 # --- CORRECTED HANDLERS ---
@@ -8180,43 +8512,51 @@ async def on_group_message(message: types.Message):
 
 
 async def _update_trivia_scoreboard(chat_id: int, trivia_eng) -> None:
-    """Edit the single persistent trivia scoreboard message in-place."""
+    """
+    Keep ONE scoreboard message pinned at the BOTTOM of the trivia topic.
+    Strategy: delete the old scoreboard, immediately resend it so it is
+    always the most-recent (bottom) message — players see it without scrolling.
+    """
     if not trivia_eng.scores:
         return
 
     sorted_scores = sorted(trivia_eng.scores.items(), key=lambda x: x[1]['pts'], reverse=True)
     q_num = getattr(trivia_eng, 'question_number', '?')
-    board = f"📊 <b>SCOREBOARD — Q{q_num}/{TRIVIA_QUESTIONS_PER_GAME}</b>\n━━━━━━━━━━━━━━━━━\n"
+
+    board = (
+        f"\n📊 <b>SCOREBOARD — Q{q_num}/{TRIVIA_QUESTIONS_PER_GAME}</b>\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+    )
     medals = ["🥇", "🥈", "🥉"]
 
     for i, (uid, data) in enumerate(sorted_scores[:10]):
         medal = medals[i] if i < 3 else f"{i + 1}."
         safe_name = _safe_name(data['name'])
-        # TriviaEngine.add_score() stores correct count in 'answers' key
         correct_count = data.get('answers', data.get('correct', 0))
         streak = data.get('streak', 0)
-        streak_display = f" 🔥{streak}" if streak >= 3 else ""
-        board += f"{medal} <b>{safe_name}</b> — {data['pts']} pts ({correct_count}✓){streak_display}\n"
+        streak_display = f"  🔥×{streak}" if streak >= 3 else ""
+        board += f"{medal} <b>{safe_name}</b>  {data['pts']} pts  ({correct_count}✓){streak_display}\n"
+
+    board += "━━━━━━━━━━━━━━━━━"
 
     try:
-        # dashboard_msg_id is the correct attribute name on TriviaEngine
-        msg_id = getattr(trivia_eng, 'dashboard_msg_id', None)
-        if msg_id:
-            await bot.edit_message_text(
-                board,
-                chat_id=chat_id,
-                message_id=msg_id,
-                parse_mode="HTML"
-            )
-        else:
-            m = await bot.send_message(
-                chat_id, board, parse_mode="HTML",
-                message_thread_id=TRIVIA_TOPIC_ID
-            )
-            trivia_eng.dashboard_msg_id = m.message_id
-    except TelegramBadRequest as e:
-        if "message is not modified" not in str(e):
-            print(f"[SCOREBOARD UPDATE ERROR] {e}")
+        # Delete old scoreboard so the new one appears at the bottom
+        old_id = getattr(trivia_eng, 'dashboard_msg_id', None)
+        if old_id:
+            try:
+                await bot.delete_message(chat_id, old_id)
+            except Exception:
+                pass
+            trivia_eng.dashboard_msg_id = None
+
+        # Send fresh scoreboard at the bottom
+        m = await bot.send_message(
+            chat_id, board,
+            parse_mode="HTML",
+            message_thread_id=TRIVIA_TOPIC_ID
+        )
+        trivia_eng.dashboard_msg_id = m.message_id
+
     except Exception as e:
         print(f"[SCOREBOARD UPDATE ERROR] {e}")
 
@@ -8965,6 +9305,58 @@ setup_guild_handlers(dp, _cmd, types, InlineKeyboardMarkup, InlineKeyboardButton
 #  ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════════════
 
+async def hourly_leaderboard_broadcast_task(bot: Bot, chat_id: int):
+    """Post all leaderboards to the LEADERBOARDS topic every hour."""
+    await asyncio.sleep(10)  # brief startup delay
+    while True:
+        try:
+            now_str = datetime.utcnow().strftime("%H:%M UTC")
+            medals  = ["🥇", "🥈", "🥉"]
+
+            sections = [
+                ("🃏 FUSION — WEEKLY",   get_game_weekly_leaderboard, {"game_type": "fusion",  "limit": 10}),
+                ("🃏 FUSION — ALL-TIME", get_game_alltime_leaderboard, {"game_type": "fusion",  "limit": 10}),
+                ("🧠 TRIVIA — WEEKLY",   get_game_weekly_leaderboard, {"game_type": "trivia",  "limit": 10}),
+                ("🧠 TRIVIA — ALL-TIME", get_game_alltime_leaderboard, {"game_type": "trivia",  "limit": 10}),
+                ("🏆 OVERALL — WEEKLY",  get_weekly_leaderboard,       {"limit": 10}),
+                ("🏆 OVERALL — ALL-TIME",get_alltime_leaderboard,      {"limit": 10}),
+            ]
+
+            full_board = f"📊 <b>LEADERBOARDS</b>  <i>({now_str})</i>\n"
+
+            for title, fn, kwargs in sections:
+                full_board += f"\n━━━━━━━━━━━━━━━━━\n<b>{title}</b>\n"
+                try:
+                    lb = fn(**kwargs)
+                    if lb:
+                        for i, p in enumerate(lb):
+                            medal = medals[i] if i < 3 else f"  {i+1}."
+                            name  = _safe_name(p.get("username", "Unknown"))
+                            pts   = p.get("points", 0)
+                            full_board += f"{medal} <b>{name}</b> — {pts:,} pts\n"
+                    else:
+                        full_board += "<i>No scores yet.</i>\n"
+                except Exception as lb_err:
+                    full_board += f"<i>Error: {lb_err}</i>\n"
+
+            try:
+                await bot.send_message(
+                    chat_id, full_board,
+                    parse_mode="HTML",
+                    message_thread_id=LEADERBOARDS_TOPIC_ID
+                )
+                print(f"[LEADERBOARD BROADCAST] Sent at {now_str}")
+            except Exception as send_err:
+                print(f"[LEADERBOARD BROADCAST] Send failed: {send_err}")
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[LEADERBOARD BROADCAST ERROR] {e}")
+
+        await asyncio.sleep(3600)  # every hour
+
+
 async def main():
     import signal, platform
     print("Bot starting...")
@@ -9057,6 +9449,12 @@ async def main():
             print(f"[OK] Bot activity simulator started (hourly)")
         except Exception as e:
             print(f"[WARN] Bot activity task failed: {e}")
+
+        try:
+            lb_broadcast_task = asyncio.create_task(hourly_leaderboard_broadcast_task(bot, CHECKMATE_HQ_GROUP_ID))
+            print(f"[OK] Hourly leaderboard broadcaster started → topic {LEADERBOARDS_TOPIC_ID}")
+        except Exception as e:
+            print(f"[WARN] Leaderboard broadcaster failed: {e}")
     else:
         print(f"[WARN] CHECKMATE_HQ_GROUP_ID invalid or not set (got: {CHECKMATE_HQ_GROUP_ID}) - announcements disabled")
     
