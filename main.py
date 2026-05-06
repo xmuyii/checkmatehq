@@ -327,6 +327,9 @@ class GameEngine:
         self.decoy_claimers   = []  # Track who got decoy crates
         self.dashboard_msgs   = {}  # user_id -> message_id for live dashboards
         self.player_sessions  = {}  # user_id -> round session stats dict
+        # ── Board Freeze ──────────────────────────────────────────────────
+        self.freeze_until     = 0   # epoch timestamp; >0 means timer is paused
+        self.freeze_secs_added = 0  # total seconds added this round
 
 active_games: dict[int, GameEngine] = {}
 
@@ -528,6 +531,8 @@ async def game_loop(chat_id: int):
                 eng.letters = (eng.word1 + eng.word2).lower()
                 eng.extra_letters = ""
                 eng.words_repeated_count = 0
+                eng.freeze_until = 0
+                eng.freeze_secs_added = 0
 
                 crate_note = ""
                 if random.random() < 0.2:
@@ -587,10 +592,15 @@ async def game_loop(chat_id: int):
                 )
 
                 crate_dropped = False
-                for elapsed in range(ROUND_SECS):
+                elapsed = 0
+                while elapsed < ROUND_SECS:
                     await asyncio.sleep(1)
                     if eng.force_stop:
                         break
+                    # Board Freeze — don't advance elapsed while frozen
+                    if eng.freeze_until > time.time():
+                        continue   # tick passes but elapsed doesn't increment
+                    elapsed += 1
                         
                     # Repetition every 4 inputs is handled in on_group_message, but we can also just remind them if inactive
                     
@@ -700,7 +710,8 @@ async def game_loop(chat_id: int):
                     
                     result += f"\n{divider()}\n`!weekly` | `!alltime` for full stats"
                 
-                await bot.send_message(chat_id, result, parse_mode="Markdown")
+                await bot.send_message(chat_id, result, parse_mode="Markdown",
+                                          message_thread_id=FUSION_TOPIC_ID)
 
                 # Level-up announcements
                 try:
@@ -723,7 +734,8 @@ async def game_loop(chat_id: int):
                                 if lvl % 5 == 0:
                                     iname, idesc = award_powerful_locked_item(uid)
                                     msg += f"\n\n{divider()}\n⚡ *MILESTONE!* Unlocked: *{iname}*\n_{idesc}_\n{divider()}"
-                                await bot.send_message(chat_id, msg, parse_mode="Markdown")
+                                await bot.send_message(chat_id, msg, parse_mode="Markdown",
+                                                          message_thread_id=FUSION_TOPIC_ID)
                 except Exception as e:
                     print(f"[ERROR] Level-up announcements: {e}")
 
@@ -734,13 +746,15 @@ async def game_loop(chat_id: int):
                         f"{divider()}\n"
                         f"🃏 *GameMaster:* \"*Three* empty rounds? Are you all *asleep*?! Pathetic.\n\n"
                         f"{divider()}",
-                        parse_mode="Markdown"
+                        parse_mode="Markdown",
+                        message_thread_id=FUSION_TOPIC_ID
                     )
                     break
 
                 eng.games_played += 1
                 if eng.games_played >= eng.games_until_help:
-                    await bot.send_message(chat_id, _help_text(), parse_mode="Markdown")
+                    await bot.send_message(chat_id, _help_text(), parse_mode="Markdown",
+                                              message_thread_id=FUSION_TOPIC_ID)
                     eng.games_until_help = eng.games_played + random.randint(3, 7)
 
                 if eng.games_played % 5 == 0:
@@ -751,7 +765,8 @@ async def game_loop(chat_id: int):
                             for i, p in enumerate(lb[:10], 1):
                                 medal = ["🥇","🥈","🥉"][i-1] if i<=3 else f"{i}."
                                 t += f"{medal} {p['username']} — {p['points']:,} pts\n"
-                            await bot.send_message(chat_id, t, parse_mode="Markdown")
+                            await bot.send_message(chat_id, t, parse_mode="Markdown",
+                                                    message_thread_id=FUSION_TOPIC_ID)
                     except Exception as e:
                         print(f"[ERROR] Weekly leaderboard display: {e}")
 
@@ -762,7 +777,8 @@ async def game_loop(chat_id: int):
                 import traceback
                 traceback.print_exc()
                 try:
-                    await bot.send_message(chat_id, f"❌ *ERROR:* {e}\n\nType `!fusion` to restart the game.", parse_mode="Markdown")
+                    await bot.send_message(chat_id, f"❌ *ERROR:* {e}\n\nType `!fusion` to restart the game.", parse_mode="Markdown",
+                                              message_thread_id=FUSION_TOPIC_ID)
                 except:
                     pass
                 eng.running = False
@@ -8362,6 +8378,7 @@ async def _do_claim_all(target, user_id: str, edit: bool = False, is_command: bo
 
 
 import html as _html
+import time as _time_module  # used by freeze
 
 # ── Safe username helper ─────────────────────────────────────────────────
 def _safe_name(name: str) -> str:
@@ -8443,6 +8460,174 @@ def build_player_dashboard(player_name: str, session: dict, user_id: str = None,
     if rare_msg:
         dashboard += f"\n\n{rare_msg}"
     return dashboard
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  BOARD FREEZE ITEM  — pauses the round timer
+# ═══════════════════════════════════════════════════════════════════════════
+
+FREEZE_DURATIONS = {
+    "freeze_30":  30,
+    "freeze_60":  60,
+    "freeze_120": 120,
+    "freeze_180": 180,
+}
+FREEZE_COSTS = {
+    "freeze_30":  200,
+    "freeze_60":  350,
+    "freeze_120": 600,
+    "freeze_180": 900,
+}
+
+@dp.message(_cmd("freeze", "board_freeze"))
+async def cmd_board_freeze(message: types.Message):
+    """Show the Board Freeze shop inline keyboard."""
+    if message.chat.type in ("group", "supergroup"):
+        # Must be used in the Fusion topic
+        if message.message_thread_id != FUSION_TOPIC_ID:
+            await message.reply("❄️ Use /freeze inside the Fusion topic!")
+            return
+        eng = get_engine(message.chat.id)
+        if not eng.active:
+            await message.reply("❄️ No active round to freeze.")
+            return
+
+        u_id = str(message.from_user.id)
+        user = get_user(u_id)
+        if not user:
+            await message.reply("❌ Register first: /start in DM")
+            return
+
+        bitcoin = user.get("bitcoin", 0)
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"❄️ +30s — 200₿ {'✅' if bitcoin>=200 else '❌'}",
+                    callback_data=f"freeze_buy_freeze_30_{message.from_user.id}"
+                ),
+                InlineKeyboardButton(
+                    text=f"❄️ +60s — 350₿ {'✅' if bitcoin>=350 else '❌'}",
+                    callback_data=f"freeze_buy_freeze_60_{message.from_user.id}"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text=f"❄️ +2m — 600₿ {'✅' if bitcoin>=600 else '❌'}",
+                    callback_data=f"freeze_buy_freeze_120_{message.from_user.id}"
+                ),
+                InlineKeyboardButton(
+                    text=f"❄️ +3m — 900₿ {'✅' if bitcoin>=900 else '❌'}",
+                    callback_data=f"freeze_buy_freeze_180_{message.from_user.id}"
+                ),
+            ],
+        ])
+        await message.reply(
+            f"❄️ *BOARD FREEZE*\n"
+            f"Pause the round timer and keep mining words!\n\n"
+            f"💰 Your Bitcoin: *{bitcoin:,}*\n"
+            f"⏱️ Round time frozen for everyone in the round.\n"
+            f"Max 3 minutes extra per round.",
+            parse_mode="Markdown",
+            reply_markup=kb
+        )
+    else:
+        # In DM — show info
+        await message.answer(
+            "❄️ *BOARD FREEZE ITEM*\n\n"
+            "Use /freeze inside the Fusion topic during an active round.\n\n"
+            "*Durations & Costs:*\n"
+            "• +30 seconds — 200 Bitcoin\n"
+            "• +60 seconds — 350 Bitcoin\n"
+            "• +2 minutes — 600 Bitcoin\n"
+            "• +3 minutes — 900 Bitcoin\n\n"
+            "_Freezes the round timer so you can keep finding words._",
+            parse_mode="Markdown"
+        )
+
+
+@dp.callback_query(lambda q: q.data.startswith("freeze_buy_"))
+async def cb_freeze_buy(callback: types.CallbackQuery):
+    """Process board freeze purchase."""
+    await callback.answer()
+    try:
+        # Format: freeze_buy_freeze_30_USERID
+        parts   = callback.data.split("_")
+        # parts = ['freeze','buy','freeze','30','USERID']
+        freeze_key = f"{parts[2]}_{parts[3]}"   # e.g. freeze_30
+        buyer_id   = parts[4]
+
+        # Only the person who invoked it can buy
+        if str(callback.from_user.id) != buyer_id:
+            await callback.answer("❌ Only the player who called /freeze can buy this.", show_alert=True)
+            return
+
+        if freeze_key not in FREEZE_DURATIONS:
+            await callback.answer("❌ Unknown freeze type.", show_alert=True)
+            return
+
+        secs = FREEZE_DURATIONS[freeze_key]
+        cost = FREEZE_COSTS[freeze_key]
+
+        u_id = str(callback.from_user.id)
+        user = get_user(u_id)
+        if not user:
+            await callback.answer("❌ User not found.", show_alert=True)
+            return
+
+        bitcoin = user.get("bitcoin", 0)
+        if bitcoin < cost:
+            await callback.answer(f"❌ Need {cost} Bitcoin, you have {bitcoin}.", show_alert=True)
+            return
+
+        # Check round is still active
+        chat_id = callback.message.chat.id
+        eng = get_engine(chat_id)
+        if not eng.active:
+            await callback.answer("❌ Round is no longer active.", show_alert=True)
+            return
+
+        # Check total freeze this round doesn't exceed 180s
+        MAX_FREEZE = 180
+        if eng.freeze_secs_added + secs > MAX_FREEZE:
+            remaining_allowed = MAX_FREEZE - eng.freeze_secs_added
+            await callback.answer(
+                f"❌ Only {remaining_allowed}s of freeze left this round (max 3min total).",
+                show_alert=True
+            )
+            return
+
+        # Deduct bitcoin and apply freeze
+        user["bitcoin"] = bitcoin - cost
+        save_user(u_id, user)
+
+        import time as _t
+        # Extend freeze_until from max(now, current freeze_until)
+        current_freeze_end = max(_t.time(), eng.freeze_until)
+        eng.freeze_until = current_freeze_end + secs
+        eng.freeze_secs_added += secs
+
+        buyer_name = _safe_name(user.get("username", "Someone"))
+
+        # Announce in Fusion topic
+        await bot.send_message(
+            chat_id,
+            f"❄️ *BOARD FREEZE!* ❄️\n"
+            f"*{buyer_name}* froze the timer for *{secs} seconds*!\n"
+            f"💰 Cost: {cost} Bitcoin\n"
+            f"⏱️ Keep finding words!",
+            parse_mode="Markdown",
+            message_thread_id=FUSION_TOPIC_ID
+        )
+
+        # Delete the original freeze menu message
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+
+    except Exception as e:
+        print(f"[FREEZE BUY ERROR] {e}")
+        await callback.answer(f"❌ Error: {str(e)[:50]}", show_alert=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -8854,10 +9039,19 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                             except Exception as re:
                                 print(f"[WEEKLY RESET] Reward error for {p.get('username')}: {re}")
                         
-                        # Save to file for display in games
+                        # Save to file for display in games — normalize field names
                         try:
-                            with open('last_week_winners.json', 'w', encoding='utf-8') as f:
-                                json.dump(lb[:3], f)
+                            winners_to_save = []
+                            for wp in lb[:3]:
+                                winners_to_save.append({
+                                    'username': wp.get('username', 'Unknown'),
+                                    'points':   wp.get('points', 0),
+                                    'id':       wp.get('id') or wp.get('user_id', ''),
+                                })
+                            save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'last_week_winners.json')
+                            with open(save_path, 'w', encoding='utf-8') as f:
+                                json.dump(winners_to_save, f, ensure_ascii=False)
+                            print(f"[WEEKLY RESET] Saved {len(winners_to_save)} winners to {save_path}")
                         except Exception as e:
                             print(f"[WEEKLY RESET] Failed to save last week winners: {e}")
                         
@@ -8913,11 +9107,15 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                     except Exception as bot_preload_err:
                         print(f"[WEEKLY RESET] Bot preload error: {bot_preload_err}")
                     
-                    # 5. Send announcement to group
+                    # 5. Send announcement to Fusion topic (not general)
                     if chat_id:
                         try:
-                            await bot.send_message(chat_id, announcement, parse_mode="Markdown")
-                            print(f"[WEEKLY RESET] Announcement sent to group {chat_id}")
+                            await bot.send_message(
+                                chat_id, announcement,
+                                parse_mode="Markdown",
+                                message_thread_id=FUSION_TOPIC_ID
+                            )
+                            print(f"[WEEKLY RESET] Announcement sent to group {chat_id} topic {FUSION_TOPIC_ID}")
                         except Exception as send_err:
                             print(f"[WEEKLY RESET] Failed to send announcement: {send_err}")
                     
