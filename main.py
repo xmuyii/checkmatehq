@@ -647,8 +647,12 @@ async def game_loop(chat_id: int):
                 else:
                     eng.empty_rounds = 0
                     medals = ["🥇", "🥈", "🥉"]
-                    result = f"🏆 *ROUND COMPLETE*\n{divider()}\n"
-                    
+                    result = (
+                        f"🏆 *ROUND COMPLETE*\n{divider()}\n"
+                        f"`{'Rank':<4} {'Player':<14} {'Shield':<6} Pts`\n"
+                        f"`{'-'*36}`\n"
+                    )
+
                     # Crate bonus notification + decoy trap warning
                     if eng.crates_dropping > 0 and eng.crate_claimers:
                         try:
@@ -675,10 +679,19 @@ async def game_loop(chat_id: int):
                         except Exception as e:
                             print(f"[ERROR] Crate handling: {e}")
                     
-                    # Scores with medals
+                    # Scores with medals + shield column
                     for i, p in enumerate(ss):
-                        medal = medals[i] if i < 3 else f"  {i+1}."
-                        result += f"{medal} {p['name']} — *{p['pts']:,} pts*\n"
+                        medal      = medals[i] if i < 3 else f"  {i+1}."
+                        p_name     = (p['name'] or "Player")[:13]
+                        shield_i   = "⚠️"
+                        try:
+                            _u = get_user(p.get('user_id', ''))
+                            if _u:
+                                _st = _u.get("shield_status") or ""
+                                shield_i = "🛡️" if "ACTIVE" in _st else ("💥" if "DISRUPTED" in _st else "⚠️")
+                        except Exception:
+                            pass
+                        result += f"{medal} {p_name}  {shield_i}  *{p['pts']:,} pts*\n"
                         if i < 3:
                             try:
                                 add_unclaimed_item(p['user_id'], "super_crate", 1)
@@ -4856,9 +4869,11 @@ async def cmd_start(message: types.Message):
     bitcoin    = user.get("bitcoin", 0)
     sector     = user.get("sector", "—")
     base_name  = user.get("base_name") or "No Base"
-    shield_st  = user.get("shield_status", "⚠️ UNPROTECTED")
-    unclaimed  = len(user.get("unclaimed_items", []))
-    inv_count  = len(user.get("inventory", []))
+    shield_st  = user.get("shield_status") or "⚠️ UNPROTECTED"  # guard against None from DB
+    unclaimed_raw = user.get("unclaimed_items", [])
+    unclaimed  = len(unclaimed_raw) if isinstance(unclaimed_raw, list) else 0
+    inv_raw    = user.get("inventory", [])
+    inv_count  = len(inv_raw) if isinstance(inv_raw, list) else 0
     inv_slots  = user.get("backpack_slots", 5)
     xp_bar_pct = min(100, int((xp % 100)))
     filled     = xp_bar_pct // 10
@@ -4941,36 +4956,70 @@ async def cb_menu_leaderboards(callback: types.CallbackQuery):
 
 
 async def _render_leaderboard(game_type: str, scope: str) -> str:
-    """Render a leaderboard as HTML text."""
+    """Render a leaderboard as HTML text with shield status column."""
     medals = ["🥇", "🥈", "🥉"]
+
+    # Fetch leaderboard data
+    lb = []
     try:
-        if scope == "weekly":
+        if game_type == "overall":
+            lb = get_weekly_leaderboard(limit=10) if scope == "weekly" else get_alltime_leaderboard(limit=10)
+        elif scope == "weekly":
             lb = get_game_weekly_leaderboard(game_type=game_type, limit=10)
         else:
             lb = get_game_alltime_leaderboard(game_type=game_type, limit=10)
     except Exception as e:
+        # graceful fallback
         try:
-            if scope == "weekly":
-                lb = get_weekly_leaderboard(limit=10)
-            else:
-                lb = get_alltime_leaderboard(limit=10)
+            lb = get_weekly_leaderboard(limit=10) if scope == "weekly" else get_alltime_leaderboard(limit=10)
         except Exception:
             return f"❌ Could not fetch leaderboard: {e}"
 
     if not lb:
-        return "No scores yet. Play some games first!"
+        return "📭 No scores yet. Play some games first!"
 
     game_icons = {"fusion": "🃏", "trivia": "🧠", "overall": "🏆"}
-    icon = game_icons.get(game_type, "🏆")
+    icon        = game_icons.get(game_type, "🏆")
     scope_label = "WEEKLY" if scope == "weekly" else "ALL-TIME"
 
-    txt = f"{icon} <b>{game_type.upper()} {scope_label}</b>\n━━━━━━━━━━━━━━━━━\n"
+    now_str = datetime.utcnow().strftime("%d %b · %H:%M UTC")
+
+    header = (
+        f"{icon} <b>{game_type.upper()} — {scope_label}</b>\n"
+        f"<i>{now_str}</i>\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"<b>{'Rank':<4} {'Player':<16} {'Shield':<8} Pts</b>\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+    )
+
+    rows = ""
     for i, p in enumerate(lb):
-        medal = medals[i] if i < 3 else f"  {i+1}."
-        name = _safe_name(p.get("username", "Unknown"))
-        pts  = p.get("points", 0)
-        txt += f"{medal} <b>{name}</b> — {pts:,} pts\n"
-    return txt
+        medal     = medals[i] if i < 3 else f"{i+1:>2}."
+        name      = _safe_name(p.get("username", "Unknown"))[:14]
+        pts       = p.get("points", 0)
+
+        # Shield directly from leaderboard row (no extra DB call needed)
+        st          = p.get("shield_status") or "UNPROTECTED"
+        shield_icon = "🛡️" if "ACTIVE" in st else ("💥" if "DISRUPTED" in st else "⚠️")
+        ns_until    = p.get("name_shield_until")
+        if ns_until:
+            try:
+                from datetime import datetime as _dt
+                if _dt.now() < _dt.fromisoformat(ns_until):
+                    name        = "🔐 Anonymous"
+                    shield_icon = "🛡️"
+            except Exception:
+                pass
+
+        rows += f"{medal} <b>{name}</b>  {shield_icon}  {pts:,} pts\n"
+
+    footer = (
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"<i>🛡️ Protected · ⚠️ Exposed · 💥 Disrupted</i>\n"
+        f"<i>Use /attack @name to raid · /shield to protect</i>"
+    )
+
+    return header + rows + footer
 
 
 @dp.callback_query(lambda q: q.data.startswith("lb_"))
@@ -4987,15 +5036,211 @@ async def cb_leaderboard_view(callback: types.CallbackQuery):
 
     back_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🔄 Refresh",    callback_data=callback.data),
-            InlineKeyboardButton(text="⬅️ Back",       callback_data="menu_leaderboards"),
-        ]
+            InlineKeyboardButton(text="🔄 Refresh",      callback_data=callback.data),
+            InlineKeyboardButton(text="⬅️ Back",         callback_data="menu_leaderboards"),
+        ],
+        [
+            InlineKeyboardButton(text="⚔️ Attack",       callback_data="battle_attack_menu"),
+            InlineKeyboardButton(text="🛡️ My Shield",    callback_data="battle_shield"),
+            InlineKeyboardButton(text="🪤 Set Trap",     callback_data="lb_set_trap"),
+        ],
     ])
 
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=back_kb)
     except TelegramBadRequest:
         pass
+
+
+@dp.callback_query(lambda q: q.data == "lb_set_trap")
+async def cb_lb_set_trap(callback: types.CallbackQuery):
+    """Quick trap-setting from leaderboard view."""
+    await callback.answer()
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered", show_alert=True); return
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🪤 Set 3 Mousetraps",  callback_data="trap_set_3"),
+            InlineKeyboardButton(text="🪤 Set 5 Mousetraps",  callback_data="trap_set_5"),
+        ],
+        [
+            InlineKeyboardButton(text="🔥 Activate Firewall", callback_data="trap_firewall"),
+        ],
+        [InlineKeyboardButton(text="⬅️ Back",                callback_data="menu_leaderboards")],
+    ])
+    await callback.message.edit_text(
+        "🪤 <b>SET DEFENSES</b>\n━━━━━━━━━━━━━━━━━\n"
+        "Mousetraps: 30% chance to catch incoming scouts (70% escape).\n"
+        "Firewall: 50% chance to incinerate scouts with fireball.\n\n"
+        "<i>Use /defenses in private for full options.</i>",
+        parse_mode="HTML", reply_markup=kb
+    )
+
+
+@dp.callback_query(lambda q: q.data.startswith("trap_set_"))
+async def cb_trap_set_count(callback: types.CallbackQuery):
+    """Set mousetraps from inline menu."""
+    u_id = str(callback.from_user.id)
+    count = int(callback.data.replace("trap_set_", ""))
+    try:
+        set_mousetraps(u_id, count)
+        await callback.answer(f"✅ {count} mousetraps set!", show_alert=True)
+    except Exception as e:
+        await callback.answer(f"❌ {e}", show_alert=True)
+
+
+@dp.callback_query(lambda q: q.data == "trap_firewall")
+async def cb_trap_firewall_activate(callback: types.CallbackQuery):
+    """Activate firewall from inline menu."""
+    u_id = str(callback.from_user.id)
+    try:
+        activate_firewall(u_id)
+        await callback.answer("🔥 Firewall activated for 1 hour!", show_alert=True)
+    except Exception as e:
+        await callback.answer(f"❌ {e}", show_alert=True)
+
+
+@dp.callback_query(lambda q: q.data == "battle_attack_menu")
+async def cb_battle_attack_menu(callback: types.CallbackQuery):
+    """Attack target selection UI."""
+    await callback.answer()
+    await callback.message.edit_text(
+        "⚔️ <b>ATTACK A PLAYER</b>\n━━━━━━━━━━━━━━━━━\n"
+        "To attack, go to private chat and type:\n\n"
+        "<code>/attack @username</code>\n\n"
+        "Or tap the leaderboard and use the attack action buttons next to a player.\n\n"
+        "<i>⚠️ Attacking deactivates your own shield!</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_battle")]
+        ])
+    )
+
+
+@dp.callback_query(lambda q: q.data == "battle_scout_menu")
+async def cb_battle_scout_menu(callback: types.CallbackQuery):
+    """Scout target selection UI."""
+    await callback.answer()
+    await callback.message.edit_text(
+        "🔍 <b>SCOUT A PLAYER</b>\n━━━━━━━━━━━━━━━━━\n"
+        "Scouting reveals an enemy's army, resources and shield status.\n\n"
+        "Cost: <b>100 Bitcoin</b>\n"
+        "Success rate: <b>70%</b>\n\n"
+        "To scout, type in private chat:\n"
+        "<code>/scout @username</code>\n\n"
+        "<i>Target's name shield blocks scouting.</i>",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_battle")]
+        ])
+    )
+
+
+@dp.callback_query(lambda q: q.data == "battle_revenge")
+async def cb_battle_revenge_info(callback: types.CallbackQuery):
+    """Revenge info."""
+    await callback.answer()
+    u_id = str(callback.from_user.id)
+    try:
+        from revenge_system import get_revenge_info
+        rv = get_revenge_info(u_id)
+        if rv.get("active"):
+            target = rv.get("target_name", "Unknown")
+            txt = (
+                f"🩸 <b>BLOOD DEBT ACTIVE</b>\n━━━━━━━━━━━━━━━━━\n"
+                f"Target: <b>{_safe_name(target)}</b>\n"
+                f"Bonus: <b>1.5× damage</b>\n\n"
+                f"Type <code>/revenge</code> then\n"
+                f"<code>/attack @{target}</code> to settle it."
+            )
+        else:
+            txt = (
+                f"🩸 <b>NO BLOOD DEBT</b>\n━━━━━━━━━━━━━━━━━\n"
+                f"<i>Get raided first. Then you earn a 1.5× revenge multiplier.</i>"
+            )
+    except Exception:
+        txt = "❌ Revenge system unavailable."
+    await callback.message.edit_text(
+        txt, parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_battle")]
+        ])
+    )
+
+
+@dp.callback_query(lambda q: q.data == "menu_back")
+async def cb_menu_back_to_hud(callback: types.CallbackQuery):
+    """Return to main HUD from any sub-menu."""
+    await callback.answer()
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Session expired. Type /start", show_alert=True); return
+
+    username   = _safe_name(user.get("username") or "Operative")
+    level      = user.get("level", 1)
+    xp         = user.get("xp", 0)
+    bitcoin    = user.get("bitcoin", 0)
+    sector     = user.get("sector", "—")
+    base_name  = user.get("base_name") or "No Base"
+    shield_st  = user.get("shield_status") or "⚠️ UNPROTECTED"
+    unclaimed_raw = user.get("unclaimed_items", [])
+    unclaimed  = len(unclaimed_raw) if isinstance(unclaimed_raw, list) else 0
+    inv_raw    = user.get("inventory", [])
+    inv_count  = len(inv_raw) if isinstance(inv_raw, list) else 0
+    inv_slots  = user.get("backpack_slots", 5)
+    xp_bar_pct = min(100, int(xp % 100))
+    filled     = xp_bar_pct // 10
+    xp_bar     = "█" * filled + "░" * (10 - filled)
+    shield_icon = "🛡️" if "ACTIVE" in shield_st else ("💥" if "DISRUPTED" in shield_st else "⚠️")
+    claims_warn = f"  ⚡ <b>{unclaimed} UNCLAIMED</b>" if unclaimed > 0 else ""
+
+    hud = (
+        f"╔═══════════════════════════╗\n"
+        f"║  🃏  <b>CHECKMATE HQ</b>  🃏  ║\n"
+        f"╠═══════════════════════════╣\n"
+        f"║  👤 <b>{username[:18]}</b>\n"
+        f"║  ⭐ Level <b>{level}</b>   💰 <b>{bitcoin:,}</b> BTC\n"
+        f"║  [{xp_bar}] {xp_bar_pct}%\n"
+        f"║  📍 Sector: <b>{sector}</b>\n"
+        f"║  🏰 <b>{base_name[:20]}</b>\n"
+        f"║  {shield_icon} Shield: <b>{shield_st}</b>\n"
+        f"║  🎒 Inv: <b>{inv_count}/{inv_slots}</b>{claims_warn}\n"
+        f"╚═══════════════════════════╝"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👤 Profile",      callback_data="menu_profile"),
+            InlineKeyboardButton(text="🏰 My Base",      callback_data="menu_base"),
+        ],
+        [
+            InlineKeyboardButton(text="🎒 Inventory",    callback_data="menu_inventory"),
+            InlineKeyboardButton(text="🎁 Claims",       callback_data="menu_claims"),
+        ],
+        [
+            InlineKeyboardButton(text="🛍️ Shop",         callback_data="menu_shop"),
+            InlineKeyboardButton(text="⚔️ Battle",       callback_data="menu_battle"),
+        ],
+        [
+            InlineKeyboardButton(text="🏆 Leaderboards", callback_data="menu_leaderboards"),
+            InlineKeyboardButton(text="🗺️ Map/Sectors",  callback_data="menu_map"),
+        ],
+        [
+            InlineKeyboardButton(text="🧬 Research Lab", callback_data="menu_research"),
+            InlineKeyboardButton(text="⚙️ Account",      callback_data="menu_account"),
+        ],
+        [
+            InlineKeyboardButton(text="🎮 Fusion",       callback_data="menu_fusion_info"),
+            InlineKeyboardButton(text="🧠 Trivia",       callback_data="menu_trivia_info"),
+        ],
+    ])
+    try:
+        await callback.message.edit_text(hud, parse_mode="HTML", reply_markup=kb)
+    except TelegramBadRequest:
+        await callback.message.answer(hud, parse_mode="HTML", reply_markup=kb)
 
 
 @dp.callback_query(lambda q: q.data == "menu_claims")
@@ -5659,39 +5904,7 @@ def get_user_with_fix(u_id):
         save_user(u_id, user) # Save the fixed version
     return user
 
-@dp.callback_query(lambda q: q.data == "menu_back")
-async def cb_menu_back(callback: types.CallbackQuery):
-    """Return to main menu."""
-    u_id = str(callback.from_user.id)
-    user = get_user(u_id)
-    username = user.get("username", "Player") if user else "Player"
-    level = user.get("level", 1) if user else 1
-    bitcoin = user.get("bitcoin", 0) if user else 0
-    gold = user.get("gold", 0) if user else 0
-    
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="[🏰 BASE]", callback_data="menu_base"),
-         InlineKeyboardButton(text="[🪵 RESOURCES]", callback_data="menu_resources")],
-        [InlineKeyboardButton(text="[👤 PROFILE]", callback_data="menu_profile"),
-         InlineKeyboardButton(text="[🛍️ SHOP]", callback_data="menu_shop")],
-        [InlineKeyboardButton(text="[⚔️ ALLIANCE]", callback_data="menu_guild"),
-         InlineKeyboardButton(text="[🗺️ MAP]", callback_data="menu_map")],
-        [InlineKeyboardButton(text="[💎 ACCOUNT]", callback_data="menu_account"),
-         InlineKeyboardButton(text="[🎒 INVENTORY]", callback_data="menu_inventory")],
-    ])
-    
-    await callback.message.edit_text(
-        f"🃏 *CHECKMATE HQ* 🃏\n\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"*Welcome back, {username}!*\n"
-        f"**Level {level}** • Ready for Battle\n\n"
-        f"👑 **Gold:** {gold} |💳 **Bitcoin:** {bitcoin:,} \n\n"
-        f"━━━━━━━━━━━━━━━━━\n\n"
-        f"_Where would you like to go?_",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-    await callback.answer()
+# menu_back handler moved to new cb_menu_back_to_hud above
 
 
 # ━━━━━ SHOP SUBMENUS ━━━━━
@@ -8530,12 +8743,21 @@ async def _update_trivia_scoreboard(chat_id: int, trivia_eng) -> None:
     medals = ["🥇", "🥈", "🥉"]
 
     for i, (uid, data) in enumerate(sorted_scores[:10]):
-        medal = medals[i] if i < 3 else f"{i + 1}."
-        safe_name = _safe_name(data['name'])
-        correct_count = data.get('answers', data.get('correct', 0))
-        streak = data.get('streak', 0)
-        streak_display = f"  🔥×{streak}" if streak >= 3 else ""
-        board += f"{medal} <b>{safe_name}</b>  {data['pts']} pts  ({correct_count}✓){streak_display}\n"
+        medal       = medals[i] if i < 3 else f"{i + 1}."
+        safe_name   = _safe_name(data['name'])[:14]
+        correct_cnt = data.get('answers', data.get('correct', 0))
+        streak      = data.get('streak', 0)
+        streak_disp = f" 🔥×{streak}" if streak >= 3 else ""
+        # Shield — look up cheaply (trivia scores are in-memory, no lb row)
+        shield_i = "⚠️"
+        try:
+            _u = get_user(uid)
+            if _u:
+                _st = _u.get("shield_status") or ""
+                shield_i = "🛡️" if "ACTIVE" in _st else ("💥" if "DISRUPTED" in _st else "⚠️")
+        except Exception:
+            pass
+        board += f"{medal} <b>{safe_name}</b>  {shield_i}  {data['pts']} pts  ({correct_cnt}✓){streak_disp}\n"
 
     board += "━━━━━━━━━━━━━━━━━"
 
@@ -8657,11 +8879,19 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                     try:
                         from supabase_db import supabase, DB_TABLE, _current_week_key
                         new_week = _current_week_key()
-                        # Bulk update: set weekly_points=0 and update week_start for all users
+                        # Use gt(0) to only update rows that actually have points — safer than neq('')
                         supabase.table(DB_TABLE).update({
                             'weekly_points': 0,
                             'week_start': new_week
-                        }).neq('user_id', '').execute()
+                        }).gt('weekly_points', -1).execute()  # -1 catches 0 and above
+                        # Also reset game-specific weekly cols
+                        for game_col in ['fusion_weekly_points', 'trivia_weekly_points']:
+                            try:
+                                supabase.table(DB_TABLE).update({
+                                    game_col: 0
+                                }).gt(game_col, -1).execute()
+                            except Exception:
+                                pass
                         print(f"[WEEKLY RESET] All weekly_points reset to 0, week_start = {new_week}")
                     except Exception as db_err:
                         print(f"[WEEKLY RESET] DB bulk reset error: {db_err}")
@@ -9330,10 +9560,22 @@ async def hourly_leaderboard_broadcast_task(bot: Bot, chat_id: int):
                     lb = fn(**kwargs)
                     if lb:
                         for i, p in enumerate(lb):
-                            medal = medals[i] if i < 3 else f"  {i+1}."
-                            name  = _safe_name(p.get("username", "Unknown"))
-                            pts   = p.get("points", 0)
-                            full_board += f"{medal} <b>{name}</b> — {pts:,} pts\n"
+                            medal     = medals[i] if i < 3 else f"  {i+1}."
+                            name      = _safe_name(p.get("username", "Unknown"))[:14]
+                            pts       = p.get("points", 0)
+                            # Shield directly from lb row
+                            st       = p.get("shield_status") or "UNPROTECTED"
+                            shield_i = "🛡️" if "ACTIVE" in st else ("💥" if "DISRUPTED" in st else "⚠️")
+                            ns       = p.get("name_shield_until")
+                            if ns:
+                                try:
+                                    from datetime import datetime as _dt
+                                    if _dt.now() < _dt.fromisoformat(ns):
+                                        name     = "🔐 Anonymous"
+                                        shield_i = "🛡️"
+                                except Exception:
+                                    pass
+                            full_board += f"{medal} <b>{name}</b>  {shield_i}  {pts:,}\n"
                     else:
                         full_board += "<i>No scores yet.</i>\n"
                 except Exception as lb_err:

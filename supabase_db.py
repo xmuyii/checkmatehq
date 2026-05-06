@@ -519,7 +519,7 @@ def get_weekly_leaderboard(limit: int = 10) -> list:
     this_week = _current_week_key()
     try:
         r = supabase.table(DB_TABLE) \
-            .select('user_id, username, weekly_points, week_start') \
+            .select('user_id, username, weekly_points, week_start, shield_status, name_shield_until') \
             .order('weekly_points', desc=True) \
             .limit(max(limit, 50)) \
             .execute()
@@ -527,15 +527,16 @@ def get_weekly_leaderboard(limit: int = 10) -> list:
         for p in (r.data or []):
             pts = int(p.get('weekly_points') or 0)
             player_week = p.get('week_start', '')
-            # Extract just the date part (Supabase may return full timestamp)
             player_week_date = player_week.split('T')[0] if player_week else ''
             if player_week_date != this_week:
                 pts = 0
             if pts > 0:
                 results.append({
-                    'id': p['user_id'],
-                    'username': p.get('username', 'Unknown'),
-                    'points': pts,
+                    'id':               p['user_id'],
+                    'username':         p.get('username', 'Unknown'),
+                    'points':           pts,
+                    'shield_status':    p.get('shield_status') or '⚠️ UNPROTECTED',
+                    'name_shield_until': p.get('name_shield_until'),
                 })
         results.sort(key=lambda x: x['points'], reverse=True)
         return results[:limit]
@@ -549,13 +550,19 @@ def get_weekly_leaderboard(limit: int = 10) -> list:
 def get_alltime_leaderboard(limit: int = 10) -> list:
     try:
         r = supabase.table(DB_TABLE) \
-            .select('user_id, username, all_time_points, total_words, is_bot') \
+            .select('user_id, username, all_time_points, total_words, is_bot, shield_status, name_shield_until') \
             .order('all_time_points', desc=True) \
             .limit(limit * 5) \
             .execute()
         return [
-            {'id': p['user_id'], 'username': p.get('username', 'Unknown'),
-             'points': int(p.get('all_time_points') or 0), 'words': int(p.get('total_words') or 0)}
+            {
+                'id':               p['user_id'],
+                'username':         p.get('username', 'Unknown'),
+                'points':           int(p.get('all_time_points') or 0),
+                'words':            int(p.get('total_words') or 0),
+                'shield_status':    p.get('shield_status') or '⚠️ UNPROTECTED',
+                'name_shield_until': p.get('name_shield_until'),
+            }
             for p in (r.data or []) if p.get('is_bot') is not True
         ][:limit]
     except Exception as e:
