@@ -175,7 +175,6 @@ def save_user(user_id, data: dict):
     d.pop('challenges', None)
     d.pop('metadata', None)
     d.pop('training_queue', None)
-    d.pop('shield_status', None)  # Shield status is in-memory only, not in DB
     d.pop('shield_cooldown', None)  # Shield cooldown doesn't exist in schema
     d.pop('prestige', None)  # Prestige tier is in-memory only, not in DB
     
@@ -256,35 +255,79 @@ def register_user(user_id, username: str):
         traceback.print_exc()
         return False  # Registration failed
 def get_game_weekly_leaderboard(game_type="fusion", limit=10):
-    """Fetch weekly points for a specific game from Supabase."""
-    field = f"{game_type}_weekly_points"
-    # Query players where the specific game points are > 0
-    response = supabase.table("players").select(f"id, username, {field}")\
-        .gt(field, 0).order(field, desc=True).limit(limit).execute()
-    
-    players = []
-    for row in response.data:
-        players.append({
-            "id": str(row['id']),
-            "username": row.get('username', 'Unknown'),
-            "points": row.get(field, 0)
-        })
-    return players
+    """
+    Weekly leaderboard for a specific game.
+    Tries game-specific column first; falls back to shared weekly_points.
+    """
+    this_week  = _current_week_key()
+    game_field = f"{game_type}_weekly_points"
+
+    try:
+        r = supabase.table(DB_TABLE) \
+            .select(f"user_id, username, {game_field}, week_start, shield_status, name_shield_until") \
+            .order(game_field, desc=True) \
+            .limit(max(limit, 50)) \
+            .execute()
+
+        results = []
+        for p in (r.data or []):
+            pts = int(p.get(game_field) or 0)
+            pw  = (p.get('week_start') or '').split('T')[0]
+            if pw != this_week:
+                pts = 0
+            if pts > 0:
+                results.append({
+                    'id':                p['user_id'],
+                    'username':          p.get('username', 'Unknown'),
+                    'points':            pts,
+                    'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
+                    'name_shield_until': p.get('name_shield_until'),
+                })
+        results.sort(key=lambda x: x['points'], reverse=True)
+        if results:
+            return results[:limit]
+    except Exception as e:
+        print(f"[LB] {game_field} failed ({e}) — falling back to shared weekly_points")
+
+    # Fallback: shared weekly_points column (always exists)
+    return get_weekly_leaderboard(limit=limit)
+
 
 def get_game_alltime_leaderboard(game_type="fusion", limit=10):
-    """Fetch all-time points for a specific game from Supabase."""
-    field = f"{game_type}_all_time_points"
-    response = supabase.table("players").select(f"id, username, {field}")\
-        .gt(field, 0).order(field, desc=True).limit(limit).execute()
-    
-    players = []
-    for row in response.data:
-        players.append({
-            "id": str(row['id']),
-            "username": row.get('username', 'Unknown'),
-            "points": row.get(field, 0)
-        })
-    return players
+    """
+    All-time leaderboard for a specific game.
+    Tries game-specific column first; falls back to shared all_time_points.
+    """
+    game_field = f"{game_type}_all_time_points"
+
+    try:
+        r = supabase.table(DB_TABLE) \
+            .select(f"user_id, username, {game_field}, is_bot, shield_status, name_shield_until") \
+            .order(game_field, desc=True) \
+            .limit(limit * 5) \
+            .execute()
+
+        results = []
+        for p in (r.data or []):
+            if p.get('is_bot'):
+                continue
+            pts = int(p.get(game_field) or 0)
+            if pts > 0:
+                results.append({
+                    'id':                p['user_id'],
+                    'username':          p.get('username', 'Unknown'),
+                    'points':            pts,
+                    'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
+                    'name_shield_until': p.get('name_shield_until'),
+                })
+        if results:
+            return results[:limit]
+    except Exception as e:
+        print(f"[LB] {game_field} failed ({e}) — falling back to shared all_time_points")
+
+    # Fallback: shared all_time_points column (always exists)
+    return get_alltime_leaderboard(limit=limit)
+
 
 def ensure_bot_exists(username: str, initial_points: int = 0):
     """Ensure a bot account exists in the database. Returns user_id."""
@@ -331,45 +374,64 @@ def ensure_bot_exists(username: str, initial_points: int = 0):
 # ── Points (weekly + all-time) ─────────────────────────────────────────────
 
 def add_points(user_id, points: int, username: str = '', game_type: str = 'fusion'):
-    """Accumulate points. Resets weekly bucket if the week has turned over.
-    game_type can be 'fusion' or 'trivia'."""
+    """
+    Accumulate points for a player, persisting reliably to Supabase.
+    Uses a targeted UPDATE on the core columns (always exist) plus a
+    best-effort update on game-specific columns if they exist.
+    """
     uid = str(user_id)
     user = get_user(uid)
     if not user:
         register_user(uid, username)
         user = get_user(uid)
+    if not user:
+        print(f"[ADD_POINTS] Cannot find or create user {uid}")
+        return
 
     this_week = _current_week_key()
-    last_week = user.get('week_start', '')
+    last_week_date = (user.get('week_start') or '').split('T')[0]
 
-    # Compare dates explicitly - extract just the date portion for both
-    last_week_date = last_week.split('T')[0] if last_week else ''
+    # Calculate new values
+    new_weekly    = points if last_week_date != this_week else user.get('weekly_points', 0) + points
+    new_alltime   = user.get('all_time_points', 0) + points
+    new_words     = user.get('total_words', 0) + 1
 
-    if last_week_date != this_week:
-        # New week — wipe weekly bucket and update week marker
-        user['weekly_points'] = 0
-        user['week_start'] = this_week
-        print(f"[POINTS] Week boundary for {username}: {last_week_date} → {this_week}")
+    # ── Step 1: Always-safe direct UPDATE on core columns ─────────────────
+    core_update = {
+        'weekly_points':   new_weekly,
+        'all_time_points': new_alltime,
+        'total_words':     new_words,
+        'week_start':      this_week,
+    }
+    try:
+        supabase.table(DB_TABLE).update(core_update).eq('user_id', uid).execute()
+    except Exception as e:
+        print(f"[ADD_POINTS] Core update failed for {uid}: {e}")
+        return
 
-    # Add to general totals
-    user['all_time_points'] = user.get('all_time_points', 0) + points
-    user['weekly_points']   = user.get('weekly_points',   0) + points
-    user['total_words']     = user.get('total_words',     0) + 1
-
-    # Add to game-specific totals (fusion_weekly_points / trivia_weekly_points etc.)
-    # These columns may not exist yet on all rows — use get() with 0 default
+    # ── Step 2: Game-specific columns — best effort (columns may not exist) ─
     game_weekly_key  = f"{game_type}_weekly_points"
     game_alltime_key = f"{game_type}_all_time_points"
-    game_week_key    = f"{game_type}_week_start"
 
-    if user.get(game_week_key, '').split('T')[0] != this_week:
-        user[game_weekly_key] = 0
-        user[game_week_key]   = this_week
+    try:
+        # Calculate game-specific values
+        game_weekly_prev  = user.get(game_weekly_key, 0) or 0
+        game_alltime_prev = user.get(game_alltime_key, 0) or 0
+        game_week_prev    = (user.get(f"{game_type}_week_start") or '').split('T')[0]
 
-    user[game_weekly_key]  = user.get(game_weekly_key, 0) + points
-    user[game_alltime_key] = user.get(game_alltime_key, 0) + points
+        new_game_weekly   = points if game_week_prev != this_week else game_weekly_prev + points
+        new_game_alltime  = game_alltime_prev + points
 
-    save_user(uid, user)
+        supabase.table(DB_TABLE).update({
+            game_weekly_key:             new_game_weekly,
+            game_alltime_key:            new_game_alltime,
+            f"{game_type}_week_start":   this_week,
+        }).eq('user_id', uid).execute()
+    except Exception:
+        # Column doesn't exist — that's fine, core points were already saved
+        pass
+
+    print(f"[ADD_POINTS] {username or uid}: +{points} pts (weekly={new_weekly}, alltime={new_alltime})")
 
 
 def add_xp(user_id, amount: int) -> bool:

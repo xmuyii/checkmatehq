@@ -982,50 +982,21 @@ async def cmd_words(message: types.Message):
 
 @dp.message(_cmd("weekly"))
 async def cmd_weekly(message: types.Message):
-    """Display weekly leaderboard with top scores this week."""
-    user_id = str(message.from_user.id)
-    user = get_user(user_id)
-    
-    if not user:
-        await _send_unreg_sticker(message)
-        return
-    
-    # Get the weekly leaderboard
-    try:
-        lb = get_weekly_leaderboard(limit=10)
-        print(f"[CMD_WEEKLY] Called by {user.get('username')} - got {len(lb)} players")
-        
-        text = "🏆 *WEEKLY LEADERBOARD*\n━━━━━━━━━━━━━━━\n"
-        
-        if not lb:
-            text += "No scores yet this week. Shocking."
-        else:
-            from datetime import datetime
-            for i, p in enumerate(lb, 1):
-                medal = ["🥇", "🥈", "🥉"][i-1] if i <= 3 else f"{i}."
-                
-                # Check if player has active name shield
-                display_name = p['username']
-                name_shield_until = p.get('name_shield_until')
-                if name_shield_until:
-                    try:
-                        expiry = datetime.fromisoformat(name_shield_until)
-                        if datetime.now() < expiry:
-                            display_name = "[🛡️ Anonymous]"
-                    except:
-                        pass
-                
-                text += f"{medal} {display_name} — {p['points']:,} pts\n"
-        
-        text += "\n━━━━━━━━━━━━━━━\n"
-        text += "`!alltime` for all-time scores"
-        
-        await message.answer(text, parse_mode="Markdown")
-    except Exception as e:
-        print(f"[ERROR] cmd_weekly: {e}")
-        import traceback
-        traceback.print_exc()
-        await message.answer("❌ Error retrieving leaderboard. Try again.", parse_mode="Markdown")
+    """Display weekly leaderboard — uses shared renderer with shield column."""
+    if not get_user(str(message.from_user.id)):
+        await _send_unreg_sticker(message); return
+    text = await _render_leaderboard("overall", "weekly")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🃏 Fusion Weekly",  callback_data="lb_fusion_weekly"),
+            InlineKeyboardButton(text="🧠 Trivia Weekly",  callback_data="lb_trivia_weekly"),
+        ],
+        [
+            InlineKeyboardButton(text="🏆 All-Time",       callback_data="lb_overall_alltime"),
+            InlineKeyboardButton(text="🔄 Refresh",        callback_data="lb_overall_weekly"),
+        ],
+    ])
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 @dp.message(_cmd("score"))
 async def cmd_score(message: types.Message):
@@ -1067,30 +1038,21 @@ async def cmd_score(message: types.Message):
 
 @dp.message(_cmd("alltime"))
 async def cmd_alltime(message: types.Message):
+    """Display all-time leaderboard — uses shared renderer with shield column."""
     if not get_user(str(message.from_user.id)):
         await _send_unreg_sticker(message); return
-    lb = get_alltime_leaderboard()
-    text = "🏆 *ALL-TIME LEADERBOARD*\n━━━━━━━━━━━━━━━\n"
-    if not lb:
-        text += "Blank. Just like your future."
-    else:
-        from datetime import datetime
-        for i, p in enumerate(lb, 1):
-            medal = ["🥇","🥈","🥉"][i-1] if i<=3 else f"{i}."
-            
-            # Check if player has active name shield
-            display_name = p['username']
-            name_shield_until = p.get('name_shield_until')
-            if name_shield_until:
-                try:
-                    expiry = datetime.fromisoformat(name_shield_until)
-                    if datetime.now() < expiry:
-                        display_name = "[🛡️ Anonymous]"
-                except:
-                    pass
-            
-            text += f"{medal} {display_name} — {p['points']:,} pts\n"
-    await message.answer(text, parse_mode="Markdown")
+    text = await _render_leaderboard("overall", "alltime")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🃏 Fusion All-Time", callback_data="lb_fusion_alltime"),
+            InlineKeyboardButton(text="🧠 Trivia All-Time", callback_data="lb_trivia_alltime"),
+        ],
+        [
+            InlineKeyboardButton(text="🏆 Weekly",          callback_data="lb_overall_weekly"),
+            InlineKeyboardButton(text="🔄 Refresh",         callback_data="lb_overall_alltime"),
+        ],
+    ])
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
 @dp.message(_cmd("weekly_trivia"))
@@ -4972,10 +4934,17 @@ async def cb_menu_leaderboards(callback: types.CallbackQuery):
 
 
 async def _render_leaderboard(game_type: str, scope: str) -> str:
-    """Render a leaderboard as HTML text with shield status column."""
+    """
+    Render a leaderboard as HTML with shield status column and action hints.
+    Always falls back to shared weekly/alltime if game-specific columns are empty.
+    """
     medals = ["🥇", "🥈", "🥉"]
+    game_icons = {"fusion": "🃏", "trivia": "🧠", "overall": "🏆"}
+    icon        = game_icons.get(game_type, "🏆")
+    scope_label = "WEEKLY" if scope == "weekly" else "ALL-TIME"
+    now_str     = datetime.utcnow().strftime("%d %b %Y · %H:%M UTC")
 
-    # Fetch leaderboard data
+    # ── Fetch ──────────────────────────────────────────────────────────────
     lb = []
     try:
         if game_type == "overall":
@@ -4985,39 +4954,51 @@ async def _render_leaderboard(game_type: str, scope: str) -> str:
         else:
             lb = get_game_alltime_leaderboard(game_type=game_type, limit=10)
     except Exception as e:
-        # graceful fallback
+        print(f"[LEADERBOARD ERROR] {game_type}/{scope}: {e}")
         try:
             lb = get_weekly_leaderboard(limit=10) if scope == "weekly" else get_alltime_leaderboard(limit=10)
-        except Exception:
-            return f"❌ Could not fetch leaderboard: {e}"
+        except Exception as e2:
+            return (
+                f"{icon} <b>{game_type.upper()} — {scope_label}</b>\n"
+                f"❌ Could not fetch leaderboard\n<i>{e2}</i>\n\n"
+                f"<i>Use /fusion or /trivia in the group to play!</i>"
+            )
 
-    if not lb:
-        return "📭 No scores yet. Play some games first!"
-
-    game_icons = {"fusion": "🃏", "trivia": "🧠", "overall": "🏆"}
-    icon        = game_icons.get(game_type, "🏆")
-    scope_label = "WEEKLY" if scope == "weekly" else "ALL-TIME"
-
-    now_str = datetime.utcnow().strftime("%d %b · %H:%M UTC")
-
+    # ── Header ─────────────────────────────────────────────────────────────
     header = (
         f"{icon} <b>{game_type.upper()} — {scope_label}</b>\n"
-        f"<i>{now_str}</i>\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"<b>{'Rank':<4} {'Player':<16} {'Shield':<8} Pts</b>\n"
-        f"━━━━━━━━━━━━━━━━━\n"
+        f"<i>Updated: {now_str}</i>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
     )
 
+    # ── Empty state (with helpful message, not just a dead-end) ───────────
+    if not lb:
+        empty_hint = {
+            "fusion":  "Play a game! Go to the Fusion topic and words will earn you points.",
+            "trivia":  "Play a game! Answer trivia questions in the Trivia topic.",
+            "overall": "No one has scored yet this week. Start playing!",
+        }.get(game_type, "No scores yet. Start playing!")
+        return (
+            header +
+            f"<i>📭 {empty_hint}</i>\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"<i>🛡️ Protected  ·  ⚠️ Exposed  ·  💥 Disrupted</i>\n"
+            f"<i>/attack @player  ·  /shield  ·  /freeze</i>"
+        )
+
+    # ── Rows ───────────────────────────────────────────────────────────────
     rows = ""
     for i, p in enumerate(lb):
-        medal     = medals[i] if i < 3 else f"{i+1:>2}."
-        name      = _safe_name(p.get("username", "Unknown"))[:14]
-        pts       = p.get("points", 0)
+        medal = medals[i] if i < 3 else f"{i+1:>2}."
+        name  = _safe_name(p.get("username", "Unknown"))[:15]
+        pts   = p.get("points", 0)
 
-        # Shield directly from leaderboard row (no extra DB call needed)
-        st          = p.get("shield_status") or "UNPROTECTED"
+        # Shield — read directly from lb row (no extra DB call)
+        st          = p.get("shield_status") or ""
         shield_icon = "🛡️" if "ACTIVE" in st else ("💥" if "DISRUPTED" in st else "⚠️")
-        ns_until    = p.get("name_shield_until")
+
+        # Name shield — anonymise
+        ns_until = p.get("name_shield_until")
         if ns_until:
             try:
                 from datetime import datetime as _dt
@@ -5029,10 +5010,15 @@ async def _render_leaderboard(game_type: str, scope: str) -> str:
 
         rows += f"{medal} <b>{name}</b>  {shield_icon}  {pts:,} pts\n"
 
+    # ── Footer with action commands ────────────────────────────────────────
     footer = (
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"<i>🛡️ Protected · ⚠️ Exposed · 💥 Disrupted</i>\n"
-        f"<i>Use /attack @name to raid · /shield to protect</i>"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<b>🛡️</b> Protected  <b>⚠️</b> Exposed  <b>💥</b> Disrupted\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚔️ <code>/attack @username</code> — raid a player\n"
+        f"🛡️ <code>/activateshield</code> — protect your base\n"
+        f"❄️ <code>/freeze</code> — buy time in Fusion round\n"
+        f"🔍 <code>/scout @username</code> — spy on their base"
     )
 
     return header + rows + footer
@@ -9742,12 +9728,12 @@ async def hourly_leaderboard_broadcast_task(bot: Bot, chat_id: int):
             medals  = ["🥇", "🥈", "🥉"]
 
             sections = [
-                ("🃏 FUSION — WEEKLY",   get_game_weekly_leaderboard, {"game_type": "fusion",  "limit": 10}),
-                ("🃏 FUSION — ALL-TIME", get_game_alltime_leaderboard, {"game_type": "fusion",  "limit": 10}),
-                ("🧠 TRIVIA — WEEKLY",   get_game_weekly_leaderboard, {"game_type": "trivia",  "limit": 10}),
-                ("🧠 TRIVIA — ALL-TIME", get_game_alltime_leaderboard, {"game_type": "trivia",  "limit": 10}),
                 ("🏆 OVERALL — WEEKLY",  get_weekly_leaderboard,       {"limit": 10}),
                 ("🏆 OVERALL — ALL-TIME",get_alltime_leaderboard,      {"limit": 10}),
+                ("🃏 FUSION — WEEKLY",   get_game_weekly_leaderboard,  {"game_type": "fusion",  "limit": 10}),
+                ("🃏 FUSION — ALL-TIME", get_game_alltime_leaderboard, {"game_type": "fusion",  "limit": 10}),
+                ("🧠 TRIVIA — WEEKLY",   get_game_weekly_leaderboard,  {"game_type": "trivia",  "limit": 10}),
+                ("🧠 TRIVIA — ALL-TIME", get_game_alltime_leaderboard, {"game_type": "trivia",  "limit": 10}),
             ]
 
             full_board = f"📊 <b>LEADERBOARDS</b>  <i>({now_str})</i>\n"
