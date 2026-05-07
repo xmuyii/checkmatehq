@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext # <--- Add this!
 from aiogram.fsm.state import StatesGroup, State
 
 # --- CONFIGURATION ---
-API_TOKEN = '8770224655:AAEiEusv408HSPT4hH815LpKmbj4vzyUd6s' # Use the Revoked Token here
+API_TOKEN = '8761897858:AAEb1nCZQ_I4DKgMa9PgMk-q0t8Be0bMZlQ' # Use the Revoked Token here
 SUPABASE_URL = 'https://basniiolppmtpzishhtn.supabase.co'.rstrip('/')
 SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJhc25paW9scHBtdHB6aXNoaHRuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTQ3NjMwOCwiZXhwIjoyMDkxMDUyMzA4fQ.qrj1BO5dNilRDvgKtvTdwIWjBhFTRyGzuHPD271Xcac'
 APPS_URL = 'https://script.google.com/macros/s/AKfycby1Uq9VsH7QT9M-2oEklJaLS0jerCe16BUzgC17mkwSGqHZgYGLBTGzUNCayyCE7ICS/exec'
