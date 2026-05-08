@@ -547,22 +547,31 @@ async def game_loop(chat_id: int):
                 # Show last week winners
                 last_winners = []
                 try:
+                    _script_dir = os.path.dirname(os.path.abspath(__file__))
                     paths_to_try = [
+                        os.path.join(_script_dir, 'last_week_winners.json'),
+                        os.path.join(os.getcwd(), 'last_week_winners.json'),
                         'last_week_winners.json',
-                        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'last_week_winners.json'),
-                        os.path.join(os.getcwd(), 'last_week_winners.json')
                     ]
+                    _loaded = False
                     for path in paths_to_try:
                         if os.path.exists(path):
                             with open(path, 'r', encoding='utf-8') as f:
                                 last_winners = json.load(f)
-                            if last_winners:
-                                print(f"[GAME LOOP] Loaded {len(last_winners)} last week winners from {path}")
+                            print(f"[GAME LOOP] Loaded {len(last_winners)} last-week winners from {path}")
+                            _loaded = True
                             break
+                    if not _loaded:
+                        print(f"[GAME LOOP] No last_week_winners.json found in: {paths_to_try}")
+                        # Pull from DB as fallback — top 3 all-time players
+                        try:
+                            _lb = get_alltime_leaderboard(limit=3)
+                            last_winners = [{'username': p['username'], 'points': p['points']} for p in _lb]
+                            print(f"[GAME LOOP] Using alltime top-3 as last-week fallback: {[p['username'] for p in last_winners]}")
+                        except Exception:
+                            last_winners = []
                 except Exception as e:
                     print(f"[ERROR] Loading last week winners: {e}")
-                    import traceback
-                    traceback.print_exc()
                     last_winners = []
 
                 winners_text = ""
@@ -710,8 +719,14 @@ async def game_loop(chat_id: int):
                     
                     result += f"\n{divider()}\n`!weekly` | `!alltime` for full stats"
                 
+                # Inline button so players can view leaderboard right after the round
+                _round_kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="🏆 Weekly Board",  callback_data="lb_overall_weekly"),
+                    InlineKeyboardButton(text="🃏 Fusion Board",  callback_data="lb_fusion_weekly"),
+                ]])
                 await bot.send_message(chat_id, result, parse_mode="Markdown",
-                                          message_thread_id=FUSION_TOPIC_ID)
+                                       message_thread_id=FUSION_TOPIC_ID,
+                                       reply_markup=_round_kb)
 
                 # Level-up announcements
                 try:
