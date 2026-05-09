@@ -6,7 +6,21 @@ Architecture: flat @dp.message decorators with _cmd() filter.
 on_group_message is registered LAST so every command above fires first.
 Game loop: simple asyncio.sleep ticks, force_stop flag.
 """
+from flask import Flask
+import threading
+import os
 
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    return "Bot is alive!", 200
+
+def run_flask():
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
+
+# Start the fake server in a separate thread
+threading.Thread(target=run_flask, daemon=True).start()
 # ── Load environment variables FIRST ──────────────────────────────────────
 from dotenv import load_dotenv
 load_dotenv()
