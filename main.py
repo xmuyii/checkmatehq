@@ -6,21 +6,7 @@ Architecture: flat @dp.message decorators with _cmd() filter.
 on_group_message is registered LAST so every command above fires first.
 Game loop: simple asyncio.sleep ticks, force_stop flag.
 """
-from flask import Flask
-import threading
-import os
 
-app = Flask(__name__)
-
-@app.route('/')
-def health_check():
-    return "Bot is alive!", 200
-
-def run_flask():
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 8080)))
-
-# Start the fake server in a separate thread
-threading.Thread(target=run_flask, daemon=True).start()
 # ── Load environment variables FIRST ──────────────────────────────────────
 from dotenv import load_dotenv
 load_dotenv()
@@ -279,6 +265,9 @@ try:
         add_resources_from_word_length, update_streak_and_award_food,
         reset_all_streaks, add_randomized_gift, give_automatic_shield, deactivate_shield, disrupt_shield, restore_shield_after_attack, grant_free_teleports_to_all,
         grant_free_shields_to_all, get_game_weekly_leaderboard, get_game_alltime_leaderboard,
+        award_word_score, get_credits, add_credits, spend_credits,
+        claim_daily_login_credits, award_scoreboard_credits,
+        CREDITS_TO_PLAY, CREDITS_RANK_REWARDS, CREDITS_DAILY_LOGIN,
     )
     print("✅ Using Supabase database")
 except Exception as e:
@@ -712,7 +701,7 @@ async def game_loop(chat_id: int):
                         except Exception as e:
                             print(f"[ERROR] Crate handling: {e}")
                     
-                    # Scores with medals + shield column
+                    # Scores with medals + shield column + credit awards
                     for i, p in enumerate(ss):
                         medal      = medals[i] if i < 3 else f"  {i+1}."
                         p_name     = (p['name'] or "Player")[:13]
@@ -724,12 +713,22 @@ async def game_loop(chat_id: int):
                                 shield_i = "🛡️" if "ACTIVE" in _st else ("💥" if "DISRUPTED" in _st else "⚠️")
                         except Exception:
                             pass
-                        result += f"{medal} {p_name}  {shield_i}  *{p['pts']:,} pts*\n"
+                        rank       = i + 1
+                        cr_reward  = {1:50,2:45,3:30,4:20,5:10}.get(rank, 5 if rank <= 10 else 0)
+                        cr_str     = f" (+{cr_reward}💳)" if cr_reward else ""
+                        result += f"{medal} {p_name}  {shield_i}  *{p['pts']:,} pts*{cr_str}\n"
                         if i < 3:
                             try:
                                 add_unclaimed_item(p['user_id'], "super_crate", 1)
                             except Exception as e:
                                 print(f"[ERROR] Adding crate for {p['name']}: {e}")
+                        # Award credits to top 10
+                        if cr_reward > 0:
+                            try:
+                                add_credits(p['user_id'], cr_reward, f"rank#{rank} fusion round")
+                            except Exception:
+                                pass
+                    result += f"\n💳 Credits awarded to top 10!"
                     
                     result += f"\n{divider()}\n`!weekly` | `!alltime` for full stats"
                 
@@ -1007,6 +1006,95 @@ async def cmd_words(message: types.Message):
     if not eng.active or not eng.word1:
         await message.answer("🃏 *GameMaster:*No round running.", parse_mode="Markdown"); return
     await message.answer(f"📝 *THE WORDS ARE:* \n\n\n`{eng.word1}`  `{eng.word2}` with added letters `{eng.extra_letters[0]}` `{eng.extra_letters[1]}`", parse_mode="Markdown")
+
+
+@dp.message(_cmd("daily"))
+async def cmd_daily(message: types.Message):
+    """Claim daily login credits."""
+    u_id = str(message.from_user.id)
+    if not get_user(u_id):
+        await _send_unreg_sticker(message); return
+
+    awarded, amount, new_bal = claim_daily_login_credits(u_id)
+    if awarded:
+        await message.answer(
+            f"🌅 <b>Daily Login Bonus Claimed!</b>\n\n"
+            f"💳 <b>+{amount} credits</b>\n"
+            f"Balance: <b>{new_bal} credits</b>\n\n"
+            f"Come back tomorrow for another {amount} credits!",
+            parse_mode="HTML"
+        )
+    else:
+        bal = get_credits(u_id)
+        await message.answer(
+            f"⏳ <b>Already claimed today!</b>\n\n"
+            f"💳 Balance: <b>{bal} credits</b>\n"
+            f"Come back tomorrow for {CREDITS_DAILY_LOGIN} more credits.",
+            parse_mode="HTML"
+        )
+
+
+@dp.message(_cmd("credits", "balance"))
+async def cmd_credits(message: types.Message):
+    """Show credit balance and how to earn more."""
+    u_id = str(message.from_user.id)
+    if not get_user(u_id):
+        await _send_unreg_sticker(message); return
+
+    bal = get_credits(u_id)
+    kb  = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌅 Claim Daily (+50)",  callback_data="credits_daily")],
+        [InlineKeyboardButton(text="💳 How to earn more",   callback_data="credits_info")],
+    ])
+    await message.answer(
+        f"💳 <b>YOUR CREDITS</b>\n━━━━━━━━━━━━━━━━━\n"
+        f"Balance: <b>{bal} credits</b>\n\n"
+        f"<b>How to earn credits:</b>\n"
+        f"🌅 Daily login → +50\n"
+        f"🥇 Rank #1 → +50  🥈 #2 → +45  🥉 #3 → +30\n"
+        f"  4th → +20  5th → +10  6-10th → +5\n\n"
+        f"<b>Cost to play:</b>\n"
+        f"🃏 Fusion round entry → {CREDITS_TO_PLAY} credits\n\n"
+        f"<b>Buy credits:</b>\n"
+        f"1000 credits = ₦1000\n"
+        f"Contact admin to purchase.",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
+
+@dp.callback_query(lambda q: q.data == "credits_daily")
+async def cb_credits_daily(callback: types.CallbackQuery):
+    u_id = str(callback.from_user.id)
+    awarded, amount, new_bal = claim_daily_login_credits(u_id)
+    if awarded:
+        await callback.answer(f"✅ +{amount} credits! Balance: {new_bal}", show_alert=True)
+    else:
+        bal = get_credits(u_id)
+        await callback.answer(f"⏳ Already claimed today. Balance: {bal}", show_alert=True)
+
+
+@dp.callback_query(lambda q: q.data == "credits_info")
+async def cb_credits_info(callback: types.CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text(
+        f"💳 <b>CREDIT SYSTEM</b>\n━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>Earning credits:</b>\n"
+        f"• Daily login: +50 credits\n"
+        f"• #1 on scoreboard: +50\n"
+        f"• #2: +45  •  #3: +30\n"
+        f"• #4: +20  •  #5: +10\n"
+        f"• #6-10: +5 each\n\n"
+        f"<b>Spending credits:</b>\n"
+        f"• Fusion round entry: {CREDITS_TO_PLAY} credits\n\n"
+        f"<b>Buying credits:</b>\n"
+        f"1000 credits = ₦1,000\n"
+        f"Contact admin to top up.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")
+        ]])
+    )
 
 
 @dp.message(_cmd("weekly"))
@@ -4870,6 +4958,15 @@ async def cmd_start(message: types.Message):
     if user is None:
         user = register_new_user(u_id, message.from_user.first_name)
 
+    # Daily login credits
+    _awarded, _amount, _new_bal = claim_daily_login_credits(u_id)
+    if _awarded:
+        asyncio.create_task(message.answer(
+            f"🌅 <b>Daily Login Bonus!</b>  +{_amount} credits\n"
+            f"💳 Balance: <b>{_new_bal} credits</b>",
+            parse_mode="HTML"
+        ))
+
     username   = _safe_name(user.get("username") or message.from_user.first_name or "Operative")
     level      = user.get("level", 1)
     xp         = user.get("xp", 0)
@@ -5718,52 +5815,54 @@ async def cb_menu_resources(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda q: q.data == "menu_profile")
 async def cb_menu_profile(callback: types.CallbackQuery):
-    """Show player profile."""
+    """Show the CALLING player's own profile — never another player's."""
+    # SECURITY: always use callback.from_user.id, never trust data in callback.data
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
-    
-    if not user:
-        await callback.answer("User not found", show_alert=True)
-        return
-    
-    username = user.get("username", "Unknown")
-    level = user.get("level", 1)
-    xp = user.get("xp", 0)
-    all_time_points = user.get("all_time_points", 0)
-    weekly_points = user.get("weekly_points", 0)
-    total_words = user.get("total_words", 0)
-    wins = user.get("wins", 0)
-    losses = user.get("losses", 0)
-    
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎖️ Achievements", callback_data="profile_achievements")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
-    ])
-    
-   
-    await callback.message.edit_text(
-        f"👤 *{username}*\n\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"🎖️ **Level:** {level}\n"
-        f"✨ **XP:** {xp}\n"
-        f"💰 **Gold:** {user.get('gold', 0)}\n"
-        f"🏰 **Guild:** {user.get('guild', {}).get('name', 'No Guild')}\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"*Points:*\n"
-        f"📊 All-Time: **{all_time_points}**\n"
-        f"📈 Weekly: **{weekly_points}**\n\n"
-        f"*Statistics:*\n"
-        f"📝 Words: **{total_words}**\n"
-        f"🏆 Wins: **{wins}**\n"
-        f"💀 Losses: **{losses}**\n"
-        f"━━━━━━━━━━━━━━━━━",
-        parse_mode="Markdown",
-        reply_markup=markup
 
-    
-            )
-    
-    
+    if not user:
+        await callback.answer("Profile not found. Type /start first.", show_alert=True)
+        return
+
+    username        = _safe_name(user.get("username", "Unknown"))
+    level           = user.get("level", 1)
+    xp              = user.get("xp", 0)
+    all_time_points = user.get("all_time_points", 0)
+    weekly_points   = user.get("weekly_points", 0)
+    total_words     = user.get("total_words", 0)
+    wins            = user.get("wins", 0)
+    losses          = user.get("losses", 0)
+    credits         = int(user.get("credits", 0))
+    shield_st       = user.get("shield_status") or "⚠️ UNPROTECTED"
+    shield_icon     = "🛡️" if "ACTIVE" in shield_st else ("💥" if "DISRUPTED" in shield_st else "⚠️")
+    xp_bar_pct      = min(100, int(xp % 100))
+    xp_bar          = "█" * (xp_bar_pct // 10) + "░" * (10 - xp_bar_pct // 10)
+
+    markup = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🌅 Claim Daily",     callback_data="credits_daily"),
+            InlineKeyboardButton(text="💳 Credits Info",    callback_data="credits_info"),
+        ],
+        [InlineKeyboardButton(text="⬅️ Back",               callback_data="menu_back")],
+    ])
+
+    await callback.message.edit_text(
+        f"👤 <b>{username}</b>  —  Level <b>{level}</b>\n"
+        f"[{xp_bar}] {xp_bar_pct}%\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⭐ XP: <b>{xp:,}</b>\n"
+        f"💰 Bitcoin: <b>{user.get('bitcoin', 0):,}</b>\n"
+        f"💳 Credits: <b>{credits}</b>\n"
+        f"{shield_icon} Shield: <b>{shield_st}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 All-Time: <b>{all_time_points:,}</b> pts\n"
+        f"📈 Weekly:   <b>{weekly_points:,}</b> pts\n"
+        f"📝 Words:    <b>{total_words:,}</b>\n"
+        f"🏆 Wins: <b>{wins}</b>  💀 Losses: <b>{losses}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━",
+        parse_mode="HTML",
+        reply_markup=markup
+    )
     await callback.answer()
 
 
@@ -8775,6 +8874,25 @@ async def on_group_message(message: types.Message):
             if len(guess) < 3:
                 return
 
+            # ── Credits check: deduct CREDITS_TO_PLAY on first word of round ─
+            if u_id not in eng.player_sessions:
+                cr_bal = int(user.get('credits', 0))
+                if cr_bal < CREDITS_TO_PLAY:
+                    await message.reply(
+                        f"💳 <b>Not enough credits!</b>\n"
+                        f"You need <b>{CREDITS_TO_PLAY} credits</b> to play Fusion.\n"
+                        f"Your balance: <b>{cr_bal}</b>\n\n"
+                        f"• /daily — claim 50 free daily credits\n"
+                        f"• Appear on the scoreboard to earn more\n"
+                        f"• Purchase credits: 1000 credits = ₦1000",
+                        parse_mode="HTML"
+                    )
+                    return
+                # Deduct credits (non-blocking background task)
+                async def _deduct_entry_credits():
+                    spend_credits(u_id, CREDITS_TO_PLAY, "fusion round entry")
+                asyncio.create_task(_deduct_entry_credits())
+
             if guess in eng.used_words:
                 update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
                 await message.reply(f"❌ `{guess.upper()}` was already guessed!", parse_mode="Markdown")
@@ -8818,49 +8936,57 @@ async def on_group_message(message: types.Message):
                     message_thread_id=FUSION_TOPIC_ID
                 )
 
-            pts = max(len(guess) - 2, 1)
-            db_name = user.get("username", message.from_user.first_name or "Player")
-            word_len = len(guess)
+            pts         = max(len(guess) - 2, 1)
+            db_name     = user.get("username", message.from_user.first_name or "Player")
+            word_len    = len(guess)
+            xp_awarded  = pts * 2
+            btc_awarded = max(pts // 2, 1)
 
-            resources_awarded = {}
             resource_map = {4: 'wood', 5: 'bronze', 6: 'iron', 7: 'diamond'}
+            resources_awarded = {}
             if word_len in resource_map:
                 resources_awarded[resource_map[word_len]] = 1
             elif word_len >= 8:
                 resources_awarded['relics'] = 1
 
-            streak_info = update_streak_and_award_food(u_id, correct=True, username=db_name)
-            rare_item = check_rare_drop()
-            if rare_item:
-                add_unclaimed_item(u_id, rare_item["key"], 1)
-
-            xp_awarded = pts * 2
-            bitcoin_awarded = max(pts // 2, 1)
-
+            # ── Update in-memory session FIRST → instant dashboard ─────────
             if u_id not in eng.player_sessions:
                 eng.player_sessions[u_id] = {
                     'pts': 0, 'xp': 0, 'word_count': 0,
                     'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
                     'food': 0, 'streak': 0, 'last_word': '', 'last_pts': 0, 'rare_message': ''
                 }
-
             session = eng.player_sessions[u_id]
+
+            # Streak (pure in-memory for speed)
+            session['streak'] = session.get('streak', 0) + 1
+            streak_val = session['streak']
+            food_bonus = max(0, streak_val - 2) if streak_val >= 3 else 0
+
             session.update({
-                'pts': session['pts'] + pts,
-                'xp': session['xp'] + xp_awarded,
+                'pts':        session['pts'] + pts,
+                'xp':         session['xp'] + xp_awarded,
                 'word_count': session['word_count'] + 1,
-                'last_word': guess,
-                'last_pts': pts,
-                'streak': streak_info.get('streak', 0),
-                'food': session['food'] + streak_info.get('food_awarded', 0)
+                'last_word':  guess,
+                'last_pts':   pts,
+                'food':       session['food'] + food_bonus,
             })
             for res_type, amount in resources_awarded.items():
                 session['resources'][res_type] += amount
+
+            # Rare drop check (in-memory, no DB needed here)
+            rare_item = check_rare_drop()
             if rare_item:
                 session['rare_message'] = f"🎉 <b>RARE DROP!</b> {_html.escape(rare_item['name'])}"
 
+            # Update round scores (in-memory)
+            if u_id not in eng.scores:
+                eng.scores[u_id] = {'name': db_name, 'pts': 0, 'user_id': u_id, 'leveled_up': False}
+            eng.scores[u_id]['pts'] += pts
+
+            # ── Send/edit dashboard immediately (no DB wait) ───────────────
             dashboard_text = build_player_dashboard(db_name, session, u_id, has_jammer=has_jammer)
-            word_num = session['word_count']
+            word_num       = session['word_count']
 
             if u_id in eng.dashboard_msgs and word_num % 4 != 0:
                 try:
@@ -8880,7 +9006,10 @@ async def on_group_message(message: types.Message):
             else:
                 if u_id in eng.dashboard_msgs:
                     try:
-                        await bot.delete_message(chat_id=message.chat.id, message_id=eng.dashboard_msgs[u_id])
+                        await bot.delete_message(
+                            chat_id=message.chat.id,
+                            message_id=eng.dashboard_msgs[u_id]
+                        )
                     except Exception:
                         pass
                 msg = await bot.send_message(
@@ -8890,29 +9019,21 @@ async def on_group_message(message: types.Message):
                 )
                 eng.dashboard_msgs[u_id] = msg.message_id
 
-            # Also update eng.scores so end-of-round summary works
-            if u_id not in eng.scores:
-                eng.scores[u_id] = {'name': db_name, 'pts': 0, 'user_id': u_id, 'leveled_up': False}
-            eng.scores[u_id]['pts'] += pts
+            # ── Fire DB write as background task (non-blocking) ────────────
+            async def _save_word_score():
+                try:
+                    award_word_score(
+                        u_id, pts, xp_awarded, btc_awarded,
+                        resources_awarded, db_name, game_type="fusion"
+                    )
+                    if rare_item:
+                        add_unclaimed_item(u_id, rare_item["key"], 1)
+                    # Streak DB update (best-effort)
+                    update_streak_and_award_food(u_id, correct=True, username=db_name)
+                except Exception as e:
+                    print(f"[DB SAVE WORD] {e}")
 
-            # Save to DB
-            try:
-                add_points(u_id, pts, db_name, game_type="fusion")
-                add_xp(u_id, xp_awarded)
-                add_bitcoin(u_id, bitcoin_awarded, db_name)
-                user_fresh = get_user(u_id)
-                if user_fresh:
-                    base_res = user_fresh.get('base_resources', {'resources': {}})
-                    if not isinstance(base_res, dict):
-                        base_res = {'resources': {}}
-                    res_dict = base_res.get('resources', {})
-                    for rt, am in resources_awarded.items():
-                        res_dict[rt] = res_dict.get(rt, 0) + am
-                    base_res['resources'] = res_dict
-                    user_fresh['base_resources'] = base_res
-                    save_user(u_id, user_fresh)
-            except Exception as e:
-                print(f"[DB ERROR] {e}")
+            asyncio.create_task(_save_word_score())
             return
 
         # ── Messages outside any game topic — ignore ──────────────────

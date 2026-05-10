@@ -494,6 +494,201 @@ def add_bitcoin(user_id, amount: int, username: str = ''):
     save_user(str(user_id), user)
 
 
+def award_word_score(user_id: str, pts: int, xp: int, bitcoin: int,
+                     resources: dict, username: str = '', game_type: str = 'fusion') -> dict:
+    """
+    ONE function, ONE DB read, ONE DB write for the entire word-score pipeline.
+    Returns the updated user dict so the caller can use it without re-fetching.
+    
+    Replaces: add_points() + add_xp() + add_bitcoin() + get_user() + save_user()
+    That was 8-10 Supabase round-trips. This is 2 (read + write).
+    """
+    uid       = str(user_id)
+    this_week = _current_week_key()
+
+    # ── Single read ────────────────────────────────────────────────────────
+    user = get_user(uid)
+    if not user:
+        register_user(uid, username)
+        user = get_user(uid)
+    if not user:
+        return {}
+
+    last_week_date = (user.get('week_start') or '').split('T')[0]
+    old_weekly     = int(user.get('weekly_points') or 0)
+    old_alltime    = int(user.get('all_time_points') or 0)
+    old_words      = int(user.get('total_words') or 0)
+    old_xp         = int(user.get('xp') or 0)
+    old_bitcoin    = int(user.get('bitcoin') or 0)
+
+    new_weekly     = pts if last_week_date != this_week else old_weekly + pts
+    new_alltime    = old_alltime + pts
+    new_words      = old_words + 1
+    new_xp         = old_xp + xp
+    new_level      = 1 + (new_xp // 100)
+    new_bitcoin    = old_bitcoin + bitcoin
+
+    # Game-specific weekly/alltime
+    gw_key         = f"{game_type}_weekly_points"
+    ga_key         = f"{game_type}_all_time_points"
+    gw_date        = (user.get(f"{game_type}_week_start") or '').split('T')[0]
+    gw_prev        = int(user.get(gw_key) or 0)
+    ga_prev        = int(user.get(ga_key) or 0)
+    new_gw         = pts if gw_date != this_week else gw_prev + pts
+    new_ga         = ga_prev + pts
+
+    # Resources
+    base_res       = user.get('base_resources', {})
+    if not isinstance(base_res, dict):
+        base_res   = {}
+    res_dict       = base_res.get('resources', {})
+    if not isinstance(res_dict, dict):
+        res_dict   = {}
+    for rt, am in resources.items():
+        res_dict[rt] = res_dict.get(rt, 0) + am
+    base_res['resources'] = res_dict
+
+    # ── Single write ───────────────────────────────────────────────────────
+    payload = {
+        'weekly_points':   new_weekly,
+        'all_time_points': new_alltime,
+        'total_words':     new_words,
+        'week_start':      this_week,
+        'xp':              new_xp,
+        'level':           new_level,
+        'bitcoin':         new_bitcoin,
+    }
+
+    # Add game-specific fields (silently skipped by Supabase if columns missing)
+    try:
+        supabase.table(DB_TABLE).update({
+            **payload,
+            gw_key:                           new_gw,
+            ga_key:                           new_ga,
+            f"{game_type}_week_start":        this_week,
+        }).eq('user_id', uid).execute()
+    except Exception:
+        # Game-specific columns don't exist — write core only
+        try:
+            supabase.table(DB_TABLE).update(payload).eq('user_id', uid).execute()
+        except Exception as e:
+            print(f"[AWARD_WORD] write failed for {uid}: {e}")
+            return user
+
+    # Update the in-memory user object for the caller
+    user.update({
+        'weekly_points':   new_weekly,
+        'all_time_points': new_alltime,
+        'total_words':     new_words,
+        'week_start':      this_week,
+        'xp':              new_xp,
+        'level':           new_level,
+        'bitcoin':         new_bitcoin,
+        'base_resources':  base_res,
+        gw_key:            new_gw,
+        ga_key:            new_ga,
+    })
+
+    print(f"[AWARD_WORD] ✅ {username or uid}: +{pts}pts +{xp}xp +{bitcoin}btc "
+          f"(weekly={new_weekly} alltime={new_alltime})")
+    return user
+
+
+# ─── Credit system ────────────────────────────────────────────────────────
+
+CREDITS_DAILY_LOGIN    = 50
+CREDITS_TO_PLAY        = 10   # cost per fusion round participation
+CREDITS_RANK_REWARDS   = {1: 50, 2: 45, 3: 30, 4: 20, 5: 10}
+CREDITS_RANK_DEFAULT   = 5    # ranks 6-10
+
+def get_credits(user_id: str) -> int:
+    """Return player's current credit balance."""
+    user = get_user(str(user_id))
+    return int(user.get('credits', 0)) if user else 0
+
+
+def add_credits(user_id: str, amount: int, reason: str = '') -> int:
+    """Add credits to a player. Returns new balance."""
+    uid  = str(user_id)
+    user = get_user(uid)
+    if not user:
+        return 0
+    new_bal = int(user.get('credits', 0)) + amount
+    try:
+        supabase.table(DB_TABLE).update({'credits': new_bal}).eq('user_id', uid).execute()
+        print(f"[CREDITS] +{amount} → {uid} ({reason}) balance={new_bal}")
+    except Exception as e:
+        print(f"[CREDITS] write failed for {uid}: {e}")
+        return 0
+    return new_bal
+
+
+def spend_credits(user_id: str, amount: int, reason: str = '') -> tuple:
+    """
+    Deduct credits. Returns (success: bool, new_balance: int).
+    """
+    uid  = str(user_id)
+    user = get_user(uid)
+    if not user:
+        return False, 0
+    bal = int(user.get('credits', 0))
+    if bal < amount:
+        return False, bal
+    new_bal = bal - amount
+    try:
+        supabase.table(DB_TABLE).update({'credits': new_bal}).eq('user_id', uid).execute()
+        print(f"[CREDITS] -{amount} → {uid} ({reason}) balance={new_bal}")
+    except Exception as e:
+        print(f"[CREDITS] spend failed for {uid}: {e}")
+        return False, bal
+    return True, new_bal
+
+
+def claim_daily_login_credits(user_id: str) -> tuple:
+    """
+    Award daily login credits (50). Returns (awarded: bool, credits_given: int, new_balance: int).
+    Only awards once per UTC day.
+    """
+    uid  = str(user_id)
+    user = get_user(uid)
+    if not user:
+        return False, 0, 0
+
+    from datetime import datetime
+    today = datetime.utcnow().date().isoformat()
+    last_login = user.get('last_credit_login', '')
+
+    if last_login == today:
+        return False, 0, int(user.get('credits', 0))
+
+    amount  = CREDITS_DAILY_LOGIN
+    new_bal = int(user.get('credits', 0)) + amount
+    try:
+        supabase.table(DB_TABLE).update({
+            'credits':           new_bal,
+            'last_credit_login': today,
+        }).eq('user_id', uid).execute()
+    except Exception as e:
+        print(f"[CREDITS] daily login write failed for {uid}: {e}")
+        return False, 0, int(user.get('credits', 0))
+
+    return True, amount, new_bal
+
+
+def award_scoreboard_credits(leaderboard: list):
+    """
+    Award credits to top-10 players at round end.
+    leaderboard: list of dicts with keys user_id, username, pts — sorted desc.
+    """
+    rank_rewards = {1: 50, 2: 45, 3: 30, 4: 20, 5: 10}
+    for rank, player in enumerate(leaderboard[:10], start=1):
+        uid      = str(player.get('user_id', player.get('id', '')))
+        name     = player.get('name', player.get('username', ''))
+        reward   = rank_rewards.get(rank, 5)   # ranks 6-10 get 5
+        add_credits(uid, reward, reason=f"rank#{rank} scoreboard")
+        print(f"[CREDITS] Rank {rank}: {name} → +{reward} credits")
+
+
 def use_bitcoin(user_id, amount: int) -> bool:
     user = get_user(str(user_id))
     if not user or user.get('bitcoin', 0) < amount:
