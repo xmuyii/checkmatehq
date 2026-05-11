@@ -29,7 +29,7 @@ import random
 import time
 import json
 import html as _html
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import httpx
 import os
 from aiogram import Bot, Dispatcher, types, F
@@ -86,7 +86,7 @@ def get_recent_events(event_type: str, minutes: int = 15) -> list:
     """Get events from last N minutes."""
     if event_type not in game_events:
         return []
-    cutoff = datetime.utcnow() - timedelta(minutes=minutes)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     return [e for e in game_events[event_type] if e.get('time', datetime.utcnow()) > cutoff]
 
 # ── Addictive Mechanics ────────────────────────────────────────────────────
@@ -5069,7 +5069,7 @@ async def _render_leaderboard(game_type: str, scope: str) -> str:
     game_icons = {"fusion": "🃏", "trivia": "🧠", "overall": "🏆"}
     icon        = game_icons.get(game_type, "🏆")
     scope_label = "WEEKLY" if scope == "weekly" else "ALL-TIME"
-    now_str     = datetime.utcnow().strftime("%d %b %Y · %H:%M UTC")
+    now_str     = datetime.now(timezone.utc).strftime("%d %b %Y · %H:%M UTC")
 
     # ── Fetch ──────────────────────────────────────────────────────────────
     lb = []
@@ -5450,27 +5450,38 @@ async def cb_battle_shield(callback: types.CallbackQuery):
     await callback.answer()
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
+    
     if not user:
         return
-    shield_st = user.get("shield_status", "⚠️ UNPROTECTED")
-    is_active = "ACTIVE" in shield_st
+
+    # ✅ Handle None safely: If shield_status is NULL in Supabase, default to "⚠️ UNPROTECTED"
+    shield_st = user.get("shield_status") or "⚠️ UNPROTECTED"
+    # ✅ Also check the timestamp column we added
+    shield_until = user.get("name_shield_until") 
+    
+    is_active = "ACTIVE" in shield_st.upper()
 
     kb_rows = []
     if is_active:
         kb_rows.append([InlineKeyboardButton(text="🔴 Deactivate Shield", callback_data="shield_deactivate")])
     else:
-        kb_rows.append([InlineKeyboardButton(text="🟢 Activate Shield",   callback_data="shield_activate")])
+        kb_rows.append([InlineKeyboardButton(text="🟢 Activate Shield", callback_data="shield_activate")])
+    
     kb_rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="menu_battle")])
 
     icon = "🛡️" if is_active else "⚠️"
+    
+    # Show the expiry time if it exists
+    expiry_text = f"\nExpires: <b>{shield_until}</b>" if shield_until else ""
+    status_msg = "Your base is protected." if is_active else "Your base is VULNERABLE to attacks!"
+
     await callback.message.edit_text(
         f"{icon} <b>SHIELD STATUS</b>\n━━━━━━━━━━━━━━━━━\n"
-        f"Current: <b>{shield_st}</b>\n\n"
-        f"{'Your base is protected.' if is_active else 'Your base is VULNERABLE to attacks!'}",
+        f"Current: <b>{shield_st}</b>{expiry_text}\n\n"
+        f"<i>{status_msg}</i>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
     )
-
 
 @dp.callback_query(lambda q: q.data in ("shield_activate", "shield_deactivate"))
 async def cb_shield_toggle(callback: types.CallbackQuery):
@@ -9129,7 +9140,7 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
         try:
             await asyncio.sleep(60)  # Check every 60 seconds
             
-            now = datetime.utcnow() + timedelta(hours=1)  # UTC+1 (WAT)
+            now = datetime.now(timezone.utc) + timedelta(hours=1)  # UTC+1 (WAT)
             
             # Sunday = weekday 6, check if within 23:58-23:59 window (just before Monday)
             is_sunday_midnight = (
@@ -9875,7 +9886,7 @@ async def hourly_leaderboard_broadcast_task(bot: Bot, chat_id: int):
     await asyncio.sleep(10)  # brief startup delay
     while True:
         try:
-            now_str = datetime.utcnow().strftime("%H:%M UTC")
+            now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
             medals  = ["🥇", "🥈", "🥉"]
 
             sections = [
