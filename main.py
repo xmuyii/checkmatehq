@@ -3339,10 +3339,10 @@ async def cmd_buy(message: types.Message):
     user["bitcoin"] = player_bitcoin - item["price"]
     
     # Apply special item effects
-    from datetime import datetime, timedelta
+    from datetime import datetime, timezone, timedelta
     if item_id == "name_shield":
         # Activate name shield for 24 hours
-        user["name_shield_until"] = (datetime.now() + timedelta(hours=24)).isoformat()
+        user["name_shield_until"] = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
         activation_msg = "🔐 *Name Shield has been ACTIVATED*\n\n" \
                          "Your username is now hidden!\n" \
                          "• Players cannot find you via `/attack` or `/scout`\n" \
@@ -3417,10 +3417,10 @@ async def cmd_name_shield_status(message: types.Message):
         )
         return
     
-    from datetime import datetime
+    from datetime import datetime, timezone
     try:
         expiry = datetime.fromisoformat(name_shield_until)
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         
         if now < expiry:
             remaining = expiry - now
@@ -4091,13 +4091,13 @@ async def cmd_scout(message: types.Message):
     # ═══════════════════════════════════════════════════════════════════════════
     #  NAME SHIELD CHECK — Can't scout if target has active name shield
     # ═══════════════════════════════════════════════════════════════════════════
-    from datetime import datetime
+    from datetime import datetime, timezone
     target = get_user(target_id)
     name_shield_until = target.get("name_shield_until")
     if name_shield_until:
         try:
             expiry = datetime.fromisoformat(name_shield_until)
-            if datetime.now() < expiry:
+            if datetime.now(timezone.utc) < expiry:
                 await message.answer(
                     f"🛰️ *SCOUT BLOCKED*\n\n"
                     f"This player has activated a **Name Shield**!\n\n"
@@ -4290,13 +4290,13 @@ async def cmd_attack(message: types.Message):
     # ═══════════════════════════════════════════════════════════════════════════
     #  NAME SHIELD CHECK — Can't attack if target has active name shield
     # ═══════════════════════════════════════════════════════════════════════════
-    from datetime import datetime
+    from datetime import datetime, timezone
     target = get_user(target_id)
     name_shield_until = target.get("name_shield_until")
     if name_shield_until:
         try:
             expiry = datetime.fromisoformat(name_shield_until)
-            if datetime.now() < expiry:
+            if datetime.now(timezone.utc) < expiry:
                 await message.answer(
                     f"🔐 *ATTACK BLOCKED*\n\n"
                     f"This player has activated a **Name Shield** and cannot be targeted!\n\n"
@@ -4832,13 +4832,13 @@ async def _execute_attack(attacker_id: str, target_id: str, target_display_name:
     
     # Send raid notification to defender (if they're in group)
     # Check if attacker has name shield - anonymize if active
-    from datetime import datetime
+    from datetime import datetime, timezone
     attacker_display_name = attacker.get("username", "Unknown")
     name_shield_until = attacker.get("name_shield_until")
     if name_shield_until:
         try:
             expiry = datetime.fromisoformat(name_shield_until)
-            if datetime.now() < expiry:
+            if datetime.now(timezone.utc) < expiry:
                 attacker_display_name = "[Anonymous Attacker]"
         except:
             pass
@@ -4958,14 +4958,15 @@ async def cmd_start(message: types.Message):
     if user is None:
         user = register_new_user(u_id, message.from_user.first_name)
 
-    # Daily login credits
+# Daily login credits
     _awarded, _amount, _new_bal = claim_daily_login_credits(u_id)
     if _awarded:
-        asyncio.create_task(message.answer(
+        # ✅ FIX: Removed asyncio.create_task and added await
+        await message.answer(
             f"🌅 <b>Daily Login Bonus!</b>  +{_amount} credits\n"
             f"💳 Balance: <b>{_new_bal} credits</b>",
             parse_mode="HTML"
-        ))
+        )
 
     username   = _safe_name(user.get("username") or message.from_user.first_name or "Operative")
     level      = user.get("level", 1)
@@ -5127,8 +5128,8 @@ async def _render_leaderboard(game_type: str, scope: str) -> str:
         ns_until = p.get("name_shield_until")
         if ns_until:
             try:
-                from datetime import datetime as _dt
-                if _dt.now() < _dt.fromisoformat(ns_until):
+                from datetime import datetime as _dt, timezone
+                if _dt.now(timezone.utc) < _dt.fromisoformat(ns_until):
                     name        = "🔐 Anonymous"
                     shield_icon = "🛡️"
             except Exception:
@@ -7453,10 +7454,10 @@ async def cb_activate_shield(callback: types.CallbackQuery):
     shield = next((it for it in inv if it.get('id') == item_id and it.get('type') == 'shield'), None)
     if not shield: await callback.answer("Shield not found.", show_alert=True); return
 
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     import json
     user['inventory'] = [it for it in inv if it.get('id') != item_id]
-    user['shield_expires'] = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+    user['shield_expires'] = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
     save_user(u_id, user)
 
     await callback.answer("🛡️ Shield activated! Protected for 24 hours.", show_alert=True)
@@ -9273,11 +9274,11 @@ async def bot_activity_task():
     while True:
         try:
             from supabase_db import supabase, DB_TABLE, ensure_bot_exists, _current_week_key
-            from datetime import datetime, timedelta
+            from datetime import datetime, timedelta, timezone
             import os, json
             
             try:
-                now = datetime.utcnow() + timedelta(hours=1)
+                now = datetime.now(timezone.utc) + timedelta(hours=1)
                 
                 # Load bot initial scores config
                 bot_scores = {}
@@ -9782,7 +9783,7 @@ async def cmd_saves(message: types.Message):
                 saves_by_slot[slot_num] = cp
     
     # Build display with friendly timestamp formatting
-    from datetime import datetime
+    from datetime import datetime, timezone
     txt = "💾 *YOUR SAVED GAMES*\n━━━━━━━━━━━━━━━━━━━━\n\n"
     
     if saves_by_slot:
@@ -9903,8 +9904,8 @@ async def hourly_leaderboard_broadcast_task(bot: Bot, chat_id: int):
                             ns       = p.get("name_shield_until")
                             if ns:
                                 try:
-                                    from datetime import datetime as _dt
-                                    if _dt.now() < _dt.fromisoformat(ns):
+                                    from datetime import datetime as _dt, timezone
+                                    if _dt.now(timezone.utc) < _dt.fromisoformat(ns):
                                         name     = "🔐 Anonymous"
                                         shield_i = "🛡️"
                                 except Exception:
