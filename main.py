@@ -5154,13 +5154,23 @@ async def _render_leaderboard(game_type: str, scope: str) -> str:
 @dp.callback_query(lambda q: q.data.startswith("lb_"))
 async def cb_leaderboard_view(callback: types.CallbackQuery):
     """Render the requested leaderboard tab."""
-    await callback.answer()
-    parts = callback.data.split("_")  # e.g. lb_fusion_weekly
+    # 1. Answer immediately
+    try:
+        await callback.answer()
+    except:
+        pass
+
+    # 2. Show a loading state immediately
+    # This prevents the user from clicking the button 10 times while waiting
+    await callback.message.edit_text("🛰️ <b>Connecting to High-Scores...</b>", parse_mode="HTML")
+
+    parts = callback.data.split("_")
     if len(parts) < 3:
         return
-    game_type = parts[1]   # fusion | trivia | overall
-    scope     = parts[2]   # weekly | alltime
+    game_type = parts[1]
+    scope     = parts[2]
 
+    # 3. Now do the heavy processing
     text = await _render_leaderboard(game_type, scope)
 
     back_kb = InlineKeyboardMarkup(inline_keyboard=[
