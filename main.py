@@ -3339,7 +3339,6 @@ async def cmd_buy(message: types.Message):
     user["bitcoin"] = player_bitcoin - item["price"]
     
     # Apply special item effects
-    from datetime import datetime, timezone, timedelta
     if item_id == "name_shield":
         # Activate name shield for 24 hours
         user["name_shield_until"] = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
@@ -3417,7 +3416,6 @@ async def cmd_name_shield_status(message: types.Message):
         )
         return
     
-    from datetime import datetime, timezone
     try:
         expiry = datetime.fromisoformat(name_shield_until)
         now = datetime.now(timezone.utc)
@@ -4091,7 +4089,6 @@ async def cmd_scout(message: types.Message):
     # ═══════════════════════════════════════════════════════════════════════════
     #  NAME SHIELD CHECK — Can't scout if target has active name shield
     # ═══════════════════════════════════════════════════════════════════════════
-    from datetime import datetime, timezone
     target = get_user(target_id)
     name_shield_until = target.get("name_shield_until")
     if name_shield_until:
@@ -4290,7 +4287,6 @@ async def cmd_attack(message: types.Message):
     # ═══════════════════════════════════════════════════════════════════════════
     #  NAME SHIELD CHECK — Can't attack if target has active name shield
     # ═══════════════════════════════════════════════════════════════════════════
-    from datetime import datetime, timezone
     target = get_user(target_id)
     name_shield_until = target.get("name_shield_until")
     if name_shield_until:
@@ -4832,7 +4828,7 @@ async def _execute_attack(attacker_id: str, target_id: str, target_display_name:
     
     # Send raid notification to defender (if they're in group)
     # Check if attacker has name shield - anonymize if active
-    from datetime import datetime, timezone
+    
     attacker_display_name = attacker.get("username", "Unknown")
     name_shield_until = attacker.get("name_shield_until")
     if name_shield_until:
@@ -5128,8 +5124,8 @@ async def _render_leaderboard(game_type: str, scope: str) -> str:
         ns_until = p.get("name_shield_until")
         if ns_until:
             try:
-                from datetime import datetime as _dt, timezone
-                if _dt.now(timezone.utc) < _dt.fromisoformat(ns_until):
+                from datetime import datetime as _dt
+                if _dt.utcnow() < _dt.fromisoformat(ns_until):
                     name        = "🔐 Anonymous"
                     shield_icon = "🛡️"
             except Exception:
@@ -7475,7 +7471,7 @@ async def cb_activate_shield(callback: types.CallbackQuery):
     shield = next((it for it in inv if it.get('id') == item_id and it.get('type') == 'shield'), None)
     if not shield: await callback.answer("Shield not found.", show_alert=True); return
 
-    from datetime import datetime, timedelta, timezone
+
     import json
     user['inventory'] = [it for it in inv if it.get('id') != item_id]
     user['shield_expires'] = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
@@ -9295,7 +9291,6 @@ async def bot_activity_task():
     while True:
         try:
             from supabase_db import supabase, DB_TABLE, ensure_bot_exists, _current_week_key
-            from datetime import datetime, timedelta, timezone
             import os, json
             
             try:
@@ -9804,7 +9799,7 @@ async def cmd_saves(message: types.Message):
                 saves_by_slot[slot_num] = cp
     
     # Build display with friendly timestamp formatting
-    from datetime import datetime, timezone
+    from datetime import datetime
     txt = "💾 *YOUR SAVED GAMES*\n━━━━━━━━━━━━━━━━━━━━\n\n"
     
     if saves_by_slot:
@@ -9925,8 +9920,8 @@ async def hourly_leaderboard_broadcast_task(bot: Bot, chat_id: int):
                             ns       = p.get("name_shield_until")
                             if ns:
                                 try:
-                                    from datetime import datetime as _dt, timezone
-                                    if _dt.now(timezone.utc) < _dt.fromisoformat(ns):
+                                    from datetime import datetime as _dt
+                                    if _dt.utcnow() < _dt.fromisoformat(ns):
                                         name     = "🔐 Anonymous"
                                         shield_i = "🛡️"
                                 except Exception:
