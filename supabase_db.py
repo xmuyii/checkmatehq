@@ -284,7 +284,7 @@ def get_game_weekly_leaderboard(game_type="fusion", limit=10):
                 'username':          p.get('username', 'Unknown'),
                 'points':            pts,
                 'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
-                'name_shield_until': p.get('name_shield_until'),
+                'name_shield_until': p.get('name_shield_until') or "Expired",
             })
 
         if results:
@@ -329,7 +329,7 @@ def get_game_alltime_leaderboard(game_type="fusion", limit=10):
                 'username':          p.get('username', 'Unknown'),
                 'points':            pts,
                 'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
-                'name_shield_until': p.get('name_shield_until'),
+                'name_shield_until': p.get('name_shield_until') or "Expired",
             })
 
         if results:
@@ -831,7 +831,7 @@ def get_weekly_leaderboard(limit: int = 10) -> list:
                 'username':          p.get('username', 'Unknown'),
                 'points':            pts,
                 'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
-                'name_shield_until': p.get('name_shield_until'),
+                'name_shield_until': p.get('name_shield_until') or "Expired",
             })
 
         print(f"[LB] weekly: returning {len(results)} players")
@@ -862,7 +862,7 @@ def get_alltime_leaderboard(limit: int = 10) -> list:
                 'points':            int(p.get('all_time_points') or 0),
                 'words':             int(p.get('total_words') or 0),
                 'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
-                'name_shield_until': p.get('name_shield_until'),
+                'name_shield_until': p.get('name_shield_until') or "Expired",
             }
             for p in raw
             if not p.get('is_bot') and int(p.get('all_time_points') or 0) > 0
