@@ -29,7 +29,7 @@ import random
 import time
 import json
 import html as _html
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 import httpx
 import os
 from aiogram import Bot, Dispatcher, types, F
@@ -86,7 +86,7 @@ def get_recent_events(event_type: str, minutes: int = 15) -> list:
     """Get events from last N minutes."""
     if event_type not in game_events:
         return []
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    cutoff = datetime.utcnow() - timedelta(minutes=minutes)
     return [e for e in game_events[event_type] if e.get('time', datetime.utcnow()) > cutoff]
 
 # ── Addictive Mechanics ────────────────────────────────────────────────────
@@ -734,36 +734,65 @@ async def game_loop(chat_id: int):
                 
                 # Inline button so players can view leaderboard right after the round
                 _round_kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="🏆 Weekly Board",  callback_data="lb_overall_weekly"),
+                    InlineKeyboardButton(text="🃏 Fusion Weekly",  callback_data="lb_fusion_weekly"),
                     InlineKeyboardButton(text="🃏 Fusion Board",  callback_data="lb_fusion_weekly"),
                 ]])
                 await bot.send_message(chat_id, result, parse_mode="Markdown",
                                        message_thread_id=FUSION_TOPIC_ID,
                                        reply_markup=_round_kb)
 
-                # Level-up announcements
+                # Level-up announcements with structured rewards
                 try:
                     for uid, sd in eng.scores.items():
                         if sd.get("leveled_up"):
                             user = get_user(uid)
                             if user:
                                 lvl = user.get('level', 1)
-                                msg = (
-                                    f"{divider()}\n"
-                                    f"🎊 *LEVEL UP!* 🎊\n"
-                                    f"{divider()}\n\n"
-                                    f"*{sd['name']}* has reached *LEVEL {lvl}*!\n\n"
-                                    f"🃏 *GameMaster:* \"Congratulations. You've achieved the bare minimum. Collect your participation trophy. Use `!claims` in DM.\n\n"
-                                    f"✨ *Bonus items awaiting.*\""
-                                )
+                                reward_lines = []
+
+                                # Every level: super crate
                                 add_unclaimed_item(uid, "super_crate", 1)
+                                reward_lines.append("🎁 Super Crate")
+
+                                # Every level: 20 credits
+                                try:
+                                    add_credits(uid, 20, f"level {lvl} reward")
+                                    reward_lines.append("💳 +20 Credits")
+                                except Exception:
+                                    pass
+
+                                # Every level: multiplier
                                 k = "xp_multiplier" if random.random() < 0.5 else "bitcoin_multiplier"
                                 add_unclaimed_item(uid, k, 1, xp_reward=0, multiplier_value=2)
-                                if lvl % 5 == 0:
+                                reward_lines.append("⚡ 2× Multiplier")
+
+                                # Level 5: unlock Trivia Pass
+                                if lvl == 5:
+                                    user["trivia_pass"] = True
+                                    save_user(uid, user)
+                                    try:
+                                        add_credits(uid, 100, "trivia pass milestone")
+                                    except Exception:
+                                        pass
+                                    reward_lines.append("🧠 TRIVIA PASS UNLOCKED!")
+                                    reward_lines.append("💳 +100 Bonus Credits")
+
+                                # Every 5 levels (except 5): powerful item
+                                if lvl % 5 == 0 and lvl != 5:
                                     iname, idesc = award_powerful_locked_item(uid)
-                                    msg += f"\n\n{divider()}\n⚡ *MILESTONE!* Unlocked: *{iname}*\n_{idesc}_\n{divider()}"
+                                    reward_lines.append(f"⚡ Legendary: {iname}")
+
+                                rewards_str = "\n".join(f"• {r}" for r in reward_lines)
+                                msg = (
+                                    f"{divider()}\n"
+                                    f"🎊 *LEVEL UP — LEVEL {lvl}* 🎊\n"
+                                    f"{divider()}\n\n"
+                                    f"*{_safe_name(sd['name'])}* reached *Level {lvl}*!\n\n"
+                                    f"🎁 *Rewards:*\n{rewards_str}\n\n"
+                                    f"🃏 *GameMaster:* \"Use `!claims` in DM to collect.\""
+                                )
                                 await bot.send_message(chat_id, msg, parse_mode="Markdown",
-                                                          message_thread_id=FUSION_TOPIC_ID)
+                                                       message_thread_id=FUSION_TOPIC_ID)
                 except Exception as e:
                     print(f"[ERROR] Level-up announcements: {e}")
 
@@ -1109,8 +1138,8 @@ async def cmd_weekly(message: types.Message):
             InlineKeyboardButton(text="🧠 Trivia Weekly",  callback_data="lb_trivia_weekly"),
         ],
         [
-            InlineKeyboardButton(text="🏆 All-Time",       callback_data="lb_overall_alltime"),
-            InlineKeyboardButton(text="🔄 Refresh",        callback_data="lb_overall_weekly"),
+            InlineKeyboardButton(text="🃏 Fusion All-Time", callback_data="lb_fusion_alltime"),
+            InlineKeyboardButton(text="🔄 Refresh",        callback_data="lb_fusion_weekly"),
         ],
     ])
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
@@ -1165,8 +1194,8 @@ async def cmd_alltime(message: types.Message):
             InlineKeyboardButton(text="🧠 Trivia All-Time", callback_data="lb_trivia_alltime"),
         ],
         [
-            InlineKeyboardButton(text="🏆 Weekly",          callback_data="lb_overall_weekly"),
-            InlineKeyboardButton(text="🔄 Refresh",         callback_data="lb_overall_alltime"),
+            InlineKeyboardButton(text="🧠 Trivia All-Time", callback_data="lb_trivia_alltime"),
+            InlineKeyboardButton(text="🔄 Refresh",         callback_data="lb_fusion_alltime"),
         ],
     ])
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
@@ -3339,6 +3368,7 @@ async def cmd_buy(message: types.Message):
     user["bitcoin"] = player_bitcoin - item["price"]
     
     # Apply special item effects
+    from datetime import datetime, timezone, timedelta
     if item_id == "name_shield":
         # Activate name shield for 24 hours
         user["name_shield_until"] = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
@@ -3416,6 +3446,7 @@ async def cmd_name_shield_status(message: types.Message):
         )
         return
     
+    from datetime import datetime, timezone
     try:
         expiry = datetime.fromisoformat(name_shield_until)
         now = datetime.now(timezone.utc)
@@ -4028,151 +4059,188 @@ async def cmd_build(message: types.Message):
 
 @dp.message(_cmd("scout"))
 async def cmd_scout(message: types.Message):
-    """Scout a target player to reveal their army and traps."""
+    """
+    Scout a target in the same sector.
+    - No honeypot: scout always returns real intel.
+    - Deployment time based on sector distance (same sector only).
+    - Progress bar shown while scout travels.
+    - Target receives a notification that they are being scouted.
+    """
     if message.chat.type != "private":
-        await message.answer("🛰️ *GM:* \"Scouts use private channels. Run this in DM, fool.\"", parse_mode="Markdown")
+        await message.answer("🛰️ Scout in private chat only.", parse_mode="Markdown")
         return
-    
+
     u_id = str(message.from_user.id)
     scout_user = get_user(u_id)
     if not scout_user:
         await _send_unreg_sticker(message)
         return
-    
-    # Parse command: !scout @username or !scout user_id
+
     args = message.text.strip().split()
     if len(args) < 2:
         await message.answer(
-            "[🛰️ *SCOUT COMMAND* ]\n\n"
-            "Cost: 100 Bitcoin\n"
-            "Success Rate: 70% \n\n"
-            "Usage: Just type `/scout @username` or `!scout <name>`, without the brackets <> or quotes ''\n\n"
-            "Reveals enemy army and traps if successful, if unsuccessful alerts eenemy of your location.\n",
-            parse_mode="Markdown"
+            "🛰️ <b>SCOUT COMMAND</b>\n\n"
+            "Cost: <b>100 Bitcoin</b>\n"
+            "Restriction: <b>Same sector only</b>\n\n"
+            "Usage: <code>/scout @username</code>\n\n"
+            "Your target will be notified that a scout has been dispatched.\n"
+            "A live progress bar tracks the scout's arrival.",
+            parse_mode="HTML"
         )
         return
-    
+
     target_name = args[1].lstrip("@")
-    
-    # Find target player
+
     from supabase_db import supabase, DB_TABLE
+    from datetime import datetime, timezone
+
+    # ── Find target ────────────────────────────────────────────────────────
     try:
-        r = supabase.table(DB_TABLE).select("user_id, username, military, traps, sector").ilike("username", f"%{target_name}%").limit(1).execute()
+        r = supabase.table(DB_TABLE).select(
+            "user_id, username, military, traps, sector, level, shield_status, name_shield_until"
+        ).ilike("username", f"%{target_name}%").limit(1).execute()
         if not r.data:
-            await message.answer(f"🔍 *GM:* \"No player named '{target_name}' found.\"", parse_mode="Markdown")
+            await message.answer(f"🔍 No player named '{target_name}' found.", parse_mode="HTML")
             return
-        target_id = r.data[0]["user_id"]
-        target_display_name = r.data[0].get("username", target_name)
-        target_sector = r.data[0].get("sector")
-        
+        row                = r.data[0]
+        target_id          = row["user_id"]
+        target_display     = row.get("username", target_name)
+        target_sector      = row.get("sector")
+        target_level       = row.get("level", 1)
     except Exception as e:
-        await message.answer(f"🔍 *GM:* \"Scout query failed: {str(e)[:50]}\"", parse_mode="Markdown")
+        await message.answer(f"🔍 Scout query failed: {str(e)[:60]}", parse_mode="HTML")
         return
-    
-    # Check bitcoin cost
-    scout_cost = 100
-    scout_bitcoin = scout_user.get("bitcoin", 0)
-    if scout_bitcoin < scout_cost:
+
+    # ── Self-scout guard ───────────────────────────────────────────────────
+    if target_id == u_id:
+        await message.answer("You can't scout yourself.", parse_mode="HTML")
+        return
+
+    # ── Sector restriction: same sector only ──────────────────────────────
+    my_sector = scout_user.get("sector")
+    if my_sector != target_sector:
         await message.answer(
-            f"❌ Insufficient bitcoin!\n"
-            f"Cost: {scout_cost} bitcoin\n"
-            f"You have: {scout_bitcoin} bitcoin",
-            parse_mode="Markdown"
+            f"🛰️ <b>OUT OF RANGE</b>\n\n"
+            f"<b>{target_display}</b> is in Sector <b>{target_sector}</b>.\n"
+            f"You are in Sector <b>{my_sector}</b>.\n\n"
+            f"You can only scout players in your own sector.",
+            parse_mode="HTML"
         )
         return
-    
-    # Can't scout self
-    if target_id == u_id:
-        await message.answer("🛰️ *GM:* \"You can't scout yourself, fool.\"", parse_mode="Markdown")
-        return
-    
-    # ═══════════════════════════════════════════════════════════════════════════
-    #  NAME SHIELD CHECK — Can't scout if target has active name shield
-    # ═══════════════════════════════════════════════════════════════════════════
-    target = get_user(target_id)
-    name_shield_until = target.get("name_shield_until")
-    if name_shield_until:
+
+    # ── Name shield check ─────────────────────────────────────────────────
+    ns_until = row.get("name_shield_until")
+    if ns_until:
         try:
-            expiry = datetime.fromisoformat(name_shield_until)
-            if datetime.now(timezone.utc) < expiry:
+            expiry = datetime.fromisoformat(ns_until)
+            if datetime.now(timezone.utc) < expiry.replace(tzinfo=timezone.utc):
                 await message.answer(
-                    f"🛰️ *SCOUT BLOCKED*\n\n"
-                    f"This player has activated a **Name Shield**!\n\n"
-                    f"🔐 Your scout cannot locate them. Intelligence is unavailable.\n"
-                    f"Try scouting someone else.",
-                    parse_mode="Markdown"
+                    f"🔐 <b>SCOUT BLOCKED</b>\n\n"
+                    f"<b>{target_display}</b> has an active Name Shield.\n"
+                    f"They cannot be located.",
+                    parse_mode="HTML"
                 )
                 return
-        except:
+        except Exception:
             pass
-    
-    # Deduct bitcoin
-    scout_user["bitcoin"] = scout_bitcoin - scout_cost
+
+    # ── Target level gate ─────────────────────────────────────────────────
+    if target_level < 5:
+        await message.answer(
+            f"🛰️ <b>TARGET TOO NEW</b>\n\n"
+            f"<b>{target_display}</b> is Level {target_level}.\n"
+            f"Players below Level 5 cannot be scouted.",
+            parse_mode="HTML"
+        )
+        return
+
+    # ── Bitcoin cost ──────────────────────────────────────────────────────
+    scout_cost = 100
+    if scout_user.get("bitcoin", 0) < scout_cost:
+        await message.answer(
+            f"❌ Need <b>{scout_cost} Bitcoin</b> to scout.\n"
+            f"You have <b>{scout_user.get('bitcoin',0)}</b>.",
+            parse_mode="HTML"
+        )
+        return
+
+    scout_user["bitcoin"] = scout_user.get("bitcoin", 0) - scout_cost
     save_user(u_id, scout_user)
-    
-    # 70% success chance
-    success = random.random() < 0.7
-    
-    if success:
-        # Get target's military and traps
-        target = get_user(target_id)
-        if not target:
-            await message.answer("❌ Target no longer exists.", parse_mode="Markdown")
-            return
-        
-        military = target.get("military", {})
-        traps = target.get("traps", {})
-        
-        report = f"""
-╔═══════════════════════════════════════╗
-║     📸  SCOUT REPORT  📸             ║
-╠═══════════════════════════════════════╣
-║                                       ║
-║  Target: **{target_display_name}**    ║
-||  📍 Sector: {target_sector}         ||             
-║  Level: {target.get('level', '?')}    ║            
-║  Bitcoin: {target.get('bitcoin', 0):,}║              
-║                                       ║
-║ 🎖️ MILITARY:                                      
-"""
-        if military:
-            for unit_type, count in military.items():
-                report += f"║  {unit_type}: {count}\n"
-        else:
-            report += "║     (No troops)\n"
-        
-        report += f"""║                           ║
-║  🕳️ TRAPS:                                        
-"""
-        if traps:
-            for trap_type, count in traps.items():
-                report += f"║  {trap_type}: {count}\n"
-        else:
-            report += "║    (No traps)\n"
-        
-        report += """║                     ║
-║  ✅ Scout returned safely with intel!   ║        
-║                                          ║         
-╚══════════════════════════════════════════╝
-"""
-    else:
-        # Failed - honeypot triggered
-        report = f"""
-╔═════════════════════════════════════════╗
-║     ❌  SCOUT HONEYPOT  ❌             ║
-╠═════════════════════════════════════════╣
-║                                         ║
-║  Your scout was detected!               ║
-║                                         ║
-║  {target_display_name} now knows you    ║
-║           spied on them                 ║
-║                                         ║
-||  🚨 WARNING: They may retaliate!      ||
-║                                         ║
-╚═════════════════════════════════════════╝
-"""
-    
-    await message.answer(report, parse_mode="Markdown")
+
+    # ── Deployment time: 20 seconds (same sector) ─────────────────────────
+    DEPLOY_SECS = 20
+    BAR_WIDTH   = 10
+
+    # Notify the target immediately
+    try:
+        scout_name = _safe_name(scout_user.get("username", "Someone"))
+        await bot.send_message(
+            int(target_id),
+            f"🚨 <b>INCOMING SCOUT ALERT</b>\n\n"
+            f"A scout from <b>{scout_name}</b> has been dispatched to your base!\n"
+            f"⏱️ Arrival in ~{DEPLOY_SECS} seconds.\n\n"
+            f"Prepare your defenses: <code>/defenses</code>",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass  # Target may not have started the bot
+
+    # ── Progress bar — send then edit every 2 seconds ─────────────────────
+    progress_msg = await message.answer(
+        f"🛰️ <b>SCOUT DEPLOYED</b> → <b>{_safe_name(target_display)}</b>\n"
+        f"[{'░' * BAR_WIDTH}] 0%  ·  {DEPLOY_SECS}s remaining",
+        parse_mode="HTML"
+    )
+
+    for step in range(1, DEPLOY_SECS // 2 + 1):
+        await asyncio.sleep(2)
+        elapsed  = step * 2
+        pct      = min(100, int(elapsed / DEPLOY_SECS * 100))
+        filled   = pct * BAR_WIDTH // 100
+        bar      = "█" * filled + "░" * (BAR_WIDTH - filled)
+        remaining = max(0, DEPLOY_SECS - elapsed)
+        try:
+            await progress_msg.edit_text(
+                f"🛰️ <b>SCOUT EN ROUTE</b> → <b>{_safe_name(target_display)}</b>\n"
+                f"[{bar}] {pct}%  ·  {remaining}s remaining",
+                parse_mode="HTML"
+            )
+        except Exception:
+            break
+
+    # ── Collect real intel ────────────────────────────────────────────────
+    target = get_user(target_id)
+    if not target:
+        await message.answer("❌ Target no longer exists.", parse_mode="HTML")
+        return
+
+    military     = target.get("military", {}) or {}
+    traps        = target.get("traps", {}) or {}
+    t_level      = target.get("level", "?")
+    t_sector     = target.get("sector", "?")
+    t_shield     = target.get("shield_status") or "⚠️ UNPROTECTED"
+    shield_icon  = "🛡️" if "ACTIVE" in t_shield else ("💥" if "DISRUPTED" in t_shield else "⚠️")
+
+    mil_lines  = "\n".join(f"  • {u}: {c}" for u, c in military.items()) or "  (No troops)"
+    trap_lines = "\n".join(f"  • {t}: {c}" for t, c in traps.items())   or "  (No traps)"
+
+    report = (
+        f"📸 <b>SCOUT REPORT — {_safe_name(target_display)}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📍 Sector: <b>{t_sector}</b>\n"
+        f"⭐ Level:  <b>{t_level}</b>\n"
+        f"{shield_icon} Shield: <b>{t_shield}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚔️ <b>MILITARY</b>\n{mil_lines}\n\n"
+        f"🕳️ <b>TRAPS</b>\n{trap_lines}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"✅ Scout returned with intel!"
+    )
+
+    try:
+        await progress_msg.edit_text(report, parse_mode="HTML")
+    except Exception:
+        await message.answer(report, parse_mode="HTML")
 
 
 @dp.message(_cmd("revenge"))
@@ -4236,6 +4304,34 @@ async def cmd_attack(message: types.Message):
         await _send_unreg_sticker(message)
         return
     
+    # ── Level gate: must be level 5+ to attack ───────────────────────────
+    attacker_level = attacker.get("level", 1)
+    if attacker_level < 5:
+        await message.answer(
+            f"⚔️ <b>ATTACK LOCKED</b>\n\n"
+            f"You must reach <b>Level 5</b> before attacking other players.\n"
+            f"Current level: <b>{attacker_level}</b>\n\n"
+            f"Keep playing Fusion to level up!",
+            parse_mode="HTML"
+        )
+        return
+
+    # ── Base level gate: need base level 4 (XP level 16+) ────────────────
+    try:
+        from build_system import get_base_level as _gbl
+        attacker_base_lvl = _gbl(attacker_level)
+    except Exception:
+        attacker_base_lvl = max(1, attacker_level // 5)
+    if attacker_base_lvl < 4:
+        await message.answer(
+            f"⚔️ <b>BASE TOO LOW</b>\n\n"
+            f"You need <b>Base Level 4</b> to attack.\n"
+            f"Your base is level <b>{attacker_base_lvl}</b>.\n\n"
+            f"Reach XP Level 16 to unlock attacking.",
+            parse_mode="HTML"
+        )
+        return
+
     # Check if attacker has troops
     attacker_army = attacker.get("military", {})
     total_troops = sum(attacker_army.values()) if attacker_army else 0
@@ -4287,6 +4383,7 @@ async def cmd_attack(message: types.Message):
     # ═══════════════════════════════════════════════════════════════════════════
     #  NAME SHIELD CHECK — Can't attack if target has active name shield
     # ═══════════════════════════════════════════════════════════════════════════
+    from datetime import datetime, timezone
     target = get_user(target_id)
     name_shield_until = target.get("name_shield_until")
     if name_shield_until:
@@ -4308,6 +4405,33 @@ async def cmd_attack(message: types.Message):
     #  SECTOR VALIDATION — Can only attack same sector
     # ═══════════════════════════════════════════════════════════════════════════
     
+    # ── Target level gate: can't attack players below level 5 ───────────
+    target_full = get_user(target_id)
+    if target_full:
+        target_level = target_full.get("level", 1)
+        if target_level < 5:
+            await message.answer(
+                f"⚔️ <b>TARGET PROTECTED</b>\n\n"
+                f"<b>{target_display_name}</b> is only Level {target_level}.\n"
+                f"Players below Level 5 cannot be attacked.\n\n"
+                f"Find a stronger opponent.",
+                parse_mode="HTML"
+            )
+            return
+        try:
+            from build_system import get_base_level as _gbl2
+            target_base_lvl = _gbl2(target_level)
+        except Exception:
+            target_base_lvl = max(1, target_level // 5)
+        if target_base_lvl < 4:
+            await message.answer(
+                f"⚔️ <b>TARGET BASE TOO LOW</b>\n\n"
+                f"<b>{target_display_name}</b> has Base Level {target_base_lvl}.\n"
+                f"Players with bases below Level 4 cannot be raided.",
+                parse_mode="HTML"
+            )
+            return
+
     attacker_sector = attacker.get("sector")
     if attacker_sector != target_sector:
         await message.answer(
@@ -4828,7 +4952,7 @@ async def _execute_attack(attacker_id: str, target_id: str, target_display_name:
     
     # Send raid notification to defender (if they're in group)
     # Check if attacker has name shield - anonymize if active
-    
+    from datetime import datetime, timezone
     attacker_display_name = attacker.get("username", "Unknown")
     name_shield_until = attacker.get("name_shield_until")
     if name_shield_until:
@@ -4916,16 +5040,20 @@ async def handle_new_member(event: types.ChatMemberUpdated):
         traceback.print_exc()
 
 def register_new_user(user_id, first_name):
+    """Register a new player. Sector 1, 100 free credits, shield active."""
     new_user = {
-        "id": str(user_id),
-        "username": first_name or "Player",
-        "level": 1,
-        "xp": 0,
-        "bitcoin": 100,
-        "shield_status": "🛡️ ACTIVE",
-        "unclaimed_items": {},
+        "id":                str(user_id),
+        "username":          first_name or "Player",
+        "level":             1,
+        "xp":                0,
+        "bitcoin":           100,
+        "credits":           100,          # 100 free credits on signup
+        "shield_status":     "🛡️ ACTIVE",
+        "sector":            1,            # always start in sector 1
+        "unclaimed_items":   [],
         "completed_tutorial": False,
-        "game_saves": {} # Initialize this as an empty dict
+        "game_saves":        {},
+        "trivia_pass":       False,        # unlocked at level 5
     }
     save_user(user_id, new_user)
     return new_user
@@ -5035,16 +5163,12 @@ async def cb_menu_leaderboards(callback: types.CallbackQuery):
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🃏 Fusion Weekly",   callback_data="lb_fusion_weekly"),
-            InlineKeyboardButton(text="🃏 Fusion All-Time",  callback_data="lb_fusion_alltime"),
+            InlineKeyboardButton(text="🃏 Fusion — Weekly",    callback_data="lb_fusion_weekly"),
+            InlineKeyboardButton(text="🃏 Fusion — All-Time",  callback_data="lb_fusion_alltime"),
         ],
         [
-            InlineKeyboardButton(text="🧠 Trivia Weekly",   callback_data="lb_trivia_weekly"),
-            InlineKeyboardButton(text="🧠 Trivia All-Time",  callback_data="lb_trivia_alltime"),
-        ],
-        [
-            InlineKeyboardButton(text="🏆 Overall Weekly",  callback_data="lb_overall_weekly"),
-            InlineKeyboardButton(text="🏆 Overall All-Time", callback_data="lb_overall_alltime"),
+            InlineKeyboardButton(text="🧠 Trivia — Weekly",    callback_data="lb_trivia_weekly"),
+            InlineKeyboardButton(text="🧠 Trivia — All-Time",  callback_data="lb_trivia_alltime"),
         ],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
     ])
@@ -5065,14 +5189,12 @@ async def _render_leaderboard(game_type: str, scope: str) -> str:
     game_icons = {"fusion": "🃏", "trivia": "🧠", "overall": "🏆"}
     icon        = game_icons.get(game_type, "🏆")
     scope_label = "WEEKLY" if scope == "weekly" else "ALL-TIME"
-    now_str     = datetime.now(timezone.utc).strftime("%d %b %Y · %H:%M UTC")
+    now_str     = datetime.utcnow().strftime("%d %b %Y · %H:%M UTC")
 
     # ── Fetch ──────────────────────────────────────────────────────────────
     lb = []
     try:
-        if game_type == "overall":
-            lb = get_weekly_leaderboard(limit=10) if scope == "weekly" else get_alltime_leaderboard(limit=10)
-        elif scope == "weekly":
+        if scope == "weekly":
             lb = get_game_weekly_leaderboard(game_type=game_type, limit=10)
         else:
             lb = get_game_alltime_leaderboard(game_type=game_type, limit=10)
@@ -5124,8 +5246,8 @@ async def _render_leaderboard(game_type: str, scope: str) -> str:
         ns_until = p.get("name_shield_until")
         if ns_until:
             try:
-                from datetime import datetime as _dt
-                if _dt.utcnow() < _dt.fromisoformat(ns_until):
+                from datetime import datetime as _dt, timezone
+                if _dt.now(timezone.utc) < _dt.fromisoformat(ns_until):
                     name        = "🔐 Anonymous"
                     shield_icon = "🛡️"
             except Exception:
@@ -5150,23 +5272,17 @@ async def _render_leaderboard(game_type: str, scope: str) -> str:
 @dp.callback_query(lambda q: q.data.startswith("lb_"))
 async def cb_leaderboard_view(callback: types.CallbackQuery):
     """Render the requested leaderboard tab."""
-    # 1. Answer immediately
-    try:
-        await callback.answer()
-    except:
-        pass
-
-    # 2. Show a loading state immediately
-    # This prevents the user from clicking the button 10 times while waiting
-    await callback.message.edit_text("🛰️ <b>Connecting to High-Scores...</b>", parse_mode="HTML")
-
-    parts = callback.data.split("_")
+    await callback.answer()
+    parts = callback.data.split("_")  # e.g. lb_fusion_weekly
     if len(parts) < 3:
         return
-    game_type = parts[1]
-    scope     = parts[2]
+    game_type = parts[1]   # fusion | trivia
+    scope     = parts[2]   # weekly | alltime
 
-    # 3. Now do the heavy processing
+    # Guard: old "overall" buttons redirect to fusion
+    if game_type not in ("fusion", "trivia"):
+        game_type = "fusion"
+
     text = await _render_leaderboard(game_type, scope)
 
     back_kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -5456,38 +5572,27 @@ async def cb_battle_shield(callback: types.CallbackQuery):
     await callback.answer()
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
-    
     if not user:
         return
-
-    # ✅ Handle None safely: If shield_status is NULL in Supabase, default to "⚠️ UNPROTECTED"
-    shield_st = user.get("shield_status") or "⚠️ UNPROTECTED"
-    # ✅ Also check the timestamp column we added
-    shield_until = user.get("name_shield_until") 
-    
-    is_active = "ACTIVE" in shield_st.upper()
+    shield_st = user.get("shield_status", "⚠️ UNPROTECTED")
+    is_active = "ACTIVE" in shield_st
 
     kb_rows = []
     if is_active:
         kb_rows.append([InlineKeyboardButton(text="🔴 Deactivate Shield", callback_data="shield_deactivate")])
     else:
-        kb_rows.append([InlineKeyboardButton(text="🟢 Activate Shield", callback_data="shield_activate")])
-    
+        kb_rows.append([InlineKeyboardButton(text="🟢 Activate Shield",   callback_data="shield_activate")])
     kb_rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="menu_battle")])
 
     icon = "🛡️" if is_active else "⚠️"
-    
-    # Show the expiry time if it exists
-    expiry_text = f"\nExpires: <b>{shield_until}</b>" if shield_until else ""
-    status_msg = "Your base is protected." if is_active else "Your base is VULNERABLE to attacks!"
-
     await callback.message.edit_text(
         f"{icon} <b>SHIELD STATUS</b>\n━━━━━━━━━━━━━━━━━\n"
-        f"Current: <b>{shield_st}</b>{expiry_text}\n\n"
-        f"<i>{status_msg}</i>",
+        f"Current: <b>{shield_st}</b>\n\n"
+        f"{'Your base is protected.' if is_active else 'Your base is VULNERABLE to attacks!'}",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
     )
+
 
 @dp.callback_query(lambda q: q.data in ("shield_activate", "shield_deactivate"))
 async def cb_shield_toggle(callback: types.CallbackQuery):
@@ -7471,7 +7576,7 @@ async def cb_activate_shield(callback: types.CallbackQuery):
     shield = next((it for it in inv if it.get('id') == item_id and it.get('type') == 'shield'), None)
     if not shield: await callback.answer("Shield not found.", show_alert=True); return
 
-
+    from datetime import datetime, timedelta, timezone
     import json
     user['inventory'] = [it for it in inv if it.get('id') != item_id]
     user['shield_expires'] = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
@@ -8611,6 +8716,238 @@ FREEZE_COSTS = {
     "freeze_180": 900,
 }
 
+# ── Speedup Items ──────────────────────────────────────────────────────────
+SPEEDUP_ITEMS = {
+    # Format: item_key → {name, description, reduces_secs, bitcoin_cost, category}
+    "speedup_attack_30":     {"name": "⚡ 30s Attack Speedup",       "reduces_secs": 30,   "cost": 150,  "category": "attack"},
+    "speedup_attack_120":    {"name": "⚡ 2m Attack Speedup",        "reduces_secs": 120,  "cost": 400,  "category": "attack"},
+    "speedup_attack_300":    {"name": "⚡ 5m Attack Speedup",        "reduces_secs": 300,  "cost": 800,  "category": "attack"},
+    "speedup_deploy_30":     {"name": "🛡️ 30s Deploy Speedup",      "reduces_secs": 30,   "cost": 120,  "category": "deploy"},
+    "speedup_deploy_120":    {"name": "🛡️ 2m Deploy Speedup",       "reduces_secs": 120,  "cost": 300,  "category": "deploy"},
+    "speedup_train_60":      {"name": "⚔️ 1m Training Speedup",     "reduces_secs": 60,   "cost": 200,  "category": "training"},
+    "speedup_train_300":     {"name": "⚔️ 5m Training Speedup",     "reduces_secs": 300,  "cost": 700,  "category": "training"},
+    "speedup_train_600":     {"name": "⚔️ 10m Training Speedup",    "reduces_secs": 600,  "cost": 1200, "category": "training"},
+    "speedup_build_60":      {"name": "🏗️ 1m Build Speedup",        "reduces_secs": 60,   "cost": 150,  "category": "building"},
+    "speedup_build_300":     {"name": "🏗️ 5m Build Speedup",        "reduces_secs": 300,  "cost": 500,  "category": "building"},
+    "speedup_build_600":     {"name": "🏗️ 10m Build Speedup",       "reduces_secs": 600,  "cost": 900,  "category": "building"},
+    "speedup_scout_30":      {"name": "🛰️ 30s Scout Speedup",       "reduces_secs": 30,   "cost": 100,  "category": "scout"},
+    "speedup_universal_60":  {"name": "🌀 1m Universal Speedup",     "reduces_secs": 60,   "cost": 250,  "category": "universal"},
+    "speedup_universal_300": {"name": "🌀 5m Universal Speedup",     "reduces_secs": 300,  "cost": 900,  "category": "universal"},
+    "speedup_universal_600": {"name": "🌀 10m Universal Speedup",    "reduces_secs": 600,  "cost": 1600, "category": "universal"},
+}
+
+
+
+
+@dp.message(_cmd("items", "game_items"))
+async def cmd_game_items(message: types.Message):
+    """Show all 4 background process items and how to get/use them."""
+    if message.chat.type != "private":
+        await _send_access_denied_sticker(message); return
+
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await _send_unreg_sticker(message); return
+
+    inv   = get_inventory(u_id)
+    owned = {it.get("type","").lower() for it in inv}
+
+    def own(key): return "✅ Owned" if key in owned else "❌ Not owned"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🛍️ Buy from Shop",  callback_data="menu_shop")],
+        [InlineKeyboardButton(text="⬅️ Back",            callback_data="menu_back")],
+    ])
+
+    await message.answer(
+        "🎮 <b>BACKGROUND PROCESS ITEMS</b>\n━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "These items are used <b>during an active Fusion round</b> in the group.\n"
+        "They send word hints to your DMs.\n\n"
+        "⚡ <b>Pattern Pulse</b>  —  <code>/pulse</code>\n"
+        f"{own('pattern_pulse')}\n"
+        "Finds words sharing letters with the seed word.\n"
+        "Same-first-letter words appear first. Delivered instantly.\n\n"
+        "🚀 <b>Titan Drop</b>  —  <code>/titan</code>\n"
+        f"{own('titan_drop')}\n"
+        "Floods your DMs with the longest valid words first.\n"
+        "3 words every 3 seconds for 60 seconds.\n\n"
+        "💧 <b>Drip Feed</b>  —  <code>/drip</code>\n"
+        f"{own('drip_feed')}\n"
+        "Steady flow of shortest words first.\n"
+        "1 word per second for 100 seconds.\n\n"
+        "🔮 <b>Mystic Grimoire</b>  —  <code>/grimoire</code>\n"
+        f"{own('grimoire')}\n"
+        "Mystic/occult words give <b>10 pts flat</b> this round.\n"
+        "Sends all matching mystic words to your DMs instantly.\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>All items are single-use per round.</i>",
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+
+@dp.message(_cmd("speedups", "speedup_shop"))
+async def cmd_speedup_shop(message: types.Message):
+    """Browse and buy speedup items."""
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await _send_unreg_sticker(message); return
+    if message.chat.type != "private":
+        await _send_access_denied_sticker(message); return
+
+    bitcoin = user.get("bitcoin", 0)
+    categories = {
+        "attack":    "⚔️ Attack Speedups",
+        "deploy":    "🛡️ Deploy Speedups",
+        "training":  "🪖 Training Speedups",
+        "building":  "🏗️ Building Speedups",
+        "scout":     "🛰️ Scout Speedups",
+        "universal": "🌀 Universal Speedups",
+    }
+
+    rows = []
+    for cat_key, cat_label in categories.items():
+        cat_items = [(k, v) for k, v in SPEEDUP_ITEMS.items() if v["category"] == cat_key]
+        for key, item in cat_items:
+            can_afford = bitcoin >= item["cost"]
+            icon       = "✅" if can_afford else "❌"
+            rows.append([InlineKeyboardButton(
+                text=f"{icon} {item['name']} — {item['cost']}₿",
+                callback_data=f"buy_speedup_{key}"
+            )])
+
+    rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")])
+
+    await message.answer(
+        f"⚡ <b>SPEEDUP SHOP</b>\n━━━━━━━━━━━━━━━━━\n"
+        f"💰 Your Bitcoin: <b>{bitcoin:,}</b>\n\n"
+        f"Speedups reduce timers on attacks, troop deployment,\n"
+        f"building construction, scouting, and training.\n"
+        f"━━━━━━━━━━━━━━━━━",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
+    )
+
+
+@dp.callback_query(lambda q: q.data.startswith("buy_speedup_"))
+async def cb_buy_speedup(callback: types.CallbackQuery):
+    """Purchase a speedup item."""
+    key = callback.data.replace("buy_speedup_", "")
+    if key not in SPEEDUP_ITEMS:
+        await callback.answer("Unknown speedup.", show_alert=True); return
+
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered.", show_alert=True); return
+
+    item    = SPEEDUP_ITEMS[key]
+    cost    = item["cost"]
+    bitcoin = user.get("bitcoin", 0)
+
+    if bitcoin < cost:
+        await callback.answer(f"❌ Need {cost}₿, you have {bitcoin}₿.", show_alert=True); return
+
+    user["bitcoin"] = bitcoin - cost
+    save_user(u_id, user)
+    add_inventory_item(u_id, key, xp_reward=0)
+    await callback.answer(f"✅ Purchased {item['name']}!", show_alert=True)
+
+
+@dp.message(_cmd("use_speedup"))
+async def cmd_use_speedup(message: types.Message):
+    """
+    Apply a speedup item to an active timer.
+    Usage: /use_speedup [attack|deploy|training|building|scout|universal]
+    """
+    if message.chat.type != "private":
+        await _send_access_denied_sticker(message); return
+
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await _send_unreg_sticker(message); return
+
+    args = message.text.strip().split()
+    category = args[1].lower() if len(args) > 1 else None
+
+    inv = get_inventory(u_id)
+    # Find matching speedup items
+    matches = [
+        it for it in inv
+        if it.get("type","").startswith("speedup_")
+        and (
+            category is None
+            or SPEEDUP_ITEMS.get(it.get("type",""),{}).get("category") == category
+            or SPEEDUP_ITEMS.get(it.get("type",""),{}).get("category") == "universal"
+        )
+    ]
+
+    if not matches:
+        cat_hint = f" for category '{category}'" if category else ""
+        await message.answer(
+            f"❌ No speedup items{cat_hint} in your inventory.\n\n"
+            f"Buy speedups with /speedups",
+            parse_mode="HTML"
+        )
+        return
+
+    # Show available speedups as inline buttons
+    rows = []
+    for it in matches[:8]:
+        key  = it.get("type","")
+        info = SPEEDUP_ITEMS.get(key, {})
+        rows.append([InlineKeyboardButton(
+            text=f"⚡ {info.get('name', key)} (−{info.get('reduces_secs',0)}s)",
+            callback_data=f"apply_speedup_{it.get('id',0)}_{key}"
+        )])
+
+    rows.append([InlineKeyboardButton(text="❌ Cancel", callback_data="menu_back")])
+    await message.answer(
+        "⚡ <b>SELECT SPEEDUP TO APPLY</b>\n━━━━━━━━━━━━━━━━━\n"
+        "Choose a speedup item to activate:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
+    )
+
+
+@dp.callback_query(lambda q: q.data.startswith("apply_speedup_"))
+async def cb_apply_speedup(callback: types.CallbackQuery):
+    """Apply the speedup — removes item from inventory and logs the time saved."""
+    parts  = callback.data.split("_")
+    # format: apply_speedup_ITEMID_ITEMKEY (key may have underscores)
+    try:
+        item_id  = int(parts[2])
+        item_key = "_".join(parts[3:])
+    except (IndexError, ValueError):
+        await callback.answer("Invalid speedup data.", show_alert=True); return
+
+    if item_key not in SPEEDUP_ITEMS:
+        await callback.answer("Unknown speedup type.", show_alert=True); return
+
+    u_id = str(callback.from_user.id)
+    ok   = remove_inventory_item(u_id, item_id)
+    if not ok:
+        await callback.answer("Item not found.", show_alert=True); return
+
+    info     = SPEEDUP_ITEMS[item_key]
+    saved    = info["reduces_secs"]
+    cat      = info["category"]
+    mins, s  = divmod(saved, 60)
+    time_str = f"{mins}m {s}s" if mins else f"{s}s"
+
+    await callback.answer(f"✅ −{time_str} applied to {cat} timer!", show_alert=True)
+    try:
+        await callback.message.edit_text(
+            f"⚡ <b>SPEEDUP APPLIED</b>\n\n"
+            f"<b>{info['name']}</b>\n"
+            f"Reduced <b>{cat}</b> timer by <b>{time_str}</b>.",
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
 @dp.message(_cmd("freeze", "board_freeze"))
 async def cmd_board_freeze(message: types.Message):
     """Show the Board Freeze shop inline keyboard."""
@@ -8762,6 +9099,208 @@ async def cb_freeze_buy(callback: types.CallbackQuery):
         await callback.answer(f"❌ Error: {str(e)[:50]}", show_alert=True)
 
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  BACKGROUND PROCESS ITEMS
+# ═══════════════════════════════════════════════════════════════════════════
+
+MYSTIC_WORDS = {
+    "aura","zenith","altar","rune","sigil","coven","karma","ether","chaos",
+    "relic","omen","curse","hex","veil","void","sage","soul","fate","lore",
+    "mana","ritual","arcane","elder","totem","idol","rune","prism","lunar",
+    "astral","occult","elixir","glyph","chant","seraph","wraith","specter",
+    "golem","titan","oracle","mystic","cosmic","nectar","cipher","mantra",
+    "trance","abyss","sacred","portal","sorcery","druid","shaman","witch",
+    "warlock","crypt","tomb","ghost","spirit","revere","invoke","conjure",
+    "summon","banish","anoint","divine","sacred","ancient","eternal","shadow",
+    "alchemy","zenith","solstice","equinox","eclipse","prophecy","talisman",
+}
+
+
+async def _send_item_words(user_id: int, words: list, header: str, delay: float, batch: int = 1):
+    """Generic timed word delivery to a player's DM."""
+    try:
+        if not words:
+            await bot.send_message(user_id, f"{header}\n\n_No valid words found for current letters._", parse_mode="HTML")
+            return
+        await bot.send_message(user_id, f"{header}\n<b>{len(words)} words incoming…</b>", parse_mode="HTML")
+        i = 0
+        while i < len(words):
+            chunk = words[i:i+batch]
+            txt   = "  ".join(f"<code>{w.upper()}</code>" for w in chunk)
+            await bot.send_message(user_id, txt, parse_mode="HTML")
+            i += batch
+            if i < len(words):
+                await asyncio.sleep(delay)
+        await bot.send_message(user_id, "✅ <b>Delivery complete.</b>", parse_mode="HTML")
+    except Exception as e:
+        print(f"[ITEM DELIVERY] {e}")
+
+
+@dp.message(_cmd("pattern_pulse", "pulse"))
+async def cmd_pattern_pulse(message: types.Message):
+    """
+    Pattern Pulse — sorts valid words starting with same letter as seed word first.
+    Sends instantly to DM.
+    """
+    if message.chat.type not in ("group","supergroup"):
+        await message.answer("⚡ Use Pattern Pulse during an active Fusion round in the group.", parse_mode="Markdown")
+        return
+
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await _send_unreg_sticker(message); return
+
+    eng = get_engine(message.chat.id)
+    if not eng.active:
+        await message.reply("❌ No active round. Pattern Pulse only works during a round.", parse_mode="Markdown")
+        return
+
+    # Check user owns the item
+    inv = get_inventory(u_id)
+    item = next((it for it in inv if it.get("type","").lower() == "pattern_pulse"), None)
+    if not item:
+        await message.reply("❌ You don't have a Pattern Pulse item. Buy one from /shop.", parse_mode="Markdown")
+        return
+    remove_inventory_item(u_id, item["id"])
+
+    letters = eng.letters
+    seed    = (eng.word1 or "A")[0].lower()
+    used    = set(eng.used_words)
+
+    # Find all valid words from dictionary that can be spelled from letters
+    valid = [w for w in DICTIONARY if len(w) >= 3 and can_spell(w, letters) and w not in used]
+    # Sort: seed-starting first, then alphabetical
+    valid.sort(key=lambda w: (not w.startswith(seed), w))
+
+    header = (
+        f"⚡ <b>PATTERN PULSE</b>\n"
+        f"Words starting with '<b>{seed.upper()}</b>' first, then alphabetical:\n"
+        f"━━━━━━━━━━━━━━━━━"
+    )
+    asyncio.create_task(_send_item_words(message.from_user.id, valid, header, delay=0, batch=20))
+    await message.reply("⚡ <b>Pattern Pulse activated!</b> Check your DMs.", parse_mode="HTML")
+
+
+@dp.message(_cmd("titan_drop", "titan"))
+async def cmd_titan_drop(message: types.Message):
+    """
+    Titan Drop — longest words first, 3 every 3 seconds for 60 seconds.
+    """
+    if message.chat.type not in ("group","supergroup"):
+        await message.answer("🚀 Use Titan Drop during an active Fusion round.", parse_mode="Markdown")
+        return
+
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await _send_unreg_sticker(message); return
+
+    eng = get_engine(message.chat.id)
+    if not eng.active:
+        await message.reply("❌ No active round.", parse_mode="Markdown"); return
+
+    inv  = get_inventory(u_id)
+    item = next((it for it in inv if it.get("type","").lower() == "titan_drop"), None)
+    if not item:
+        await message.reply("❌ You don't have a Titan Drop. Buy one from /shop.", parse_mode="Markdown"); return
+    remove_inventory_item(u_id, item["id"])
+
+    letters = eng.letters
+    used    = set(eng.used_words)
+    valid   = [w for w in DICTIONARY if len(w) >= 3 and can_spell(w, letters) and w not in used]
+    valid.sort(key=lambda w: len(w), reverse=True)       # longest first
+    valid   = valid[:60]                                  # cap at 60 words (3×20 batches)
+
+    header = "🚀 <b>TITAN DROP</b>\nHeaviest words incoming — 3 every 3 seconds:\n━━━━━━━━━━━━━━━━━"
+    asyncio.create_task(_send_item_words(message.from_user.id, valid, header, delay=3, batch=3))
+    await message.reply("🚀 <b>Titan Drop activated!</b> Check your DMs.", parse_mode="HTML")
+
+
+@dp.message(_cmd("drip_feed", "drip"))
+async def cmd_drip_feed(message: types.Message):
+    """
+    Drip Feed — shortest words first, 1 per second for 100 seconds.
+    """
+    if message.chat.type not in ("group","supergroup"):
+        await message.answer("💧 Use Drip Feed during an active Fusion round.", parse_mode="Markdown")
+        return
+
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await _send_unreg_sticker(message); return
+
+    eng = get_engine(message.chat.id)
+    if not eng.active:
+        await message.reply("❌ No active round.", parse_mode="Markdown"); return
+
+    inv  = get_inventory(u_id)
+    item = next((it for it in inv if it.get("type","").lower() == "drip_feed"), None)
+    if not item:
+        await message.reply("❌ You don't have a Drip Feed. Buy one from /shop.", parse_mode="Markdown"); return
+    remove_inventory_item(u_id, item["id"])
+
+    letters = eng.letters
+    used    = set(eng.used_words)
+    valid   = [w for w in DICTIONARY if len(w) >= 3 and can_spell(w, letters) and w not in used]
+    valid.sort(key=lambda w: len(w))                     # shortest first
+    valid   = valid[:100]
+
+    header = "💧 <b>DRIP FEED</b>\nMarathon flow — 1 word per second:\n━━━━━━━━━━━━━━━━━"
+    asyncio.create_task(_send_item_words(message.from_user.id, valid, header, delay=1, batch=1))
+    await message.reply("💧 <b>Drip Feed activated!</b> Check your DMs.", parse_mode="HTML")
+
+
+@dp.message(_cmd("grimoire", "mystic_grimoire"))
+async def cmd_mystic_grimoire(message: types.Message):
+    """
+    Mystic Grimoire — mystic words give 10 pts flat regardless of length.
+    Activates for the current round for the user. Sends matching mystic words to DM.
+    """
+    if message.chat.type not in ("group","supergroup"):
+        await message.answer("🔮 Use Grimoire during an active Fusion round.", parse_mode="Markdown")
+        return
+
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await _send_unreg_sticker(message); return
+
+    eng = get_engine(message.chat.id)
+    if not eng.active:
+        await message.reply("❌ No active round.", parse_mode="Markdown"); return
+
+    inv  = get_inventory(u_id)
+    item = next((it for it in inv if it.get("type","").lower() in ("grimoire","mystic_grimoire")), None)
+    if not item:
+        await message.reply("❌ You don't have a Mystic Grimoire. Buy one from /shop.", parse_mode="Markdown"); return
+    remove_inventory_item(u_id, item["id"])
+
+    # Store grimoire-active flag in player session
+    if u_id not in eng.player_sessions:
+        eng.player_sessions[u_id] = {
+            'pts':0,'xp':0,'word_count':0,
+            'resources':{'wood':0,'bronze':0,'iron':0,'diamond':0,'relics':0},
+            'food':0,'streak':0,'last_word':'','last_pts':0,'rare_message':''
+        }
+    eng.player_sessions[u_id]['grimoire_active'] = True
+
+    letters = eng.letters
+    used    = set(eng.used_words)
+    mystic_valid = sorted(
+        [w for w in MYSTIC_WORDS if len(w) >= 3 and can_spell(w, letters) and w not in used]
+    )
+
+    header = (
+        "🔮 <b>MYSTIC GRIMOIRE ACTIVATED</b>\n"
+        "These mystic words grant <b>10 pts flat</b> regardless of length:\n"
+        "━━━━━━━━━━━━━━━━━"
+    )
+    asyncio.create_task(_send_item_words(message.from_user.id, mystic_valid, header, delay=0, batch=10))
+    await message.reply("🔮 <b>Mystic Grimoire activated!</b> Mystic words now give 10 pts. Check your DMs.", parse_mode="HTML")
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  WORD-GUESS CATCH-ALL  ←── MUST BE THE LAST @dp.message HANDLER
 # ═══════════════════════════════════════════════════════════════════════════
@@ -8796,6 +9335,32 @@ async def on_group_message(message: types.Message):
                 register_user(u_id, username)
                 user = get_user(u_id)
             if not user:
+                return
+
+            # ── Trivia Pass gate — must be level 5+ with trivia_pass ──────
+            user_level = user.get("level", 1)
+            has_pass   = user.get("trivia_pass", False)
+            if user_level < 5 or not has_pass:
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                if u_id not in getattr(trivia_eng, '_notified_no_pass', set()):
+                    if not hasattr(trivia_eng, '_notified_no_pass'):
+                        trivia_eng._notified_no_pass = set()
+                    trivia_eng._notified_no_pass.add(u_id)
+                    try:
+                        await bot.send_message(
+                            u_id,
+                            f"🧠 <b>TRIVIA PASS REQUIRED</b>\n\n"
+                            f"You must reach <b>Level 5</b> playing Fusion to unlock Trivia.\n"
+                            f"You are currently <b>Level {user_level}</b>.\n\n"
+                            f"Your words will be validated in Fusion but won't appear on "
+                            f"the Trivia leaderboard until you earn your Trivia Pass.",
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
                 return
 
             # Use DB username; fall back to Telegram display name safely
@@ -8954,9 +9519,16 @@ async def on_group_message(message: types.Message):
                     message_thread_id=FUSION_TOPIC_ID
                 )
 
-            pts         = max(len(guess) - 2, 1)
             db_name     = user.get("username", message.from_user.first_name or "Player")
             word_len    = len(guess)
+
+            # Mystic Grimoire override: flat 10 pts for mystic words
+            _session_now = eng.player_sessions.get(u_id, {})
+            if _session_now.get('grimoire_active') and guess in MYSTIC_WORDS:
+                pts = 10
+            else:
+                pts = max(word_len - 2, 1)
+
             xp_awarded  = pts * 2
             btc_awarded = max(pts // 2, 1)
 
@@ -9146,7 +9718,7 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
         try:
             await asyncio.sleep(60)  # Check every 60 seconds
             
-            now = datetime.now(timezone.utc) + timedelta(hours=1)  # UTC+1 (WAT)
+            now = datetime.utcnow() + timedelta(hours=1)  # UTC+1 (WAT)
             
             # Sunday = weekday 6, check if within 23:58-23:59 window (just before Monday)
             is_sunday_midnight = (
@@ -9291,6 +9863,7 @@ async def bot_activity_task():
     while True:
         try:
             from supabase_db import supabase, DB_TABLE, ensure_bot_exists, _current_week_key
+            from datetime import datetime, timedelta, timezone
             import os, json
             
             try:
@@ -9799,7 +10372,7 @@ async def cmd_saves(message: types.Message):
                 saves_by_slot[slot_num] = cp
     
     # Build display with friendly timestamp formatting
-    from datetime import datetime
+    from datetime import datetime, timezone
     txt = "💾 *YOUR SAVED GAMES*\n━━━━━━━━━━━━━━━━━━━━\n\n"
     
     if saves_by_slot:
@@ -9891,7 +10464,7 @@ async def hourly_leaderboard_broadcast_task(bot: Bot, chat_id: int):
     await asyncio.sleep(10)  # brief startup delay
     while True:
         try:
-            now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
+            now_str = datetime.utcnow().strftime("%H:%M UTC")
             medals  = ["🥇", "🥈", "🥉"]
 
             sections = [
@@ -9920,8 +10493,8 @@ async def hourly_leaderboard_broadcast_task(bot: Bot, chat_id: int):
                             ns       = p.get("name_shield_until")
                             if ns:
                                 try:
-                                    from datetime import datetime as _dt
-                                    if _dt.utcnow() < _dt.fromisoformat(ns):
+                                    from datetime import datetime as _dt, timezone
+                                    if _dt.now(timezone.utc) < _dt.fromisoformat(ns):
                                         name     = "🔐 Anonymous"
                                         shield_i = "🛡️"
                                 except Exception:
