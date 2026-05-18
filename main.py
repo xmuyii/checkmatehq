@@ -268,6 +268,9 @@ try:
         award_word_score, get_credits, add_credits, spend_credits,
         claim_daily_login_credits, award_scoreboard_credits,
         CREDITS_TO_PLAY, CREDITS_RANK_REWARDS, CREDITS_DAILY_LOGIN,
+        activate_shield_item, get_shield_inventory, check_shield_expiry,
+        SHIELD_DURATIONS, SHIELD_ITEM_DURATIONS,
+        save_last_week_winners, get_last_week_winners,
     )
     print("✅ Using Supabase database")
 except Exception as e:
@@ -547,43 +550,31 @@ async def game_loop(chat_id: int):
 
                 possible_words_count = compute_possible_words(eng.letters)
 
-                # Show last week winners
+                # Load last week winners from Supabase last_week_winners table
                 last_winners = []
                 try:
-                    _script_dir = os.path.dirname(os.path.abspath(__file__))
-                    paths_to_try = [
-                        os.path.join(_script_dir, 'last_week_winners.json'),
-                        os.path.join(os.getcwd(), 'last_week_winners.json'),
-                        'last_week_winners.json',
-                    ]
-                    _loaded = False
-                    for path in paths_to_try:
-                        if os.path.exists(path):
-                            with open(path, 'r', encoding='utf-8') as f:
-                                last_winners = json.load(f)
-                            print(f"[GAME LOOP] Loaded {len(last_winners)} last-week winners from {path}")
-                            _loaded = True
-                            break
-                    if not _loaded:
-                        print(f"[GAME LOOP] No last_week_winners.json found in: {paths_to_try}")
-                        # Pull from DB as fallback — top 3 all-time players
-                        try:
-                            _lb = get_alltime_leaderboard(limit=3)
-                            last_winners = [{'username': p['username'], 'points': p['points']} for p in _lb]
-                            print(f"[GAME LOOP] Using alltime top-3 as last-week fallback: {[p['username'] for p in last_winners]}")
-                        except Exception:
-                            last_winners = []
+                    _raw = get_last_week_winners()
+                    for row in _raw[:3]:
+                        last_winners.append({
+                            'username': row.get('username', 'Unknown'),
+                            'points':   row.get('weekly_points', 0),
+                            'level':    row.get('level', 1),
+                        })
+                    print(f"[GAME LOOP] Loaded {len(last_winners)} last-week winners from Supabase")
                 except Exception as e:
-                    print(f"[ERROR] Loading last week winners: {e}")
+                    print(f"[GAME LOOP] Could not load last week winners: {e}")
                     last_winners = []
 
                 winners_text = ""
                 if last_winners:
                     winners_text = "🏆 *LAST WEEK'S TOP PLAYERS* 🏆\n"
-                    # Only show up to 3 winners to prevent IndexError
                     for i, p in enumerate(last_winners[:3]):
-                        medal = ["🥇", "🥈", "🥉"][i]
-                        winners_text += f"{medal} {p.get('username', 'Unknown')} — {p.get('points', 0):,} pts\n"
+                        medal  = ["🥇", "🥈", "🥉"][i]
+                        name   = p.get('username', 'Unknown')
+                        pts    = p.get('points', p.get('weekly_points', 0))
+                        lvl    = p.get('level', '')
+                        lvl_str = f"  Lv{lvl}" if lvl else ""
+                        winners_text += f"{medal} {name}{lvl_str} — {pts:,} pts\n"
                     winners_text += f"{divider()}\n"
 
                 # Send new round sticker to fusion topic
@@ -3101,7 +3092,12 @@ async def cmd_inventory(message: types.Message):
             kind = "XP" if "xp" in itype else "BITCOIN"
             lbl, cb = f"⚡ {kind} MULTIPLIER x{mult}", f"use_{iid_str}"
         elif "locked_" in itype:                      lbl, cb = "🔒 LEGENDARY [TOO POWERFUL]", f"info_{iid_str}"
-        else:                                         lbl, cb = f"❓ {itype.upper()}",          f"use_{iid_str}"
+        else:
+            fn  = item_labels.get(itype, None)
+            if fn:
+                lbl, cb = fn(item.get("multiplier_value", 1)), f"use_{iid_str}"
+            else:
+                lbl, cb = f"🎮 {itype.replace(chr(95), chr(32)).title()}", f"use_{iid_str}"
         # Add action button and discard button on same row
         rows.append([
             InlineKeyboardButton(text=lbl, callback_data=cb),
@@ -3139,14 +3135,60 @@ async def cmd_claims(message: types.Message):
         "locked_celestial_key":      "🗝️ CELESTIAL KEY",
     }
     item_labels = {
-        "xp_multiplier":     lambda m: f"⚡ XP MULTIPLIER x{m}",
-        "bitcoin_multiplier": lambda m: f"💎 BITCOIN MULTIPLIER x{m}",
-        "super_crate":  lambda _: "🎁 SUPER CRATE",
-        "wood_crate":   lambda _: "🪵 WOOD CRATE",
-        "bronze_crate": lambda _: "🥉 BRONZE CRATE",
-        "iron_crate":   lambda _: "⚙️ IRON CRATE",
-        "shield":       lambda _: "🛡️ SHIELD",
-        "teleport":     lambda _: "🌀 TELEPORT",
+        "xp_multiplier":        lambda m: f"⚡ XP MULTIPLIER x{m}",
+        "bitcoin_multiplier":   lambda m: f"💎 BITCOIN MULTIPLIER x{m}",
+        "super_crate":          lambda _: "🎁 SUPER CRATE",
+        "wood_crate":           lambda _: "🪵 WOOD CRATE",
+        "bronze_crate":         lambda _: "🥉 BRONZE CRATE",
+        "iron_crate":           lambda _: "⚙️ IRON CRATE",
+        "shield":               lambda _: "🛡️ SHIELD (24h)",
+        "shield_potion":        lambda _: "🛡️ SHIELD POTION (24h)",
+        "free_shield":          lambda _: "🛡️ FREE SHIELD (24h)",
+        "1hours":               lambda _: "🛡️ 1-HOUR SHIELD",
+        "3hours":               lambda _: "🛡️ 3-HOUR SHIELD",
+        "12hours":              lambda _: "🛡️ 12-HOUR SHIELD",
+        "1days":                lambda _: "🛡️ 1-DAY SHIELD",
+        "3days":                lambda _: "🛡️ 3-DAY SHIELD",
+        "7days":                lambda _: "🛡️ 7-DAY SHIELD",
+        "teleport":             lambda _: "🌀 TELEPORT",
+        "free_teleport":        lambda _: "🌀 FREE TELEPORT",
+        "name_shield":          lambda _: "🔐 NAME SHIELD (24h)",
+        "rank_disguise":        lambda _: "🎭 RANK DISGUISE",
+        "coin_explosion":       lambda _: "🤑 COIN MULTIPLIER",
+        "fake_shield":          lambda _: "🧠 FAKE SHIELD",
+        "rank_swap":            lambda _: "💀 RANK SWAP",
+        "anti_rank_swap":       lambda _: "💀 ANTI-RANK SWAP",
+        "clown_badge":          lambda _: "🤡 CLOWN BADGE",
+        "scout":                lambda _: "📸 SCOUT",
+        "anti_scout":           lambda _: "📴 ANTI-SCOUT",
+        "blackout":             lambda _: "⚫ BLACKOUT",
+        "false_chest":          lambda _: "💣 FALSE CHEST",
+        "purge_call":           lambda _: "🔥 PURGE CALL",
+        "gift_drop":            lambda _: "🎁 GIFT DROP",
+        "pattern_pulse":        lambda _: "⚡ PATTERN PULSE",
+        "titan_drop":           lambda _: "🚀 TITAN DROP",
+        "drip_feed":            lambda _: "💧 DRIP FEED",
+        "grimoire":             lambda _: "🔮 MYSTIC GRIMOIRE",
+        "mystic_grimoire":      lambda _: "🔮 MYSTIC GRIMOIRE",
+        "freeze_30":            lambda _: "❄️ FREEZE +30s",
+        "freeze_60":            lambda _: "❄️ FREEZE +60s",
+        "freeze_120":           lambda _: "❄️ FREEZE +2min",
+        "freeze_180":           lambda _: "❄️ FREEZE +3min",
+        "speedup_attack_30":    lambda _: "⚡ ATTACK SPEEDUP -30s",
+        "speedup_attack_120":   lambda _: "⚡ ATTACK SPEEDUP -2m",
+        "speedup_attack_300":   lambda _: "⚡ ATTACK SPEEDUP -5m",
+        "speedup_deploy_30":    lambda _: "🛡️ DEPLOY SPEEDUP -30s",
+        "speedup_deploy_120":   lambda _: "🛡️ DEPLOY SPEEDUP -2m",
+        "speedup_train_60":     lambda _: "⚔️ TRAINING SPEEDUP -1m",
+        "speedup_train_300":    lambda _: "⚔️ TRAINING SPEEDUP -5m",
+        "speedup_train_600":    lambda _: "⚔️ TRAINING SPEEDUP -10m",
+        "speedup_build_60":     lambda _: "🏗️ BUILD SPEEDUP -1m",
+        "speedup_build_300":    lambda _: "🏗️ BUILD SPEEDUP -5m",
+        "speedup_build_600":    lambda _: "🏗️ BUILD SPEEDUP -10m",
+        "speedup_scout_30":     lambda _: "🛰️ SCOUT SPEEDUP -30s",
+        "speedup_universal_60": lambda _: "🌀 UNIVERSAL SPEEDUP -1m",
+        "speedup_universal_300":lambda _: "🌀 UNIVERSAL SPEEDUP -5m",
+        "speedup_universal_600":lambda _: "🌀 UNIVERSAL SPEEDUP -10m",
     }
 
     rows = []
@@ -5566,46 +5608,119 @@ async def cb_menu_battle(callback: types.CallbackQuery):
     )
 
 
+
 @dp.callback_query(lambda q: q.data == "battle_shield")
 async def cb_battle_shield(callback: types.CallbackQuery):
-    """Shield management from battle hub."""
+    """Shield management — shows active status, time remaining, and inventory selection."""
     await callback.answer()
     u_id = str(callback.from_user.id)
+
+    # Check and clear any expired shield first
+    check_shield_expiry(u_id)
     user = get_user(u_id)
     if not user:
         return
-    shield_st = user.get("shield_status", "⚠️ UNPROTECTED")
+
+    shield_st = user.get("shield_status") or "⚠️ UNPROTECTED"
     is_active = "ACTIVE" in shield_st
 
-    kb_rows = []
+    # Time remaining
+    time_remaining = ""
     if is_active:
-        kb_rows.append([InlineKeyboardButton(text="🔴 Deactivate Shield", callback_data="shield_deactivate")])
+        exp_str = user.get("shield_expires")
+        if exp_str:
+            try:
+                exp   = datetime.fromisoformat(exp_str)
+                delta = exp - datetime.utcnow()
+                secs  = int(delta.total_seconds())
+                if secs > 0:
+                    d = secs // 86400
+                    h = (secs % 86400) // 3600
+                    m = (secs % 3600) // 60
+                    if d > 0:
+                        time_remaining = f"\n⏱️ <b>{d}d {h}h {m}m</b> remaining"
+                    elif h > 0:
+                        time_remaining = f"\n⏱️ <b>{h}h {m}m</b> remaining"
+                    else:
+                        time_remaining = f"\n⏱️ <b>{m}m</b> remaining"
+                else:
+                    time_remaining = "\n⏱️ Expiring now"
+            except Exception:
+                pass
+
+    icon   = "🛡️" if is_active else "⚠️"
+    status = "PROTECTED" if is_active else "VULNERABLE"
+    kb_rows = []
+
+    if is_active:
+        kb_rows.append([InlineKeyboardButton(
+            text="🔴 Deactivate Shield",
+            callback_data="shield_deactivate"
+        )])
     else:
-        kb_rows.append([InlineKeyboardButton(text="🟢 Activate Shield",   callback_data="shield_activate")])
+        # Show shield items from inventory
+        shields = get_shield_inventory(u_id)
+        if shields:
+            for sit in shields[:6]:
+                iid   = sit.get("id", 0)
+                itype = (sit.get("type") or "shield").lower()
+                dur_map = {
+                    "shield": "24h", "shield_potion": "24h", "free_shield": "24h",
+                    "1hours": "1 Hour", "3hours": "3 Hours", "12hours": "12 Hours",
+                    "1days": "1 Day", "3days": "3 Days", "7days": "7 Days",
+                }
+                dur_label = dur_map.get(itype, "24h")
+                kb_rows.append([InlineKeyboardButton(
+                    text=f"🛡️ Activate {dur_label} Shield",
+                    callback_data=f"shield_use_{iid}"
+                )])
+        else:
+            kb_rows.append([InlineKeyboardButton(
+                text="🛒 Buy Shield Items (/battle_items)",
+                callback_data="battle_items_inline"
+            )])
+
     kb_rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="menu_battle")])
 
-    icon = "🛡️" if is_active else "⚠️"
+    body = "✅ Your base is protected from raids." if is_active else "⚠️ Vulnerable! Select a shield from inventory to activate."
     await callback.message.edit_text(
-        f"{icon} <b>SHIELD STATUS</b>\n━━━━━━━━━━━━━━━━━\n"
-        f"Current: <b>{shield_st}</b>\n\n"
-        f"{'Your base is protected.' if is_active else 'Your base is VULNERABLE to attacks!'}",
+        f"{icon} <b>SHIELD — {status}</b>\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"Status: <b>{shield_st}</b>{time_remaining}\n\n"
+        f"{body}",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
     )
 
 
-@dp.callback_query(lambda q: q.data in ("shield_activate", "shield_deactivate"))
-async def cb_shield_toggle(callback: types.CallbackQuery):
-    """Toggle shield on/off."""
+@dp.callback_query(lambda q: q.data.startswith("shield_use_"))
+async def cb_shield_use_item(callback: types.CallbackQuery):
+    """Activate a specific shield item from inventory."""
+    try:
+        item_id = int(callback.data.replace("shield_use_", ""))
+    except ValueError:
+        await callback.answer("Invalid item.", show_alert=True)
+        return
     u_id = str(callback.from_user.id)
-    if callback.data == "shield_activate":
-        ok, msg = activate_shield(u_id)
-    else:
-        ok, msg = deactivate_shield(u_id)
+    ok, msg, hours = activate_shield_item(u_id, item_id)
     await callback.answer(msg, show_alert=True)
-    # Refresh shield view
+    if ok:
+        await cb_battle_shield(callback)
+
+
+@dp.callback_query(lambda q: q.data == "shield_deactivate")
+async def cb_shield_deactivate(callback: types.CallbackQuery):
+    """Deactivate active shield."""
+    u_id = str(callback.from_user.id)
+    ok, msg = deactivate_shield(u_id)
+    await callback.answer(msg, show_alert=True)
     await cb_battle_shield(callback)
 
+
+@dp.callback_query(lambda q: q.data == "shield_activate")
+async def cb_shield_activate_legacy(callback: types.CallbackQuery):
+    """Legacy single-button activate — now shows inventory instead."""
+    await cb_battle_shield(callback)
 
 @dp.callback_query(lambda q: q.data == "menu_fusion_info")
 async def cb_menu_fusion_info(callback: types.CallbackQuery):
@@ -7804,7 +7919,13 @@ async def cb_discard(callback: types.CallbackQuery):
                     kind = "XP" if "xp" in itype else "BITCOIN"
                     lbl, cb = f"⚡ {kind} MULTIPLIER x{mult}", f"use_{iid_str}"
                 elif "locked_" in itype:                      lbl, cb = "🔒 LEGENDARY [TOO POWERFUL]", f"info_{iid_str}"
-                else:                                         lbl, cb = f"❓ {itype.upper()}",          f"use_{iid_str}"
+                else:
+                    fn  = item_labels.get(itype, None)
+                    if fn:
+                        lbl, cb = fn(itm.get('multiplier_value', 1)), f"use_{iid_str}"
+                    else:
+                        friendly = itype.replace("_", " ").title()
+                        lbl, cb  = f"🎮 {friendly}", f"use_{iid_str}"
                 rows.append([
                     InlineKeyboardButton(text=lbl, callback_data=cb),
                     InlineKeyboardButton(text="🗑️ DISCARD", callback_data=f"discard_{iid_str}")
@@ -9765,19 +9886,10 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                             except Exception as re:
                                 print(f"[WEEKLY RESET] Reward error for {p.get('username')}: {re}")
                         
-                        # Save to file for display in games — normalize field names
+                        # Save winners to Supabase last_week_winners table
                         try:
-                            winners_to_save = []
-                            for wp in lb[:3]:
-                                winners_to_save.append({
-                                    'username': wp.get('username', 'Unknown'),
-                                    'points':   wp.get('points', 0),
-                                    'id':       wp.get('id') or wp.get('user_id', ''),
-                                })
-                            save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'last_week_winners.json')
-                            with open(save_path, 'w', encoding='utf-8') as f:
-                                json.dump(winners_to_save, f, ensure_ascii=False)
-                            print(f"[WEEKLY RESET] Saved {len(winners_to_save)} winners to {save_path}")
+                            save_last_week_winners(lb)
+                            print(f"[WEEKLY RESET] Saved {min(len(lb),10)} winners to Supabase last_week_winners table")
                         except Exception as e:
                             print(f"[WEEKLY RESET] Failed to save last week winners: {e}")
                         
@@ -10523,6 +10635,38 @@ async def hourly_leaderboard_broadcast_task(bot: Bot, chat_id: int):
         await asyncio.sleep(3600)  # every hour
 
 
+async def shield_expiry_task():
+    """Background task: expire shields that have passed their shield_expires timestamp."""
+    while True:
+        try:
+            await asyncio.sleep(300)  # check every 5 minutes
+            from supabase_db import supabase, DB_TABLE
+            # Find all players with ACTIVE shield
+            r = supabase.table(DB_TABLE)                 .select('user_id, shield_status, shield_expires')                 .ilike('shield_status', '%ACTIVE%')                 .execute()
+            now = datetime.utcnow()
+            expired = 0
+            for row in (r.data or []):
+                exp_str = row.get('shield_expires')
+                if not exp_str:
+                    continue
+                try:
+                    exp = datetime.fromisoformat(exp_str)
+                    if now >= exp:
+                        supabase.table(DB_TABLE).update({
+                            'shield_status':  '⚠️ UNPROTECTED',
+                            'shield_expires': None,
+                        }).eq('user_id', row['user_id']).execute()
+                        expired += 1
+                except Exception:
+                    pass
+            if expired:
+                print(f"[SHIELD EXPIRY TASK] Cleared {expired} expired shields")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"[SHIELD EXPIRY TASK] Error: {e}")
+
+
 async def main():
     import signal, platform
     print("Bot starting...")
@@ -10621,6 +10765,12 @@ async def main():
             print(f"[OK] Hourly leaderboard broadcaster started → topic {LEADERBOARDS_TOPIC_ID}")
         except Exception as e:
             print(f"[WARN] Leaderboard broadcaster failed: {e}")
+
+        try:
+            _shield_task = asyncio.create_task(shield_expiry_task())
+            print(f"[OK] Shield expiry checker started (every 5 min)")
+        except Exception as e:
+            print(f"[WARN] Shield expiry task failed: {e}")
     else:
         print(f"[WARN] CHECKMATE_HQ_GROUP_ID invalid or not set (got: {CHECKMATE_HQ_GROUP_ID}) - announcements disabled")
     
