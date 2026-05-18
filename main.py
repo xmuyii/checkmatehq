@@ -287,6 +287,8 @@ except Exception as e:
     # Stub shield helpers for JSON fallback
     def activate_shield(user_id): return False
     def is_shielded(user): return False
+    CREDITS_TO_PLAY = 100 
+    def claim_daily_login_credits(user_id): return False, 0, 0
 
 from initiation import initiation_router, CHECKMATE_HQ_GROUP_ID
 from config import BOT_TOKEN, ENV_NAME, SUPABASE_URL as CONFIG_SUPABASE_URL, SUPABASE_KEY as CONFIG_SUPABASE_KEY
@@ -9839,7 +9841,7 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
         try:
             await asyncio.sleep(60)  # Check every 60 seconds
             
-            now = datetime.utcnow() + timedelta(hours=1)  # UTC+1 (WAT)
+            now = datetime.now(timezone.utc) + timedelta(hours=1)  # UTC+1 (WAT)
             
             # Sunday = weekday 6, check if within 23:58-23:59 window (just before Monday)
             is_sunday_midnight = (
@@ -10576,7 +10578,7 @@ async def hourly_leaderboard_broadcast_task(bot: Bot, chat_id: int):
     await asyncio.sleep(10)  # brief startup delay
     while True:
         try:
-            now_str = datetime.utcnow().strftime("%H:%M UTC")
+            now_str = datetime.now(timezone.utc).strftime("%H:%M UTC")
             medals  = ["🥇", "🥈", "🥉"]
 
             sections = [
