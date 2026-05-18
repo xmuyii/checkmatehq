@@ -584,17 +584,20 @@ async def game_loop(chat_id: int, topic_id: int = None):
                     for path in paths_to_try:
                         if os.path.exists(path):
                             with open(path, 'r', encoding='utf-8') as f:
-                                last_winners = json.load(f)
-                            print(f"[GAME LOOP] Loaded {len(last_winners)} last-week winners from {path}")
+                                winners_raw = json.load(f)
+                            # Filter out bot accounts
+                            last_winners = [w for w in winners_raw if not w.get('is_bot', False)]
+                            print(f"[GAME LOOP] Loaded {len(last_winners)} last-week winners (filtered bots) from {path}")
                             _loaded = True
                             break
                     if not _loaded:
                         print(f"[GAME LOOP] No last_week_winners.json found in: {paths_to_try}")
-                        # Pull from DB as fallback — top 3 all-time players
+                        # Pull from DB as fallback — top 3 all-time players, excluding bots
                         try:
-                            _lb = get_alltime_leaderboard(limit=3)
-                            last_winners = [{'username': p['username'], 'points': p['points']} for p in _lb]
-                            print(f"[GAME LOOP] Using alltime top-3 as last-week fallback: {[p['username'] for p in last_winners]}")
+                            _lb = get_alltime_leaderboard(limit=10)
+                            # Filter out bots and take top 3
+                            last_winners = [{'username': p['username'], 'points': p['points']} for p in _lb if not p.get('is_bot', False)][:3]
+                            print(f"[GAME LOOP] Using alltime top-3 as last-week fallback (filtered bots): {[p['username'] for p in last_winners]}")
                         except Exception:
                             last_winners = []
                 except Exception as e:
@@ -9208,7 +9211,9 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                 
                 try:
                     # 1. Get the final weekly leaderboard BEFORE resetting
-                    lb = get_weekly_leaderboard(limit=10)
+                    lb_raw = get_weekly_leaderboard(limit=10)
+                    # Filter out bots
+                    lb = [p for p in lb_raw if not p.get('is_bot', False)]
                     
                     # 2. Build the winners announcement
                     medals = ["🥇", "🥈", "🥉"]
@@ -9237,7 +9242,7 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                             except Exception as re:
                                 print(f"[WEEKLY RESET] Reward error for {p.get('username')}: {re}")
                         
-                        # Save to file for display in games — normalize field names
+                        # Save to file for display in games — normalize field names (bots already filtered)
                         try:
                             winners_to_save = []
                             for wp in lb[:3]:
@@ -9245,6 +9250,8 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                                     'username': wp.get('username', 'Unknown'),
                                     'points':   wp.get('points', 0),
                                     'id':       wp.get('id') or wp.get('user_id', ''),
+                                    'is_bot':   False,  # Explicitly mark as non-bot since we filtered
+                                })
                                 })
                             save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'last_week_winners.json')
                             with open(save_path, 'w', encoding='utf-8') as f:
