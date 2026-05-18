@@ -451,19 +451,30 @@ def word_in_dict(word: str) -> bool:
     return False
 
 def compute_possible_words(letters: str) -> int:
+    """Count possible words that can be made with given letters. Optimized with Counter."""
+    from collections import Counter
     if not DICTIONARY:
         load_dictionary()
+    
+    pool_count = Counter(letters)
     count = 0
     for word in DICTIONARY:
-        if len(word) >= 3 and can_spell(word, letters):
+        if len(word) < 3:
+            continue
+        word_count = Counter(word)
+        # Check if pool has enough of each character
+        if all(pool_count.get(char, 0) >= needed for char, needed in word_count.items()):
             count += 1
     return count
 
 def can_spell(word: str, pool: str) -> bool:
-    avail = list(pool)
-    for ch in word:
-        if ch in avail: avail.remove(ch)
-        else: return False
+    """Check if word can be spelled with letters in pool. O(n) instead of O(n²)."""
+    from collections import Counter
+    pool_count = Counter(pool)
+    word_count = Counter(word)
+    for char, needed in word_count.items():
+        if pool_count.get(char, 0) < needed:
+            return False
     return True
 
 def detect_word_pattern(word: str) -> str:
@@ -498,10 +509,13 @@ def detect_word_pattern(word: str) -> str:
     return 'standard'
 
 def can_spell(word: str, pool: str) -> bool:
-    avail = list(pool)
-    for ch in word:
-        if ch in avail: avail.remove(ch)
-        else: return False
+    """Check if word can be spelled with letters in pool. O(n) instead of O(n²)."""
+    from collections import Counter
+    pool_count = Counter(pool)
+    word_count = Counter(word)
+    for char, needed in word_count.items():
+        if pool_count.get(char, 0) < needed:
+            return False
     return True
 
 
@@ -519,10 +533,15 @@ load_dictionary()
 ROUND_SECS = 180
 BREAK_SECS = 15
 
-async def game_loop(chat_id: int):
+async def game_loop(chat_id: int, topic_id: int = None):
+    """Run fusion game. If topic_id is None, uses FUSION_TOPIC_ID."""
+    if topic_id is None:
+        topic_id = FUSION_TOPIC_ID
+    
     eng = get_engine(chat_id)
     eng.running      = True
     eng.empty_rounds = 0
+    eng.active_topic = topic_id
 
     try:
         while eng.running:
@@ -593,7 +612,7 @@ async def game_loop(chat_id: int):
 
                 # Send new round sticker to fusion topic
                 try:
-                    await bot.send_sticker(chat_id, STICKER_NEW_ROUND, message_thread_id=FUSION_TOPIC_ID)
+                    await bot.send_sticker(chat_id, STICKER_NEW_ROUND, message_thread_id=eng.active_topic)
                 except Exception:
                     pass
 
@@ -627,7 +646,7 @@ async def game_loop(chat_id: int):
                         is_monkey_trap = random.random() < 0.50
                         # Send crate sticker to fusion topic
                         try:
-                            await bot.send_sticker(chat_id, STICKER_CRATE_DROP, message_thread_id=FUSION_TOPIC_ID)
+                            await bot.send_sticker(chat_id, STICKER_CRATE_DROP, message_thread_id=eng.active_topic)
                         except Exception:
                             pass
                         crate_label = "🐵 *CRATE DROP!*" if is_monkey_trap else "⚡ *CRATE DROP!*"
@@ -635,7 +654,7 @@ async def game_loop(chat_id: int):
                             chat_id,
                             crate_label,
                             parse_mode="Markdown",
-                            message_thread_id=FUSION_TOPIC_ID
+                            message_thread_id=eng.active_topic
                         )
                         eng.crate_msg_id   = m.message_id
                         eng.crate_claimers = []
@@ -652,7 +671,7 @@ async def game_loop(chat_id: int):
                         await bot.send_message(
                             chat_id,
                             f"🃏 *The GameMaster:* *THE WORDS ARE:* \n\n\n`{eng.word1}` + `{eng.word2}`\n\n", parse_mode="Markdown",
-                            message_thread_id=FUSION_TOPIC_ID)
+                            message_thread_id=eng.active_topic)
 
                         # After sending word pair, wait a bit then send extra letters
                         await asyncio.sleep(0.1)
@@ -799,7 +818,7 @@ async def game_loop(chat_id: int):
                                 medal = ["🥇","🥈","🥉"][i-1] if i<=3 else f"{i}."
                                 t += f"{medal} {p['username']} — {p['points']:,} pts\n"
                             await bot.send_message(chat_id, t, parse_mode="Markdown",
-                                                    message_thread_id=FUSION_TOPIC_ID)
+                                                    message_thread_id=eng.active_topic)
                     except Exception as e:
                         print(f"[ERROR] Weekly leaderboard display: {e}")
 
@@ -953,12 +972,11 @@ async def cmd_fusion(message: types.Message):
     if eng.running:
         await message.reply("🃏 *GameMaster:* \"Fusion is already running!\""); return
 
-    asyncio.create_task(game_loop(message.chat.id))
+    # Use the current topic if in a topic, otherwise use default FUSION_TOPIC_ID
+    active_topic = message.message_thread_id if message.message_thread_id else FUSION_TOPIC_ID
+    asyncio.create_task(game_loop(message.chat.id, active_topic))
     
-    if message.message_thread_id != FUSION_TOPIC_ID:
-        chat_id_str = _chat_id_for_tg_link(message.chat.id)
-        link_text = f"https://t.me/c/{chat_id_str}/{FUSION_TOPIC_ID}" if chat_id_str else "the fusion topic"
-        await message.answer(f"🃏 *Fusion is starting in the [Fusion Topic]({link_text})!*", parse_mode="Markdown")
+    await message.answer(f"🃏 *Fusion is starting!*", parse_mode="Markdown")
 
 
 @dp.message(_cmd("forcerestart"))

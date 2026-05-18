@@ -1234,6 +1234,7 @@ def claim_item(user_id, item_id: int):
     """
     Claim ONE unclaimed item identified by its unique 'id' field.
     Moves it into inventory. Returns (True, msg) or (False, reason).
+    Special handling: backpack items increase backpack_slots instead.
     """
     uid = str(user_id)
     user = get_user(uid)
@@ -1245,6 +1246,17 @@ def claim_item(user_id, item_id: int):
     if not item:
         return False, "Item not found"
 
+    item_type = item.get('type', '')
+    
+    # Special handling for backpack upgrades - don't add to inventory, just increase capacity
+    if 'backpack' in item_type.lower():
+        old_slots = user.get('backpack_slots', 5)
+        new_slots = old_slots + 15  # 5 → 20, for example
+        user['backpack_slots'] = new_slots
+        user['unclaimed_items'] = [it for it in unclaimed if it.get('id') != item_id]
+        save_user(uid, user)
+        return True, f"Backpack upgraded! Capacity: {old_slots} → {new_slots} slots"
+
     inv = user.get('inventory', [])
     if len(inv) >= user.get('backpack_slots', 5):
         return False, "Inventory full — use or open an item first"
@@ -1252,7 +1264,7 @@ def claim_item(user_id, item_id: int):
     # Move to inventory
     inv.append({
         'id':               _next_id(inv),
-        'type':             item.get('type'),
+        'type':             item_type,
         'xp_reward':        item.get('xp_reward', 0),
         'multiplier_value': item.get('multiplier_value', 0),
         'acquired':         datetime.utcnow().isoformat(),
