@@ -70,7 +70,8 @@ game_events = {
 }
 
 from save_system import (
-    save_game, reset_game, load_game, reset_player_progress, restore_to_checkpoint, list_saves, list_checkpoints, format_reset_status, format_checkpoint_display
+    save_game, reset_game, load_game, restore_to_checkpoint, 
+    list_saves, list_checkpoints, format_reset_status, format_checkpoint_display
 )
 def add_event(event_type: str, event_data: dict):
     """Add event to tracking queue with timestamp."""
