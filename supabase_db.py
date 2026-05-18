@@ -134,7 +134,7 @@ def _row_to_user(row: dict) -> dict:
         base_res['resources'] = {}
     
     # Ensure ALL resource types exist (don't rely on stored value which might have old structure)
-    default_resources = {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0}
+    default_resources = {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0, 'incubus': 0}
     stored_resources = base_res.get('resources', {})
     
     # Merge: keep stored values but ensure all keys exist
@@ -175,7 +175,6 @@ def save_user(user_id, data: dict):
     d.pop('challenges', None)
     d.pop('metadata', None)
     d.pop('training_queue', None)
-    d.pop('shield_status', None)  # Shield status is in-memory only, not in DB
     d.pop('shield_cooldown', None)  # Shield cooldown doesn't exist in schema
     d.pop('prestige', None)  # Prestige tier is in-memory only, not in DB
     
@@ -230,7 +229,7 @@ def register_user(user_id, username: str):
             'completed_tutorial': False,
             'base_name': random_base_name,
             'base_resources': json.dumps({
-                'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
+                'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0, 'incubus': 0},
                 'food': 0,
                 'current_streak': 0
             }),
@@ -256,35 +255,93 @@ def register_user(user_id, username: str):
         traceback.print_exc()
         return False  # Registration failed
 def get_game_weekly_leaderboard(game_type="fusion", limit=10):
-    """Fetch weekly points for a specific game from Supabase."""
-    field = f"{game_type}_weekly_points"
-    # Query players where the specific game points are > 0
-    response = supabase.table("players").select(f"id, username, {field}")\
-        .gt(field, 0).order(field, desc=True).limit(limit).execute()
-    
-    players = []
-    for row in response.data:
-        players.append({
-            "id": str(row['id']),
-            "username": row.get('username', 'Unknown'),
-            "points": row.get(field, 0)
-        })
-    return players
+    """
+    Weekly leaderboard for a specific game type.
+    Tries the game-specific column (e.g. fusion_weekly_points).
+    If that column doesn't exist or is empty, falls back to shared weekly_points.
+    No week_start filtering — trust the stored value.
+    """
+    game_field = f"{game_type}_weekly_points"
+
+    try:
+        r = supabase.table(DB_TABLE) \
+            .select(f"user_id, username, {game_field}, shield_status, name_shield_until") \
+            .gt(game_field, 0) \
+            .order(game_field, desc=True) \
+            .limit(limit) \
+            .execute()
+
+        raw = r.data or []
+        print(f"[LB] {game_field}: {len(raw)} rows returned")
+
+        results = []
+        for p in raw:
+            pts = int(p.get(game_field) or 0)
+            if pts <= 0:
+                continue
+            results.append({
+                'id':                p['user_id'],
+                'username':          p.get('username', 'Unknown'),
+                'points':            pts,
+                'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
+                'name_shield_until': p.get('name_shield_until') or "Expired",
+            })
+
+        if results:
+            print(f"[LB] {game_field}: returning {len(results)} players")
+            return results
+
+    except Exception as e:
+        print(f"[LB] {game_field} not available ({e}) — using shared weekly_points fallback")
+
+    # Fallback: use shared weekly_points (guaranteed to exist)
+    return get_weekly_leaderboard(limit=limit)
+
 
 def get_game_alltime_leaderboard(game_type="fusion", limit=10):
-    """Fetch all-time points for a specific game from Supabase."""
-    field = f"{game_type}_all_time_points"
-    response = supabase.table("players").select(f"id, username, {field}")\
-        .gt(field, 0).order(field, desc=True).limit(limit).execute()
-    
-    players = []
-    for row in response.data:
-        players.append({
-            "id": str(row['id']),
-            "username": row.get('username', 'Unknown'),
-            "points": row.get(field, 0)
-        })
-    return players
+    """
+    All-time leaderboard for a specific game type.
+    Tries the game-specific column (e.g. fusion_all_time_points).
+    Falls back to shared all_time_points if missing or empty.
+    """
+    game_field = f"{game_type}_all_time_points"
+
+    try:
+        r = supabase.table(DB_TABLE) \
+            .select(f"user_id, username, {game_field}, is_bot, shield_status, name_shield_until") \
+            .gt(game_field, 0) \
+            .order(game_field, desc=True) \
+            .limit(limit) \
+            .execute()
+
+        raw = r.data or []
+        print(f"[LB] {game_field}: {len(raw)} rows returned")
+
+        results = []
+        for p in raw:
+            if p.get('is_bot'):
+                continue
+            pts = int(p.get(game_field) or 0)
+            if pts <= 0:
+                continue
+            results.append({
+                'id':                p['user_id'],
+                'username':          p.get('username', 'Unknown'),
+                'points':            pts,
+                'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
+                'name_shield_until': p.get('name_shield_until') or "Expired",
+            })
+
+        if results:
+            print(f"[LB] {game_field}: returning {len(results)} players")
+            return results
+
+    except Exception as e:
+        print(f"[LB] {game_field} not available ({e}) — using shared all_time_points fallback")
+
+    # Fallback: shared all_time_points (guaranteed to exist)
+    return get_alltime_leaderboard(limit=limit)
+
 
 def ensure_bot_exists(username: str, initial_points: int = 0):
     """Ensure a bot account exists in the database. Returns user_id."""
@@ -330,31 +387,83 @@ def ensure_bot_exists(username: str, initial_points: int = 0):
 
 # ── Points (weekly + all-time) ─────────────────────────────────────────────
 
-def add_points(user_id, points: int, username: str = ''):
-    """Accumulate points. Resets weekly bucket if the week has turned over."""
-    uid = str(user_id)
-    user = get_user(uid)
-    if not user:
-        register_user(uid, username)
-        user = get_user(uid)
-
+def add_points(user_id, points: int, username: str = '', game_type: str = 'fusion'):
+    """
+    Persist points for a player. Uses read-compute-write with full logging
+    so any failure is visible in the Railway logs immediately.
+    """
+    uid       = str(user_id)
     this_week = _current_week_key()
-    last_week = user.get('week_start', '')
-    
-    # Compare dates explicitly - extract just the date portion for both
-    last_week_date = last_week.split('T')[0] if last_week else ''
-    
-    if last_week_date != this_week:
-        # New week — wipe weekly bucket and update week marker
-        user['weekly_points'] = 0
-        user['week_start'] = this_week
-        print(f"[POINTS] Week boundary for {username}: {last_week_date} → {this_week}")
-    
-    # Add the points (whether it's a new week or not)
-    user['all_time_points'] = user.get('all_time_points', 0) + points
-    user['weekly_points']   = user.get('weekly_points',   0) + points
-    user['total_words']     = user.get('total_words',     0) + 1
-    save_user(uid, user)
+
+    try:
+        # ── Read current state ─────────────────────────────────────────────
+        user = get_user(uid)
+        if not user:
+            register_user(uid, username)
+            user = get_user(uid)
+        if not user:
+            print(f"[ADD_POINTS] CRITICAL: cannot find or create user {uid}")
+            return
+
+        last_week_date = (user.get('week_start') or '').split('T')[0]
+        old_weekly     = int(user.get('weekly_points') or 0)
+        old_alltime    = int(user.get('all_time_points') or 0)
+        old_words      = int(user.get('total_words') or 0)
+
+        # Reset weekly if week has rolled over
+        new_weekly  = points if last_week_date != this_week else old_weekly + points
+        new_alltime = old_alltime + points
+        new_words   = old_words + 1
+
+        payload = {
+            'weekly_points':   new_weekly,
+            'all_time_points': new_alltime,
+            'total_words':     new_words,
+            'week_start':      this_week,
+        }
+
+        # ── Write ──────────────────────────────────────────────────────────
+        result = supabase.table(DB_TABLE).update(payload).eq('user_id', uid).execute()
+
+        if not (hasattr(result, 'data') and result.data):
+            # Supabase returned empty — the user_id column value didn't match.
+            # This happens when the PK column is named 'id' not 'user_id'.
+            print(f"[ADD_POINTS] WARNING: eq('user_id') matched nothing for {uid} — checking DB schema")
+            # Probe: fetch the row to see what column holds our ID
+            probe = supabase.table(DB_TABLE).select('id, user_id').limit(1).execute()
+            if probe.data:
+                sample = probe.data[0]
+                print(f"[ADD_POINTS] Sample row keys: {list(sample.keys())}")
+                # If 'user_id' is a column but our value didn't match, the user might not exist
+                # Try inserting a fresh registration then retrying
+                register_user(uid, username or 'Player')
+                supabase.table(DB_TABLE).update(payload).eq('user_id', uid).execute()
+        else:
+            print(f"[ADD_POINTS] ✅ {username or uid}: +{points}pts → weekly={new_weekly} alltime={new_alltime}")
+
+        # ── Game-specific columns (best-effort, ignore if missing) ─────────
+        gw_key  = f"{game_type}_weekly_points"
+        ga_key  = f"{game_type}_all_time_points"
+        gws_key = f"{game_type}_week_start"
+        gw_prev = int(user.get(gw_key) or 0)
+        ga_prev = int(user.get(ga_key) or 0)
+        gw_date = (user.get(gws_key) or '').split('T')[0]
+
+        new_gw = points if gw_date != this_week else gw_prev + points
+        new_ga = ga_prev + points
+        try:
+            supabase.table(DB_TABLE).update({
+                gw_key:  new_gw,
+                ga_key:  new_ga,
+                gws_key: this_week,
+            }).eq('user_id', uid).execute()
+        except Exception:
+            pass  # columns don't exist yet — core points already saved
+
+    except Exception as e:
+        print(f"[ADD_POINTS] EXCEPTION for {uid}: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def add_xp(user_id, amount: int) -> bool:
@@ -385,6 +494,202 @@ def add_bitcoin(user_id, amount: int, username: str = ''):
     save_user(str(user_id), user)
 
 
+def award_word_score(user_id: str, pts: int, xp: int, bitcoin: int,
+                     resources: dict, username: str = '', game_type: str = 'fusion') -> dict:
+    """
+    ONE function, ONE DB read, ONE DB write for the entire word-score pipeline.
+    Returns the updated user dict so the caller can use it without re-fetching.
+    
+    Replaces: add_points() + add_xp() + add_bitcoin() + get_user() + save_user()
+    That was 8-10 Supabase round-trips. This is 2 (read + write).
+    """
+    uid       = str(user_id)
+    this_week = _current_week_key()
+
+    # ── Single read ────────────────────────────────────────────────────────
+    user = get_user(uid)
+    if not user:
+        register_user(uid, username)
+        user = get_user(uid)
+    if not user:
+        return {}
+
+    last_week_date = (user.get('week_start') or '').split('T')[0]
+    old_weekly     = int(user.get('weekly_points') or 0)
+    old_alltime    = int(user.get('all_time_points') or 0)
+    old_words      = int(user.get('total_words') or 0)
+    old_xp         = int(user.get('xp') or 0)
+    old_bitcoin    = int(user.get('bitcoin') or 0)
+
+    new_weekly     = pts if last_week_date != this_week else old_weekly + pts
+    new_alltime    = old_alltime + pts
+    new_words      = old_words + 1
+    new_xp         = old_xp + xp
+    new_level      = 1 + (new_xp // 100)
+    new_bitcoin    = old_bitcoin + bitcoin
+
+    # Game-specific weekly/alltime
+    gw_key         = f"{game_type}_weekly_points"
+    ga_key         = f"{game_type}_all_time_points"
+    gw_date        = (user.get(f"{game_type}_week_start") or '').split('T')[0]
+    gw_prev        = int(user.get(gw_key) or 0)
+    ga_prev        = int(user.get(ga_key) or 0)
+    new_gw         = pts if gw_date != this_week else gw_prev + pts
+    new_ga         = ga_prev + pts
+
+    # Resources
+    base_res       = user.get('base_resources', {})
+    if not isinstance(base_res, dict):
+        base_res   = {}
+    res_dict       = base_res.get('resources', {})
+    if not isinstance(res_dict, dict):
+        res_dict   = {}
+    for rt, am in resources.items():
+        res_dict[rt] = res_dict.get(rt, 0) + am
+    base_res['resources'] = res_dict
+
+    # ── Single write ───────────────────────────────────────────────────────
+    payload = {
+        'weekly_points':   new_weekly,
+        'all_time_points': new_alltime,
+        'total_words':     new_words,
+        'week_start':      this_week,
+        'xp':              new_xp,
+        'level':           new_level,
+        'bitcoin':         new_bitcoin,
+        'base_resources':  json.dumps(base_res),
+    }
+
+    # Add game-specific fields (silently skipped by Supabase if columns missing)
+    try:
+        supabase.table(DB_TABLE).update({
+            **payload,
+            gw_key:                           new_gw,
+            ga_key:                           new_ga,
+            f"{game_type}_week_start":        this_week,
+        }).eq('user_id', uid).execute()
+    except Exception:
+        # Game-specific columns don't exist — write core only
+        try:
+            supabase.table(DB_TABLE).update(payload).eq('user_id', uid).execute()
+        except Exception as e:
+            print(f"[AWARD_WORD] write failed for {uid}: {e}")
+            return user
+
+    # Update the in-memory user object for the caller
+    user.update({
+        'weekly_points':   new_weekly,
+        'all_time_points': new_alltime,
+        'total_words':     new_words,
+        'week_start':      this_week,
+        'xp':              new_xp,
+        'level':           new_level,
+        'bitcoin':         new_bitcoin,
+        'base_resources':  base_res,
+        gw_key:            new_gw,
+        ga_key:            new_ga,
+    })
+
+    print(f"[AWARD_WORD] ✅ {username or uid}: +{pts}pts +{xp}xp +{bitcoin}btc "
+          f"(weekly={new_weekly} alltime={new_alltime})")
+    return user
+
+
+# ─── Credit system ────────────────────────────────────────────────────────
+
+CREDITS_DAILY_LOGIN    = 50
+CREDITS_TO_PLAY        = 10   # cost per fusion round participation
+CREDITS_RANK_REWARDS   = {1: 50, 2: 45, 3: 30, 4: 20, 5: 10}
+CREDITS_RANK_DEFAULT   = 5    # ranks 6-10
+
+def get_credits(user_id: str) -> int:
+    """Return player's current credit balance."""
+    user = get_user(str(user_id))
+    return int(user.get('credits', 0)) if user else 0
+
+
+def add_credits(user_id: str, amount: int, reason: str = '') -> int:
+    """Add credits to a player. Returns new balance."""
+    uid  = str(user_id)
+    user = get_user(uid)
+    if not user:
+        return 0
+    new_bal = int(user.get('credits', 0)) + amount
+    try:
+        supabase.table(DB_TABLE).update({'credits': new_bal}).eq('user_id', uid).execute()
+        print(f"[CREDITS] +{amount} → {uid} ({reason}) balance={new_bal}")
+    except Exception as e:
+        print(f"[CREDITS] write failed for {uid}: {e}")
+        return 0
+    return new_bal
+
+
+def spend_credits(user_id: str, amount: int, reason: str = '') -> tuple:
+    """
+    Deduct credits. Returns (success: bool, new_balance: int).
+    """
+    uid  = str(user_id)
+    user = get_user(uid)
+    if not user:
+        return False, 0
+    bal = int(user.get('credits', 0))
+    if bal < amount:
+        return False, bal
+    new_bal = bal - amount
+    try:
+        supabase.table(DB_TABLE).update({'credits': new_bal}).eq('user_id', uid).execute()
+        print(f"[CREDITS] -{amount} → {uid} ({reason}) balance={new_bal}")
+    except Exception as e:
+        print(f"[CREDITS] spend failed for {uid}: {e}")
+        return False, bal
+    return True, new_bal
+
+
+def claim_daily_login_credits(user_id: str) -> tuple:
+    """
+    Award daily login credits (50). Returns (awarded: bool, credits_given: int, new_balance: int).
+    Only awards once per UTC day.
+    """
+    uid  = str(user_id)
+    user = get_user(uid)
+    if not user:
+        return False, 0, 0
+
+    from datetime import datetime
+    today = datetime.utcnow().date().isoformat()
+    last_login = user.get('last_credit_login', '')
+
+    if last_login == today:
+        return False, 0, int(user.get('credits', 0))
+
+    amount  = CREDITS_DAILY_LOGIN
+    new_bal = int(user.get('credits', 0)) + amount
+    try:
+        supabase.table(DB_TABLE).update({
+            'credits':           new_bal,
+            'last_credit_login': today,
+        }).eq('user_id', uid).execute()
+    except Exception as e:
+        print(f"[CREDITS] daily login write failed for {uid}: {e}")
+        return False, 0, int(user.get('credits', 0))
+
+    return True, amount, new_bal
+
+
+def award_scoreboard_credits(leaderboard: list):
+    """
+    Award credits to top-10 players at round end.
+    leaderboard: list of dicts with keys user_id, username, pts — sorted desc.
+    """
+    rank_rewards = {1: 50, 2: 45, 3: 30, 4: 20, 5: 10}
+    for rank, player in enumerate(leaderboard[:10], start=1):
+        uid      = str(player.get('user_id', player.get('id', '')))
+        name     = player.get('name', player.get('username', ''))
+        reward   = rank_rewards.get(rank, 5)   # ranks 6-10 get 5
+        add_credits(uid, reward, reason=f"rank#{rank} scoreboard")
+        print(f"[CREDITS] Rank {rank}: {name} → +{reward} credits")
+
+
 def use_bitcoin(user_id, amount: int) -> bool:
     user = get_user(str(user_id))
     if not user or user.get('bitcoin', 0) < amount:
@@ -404,7 +709,7 @@ def add_resources_from_word_length(user_id, word_length: int, username: str = ''
     
     # Initialize resources if not present
     if 'resources' not in user or not isinstance(user.get('resources'), dict):
-        user['resources'] = {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0}
+        user['resources'] = {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0, 'incubus': 0}
     
     resources_awarded = {}
     
@@ -441,7 +746,7 @@ def update_streak_and_award_food(user_id, correct: bool, username: str = '') -> 
     # Initialize base_resources if not present
     if not user.get('base_resources'):
         user['base_resources'] = {
-            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
+            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0, 'incubus': 0},
             'food': 0,
             'current_streak': 0
         }
@@ -449,7 +754,7 @@ def update_streak_and_award_food(user_id, correct: bool, username: str = '') -> 
     base_res = user['base_resources']
     if not isinstance(base_res, dict):
         base_res = {
-            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
+            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0, 'incubus': 0},
             'food': 0,
             'current_streak': 0
         }
@@ -500,30 +805,39 @@ def set_sector(user_id, sector_id):
 # ── Leaderboards ───────────────────────────────────────────────────────────
 
 def get_weekly_leaderboard(limit: int = 10) -> list:
-    """Return top players by weekly_points. Handles week rollover."""
-    this_week = _current_week_key()
+    """
+    Return top players by weekly_points.
+    Shows anyone with weekly_points > 0.
+    We trust the stored value — add_points resets it when the week rolls over.
+    No week_start filter here (that was hiding valid scores due to timezone drift).
+    """
     try:
         r = supabase.table(DB_TABLE) \
-            .select('user_id, username, weekly_points, week_start') \
+            .select('user_id, username, weekly_points, shield_status, name_shield_until') \
+            .gt('weekly_points', 0) \
             .order('weekly_points', desc=True) \
-            .limit(max(limit, 50)) \
+            .limit(limit) \
             .execute()
+
+        raw = r.data or []
+        print(f"[LB] weekly: {len(raw)} rows returned")
+
         results = []
-        for p in (r.data or []):
+        for p in raw:
             pts = int(p.get('weekly_points') or 0)
-            player_week = p.get('week_start', '')
-            # Extract just the date part (Supabase may return full timestamp)
-            player_week_date = player_week.split('T')[0] if player_week else ''
-            if player_week_date != this_week:
-                pts = 0
-            if pts > 0:
-                results.append({
-                    'id': p['user_id'],
-                    'username': p.get('username', 'Unknown'),
-                    'points': pts,
-                })
-        results.sort(key=lambda x: x['points'], reverse=True)
-        return results[:limit]
+            if pts <= 0:
+                continue
+            results.append({
+                'id':                p['user_id'],
+                'username':          p.get('username', 'Unknown'),
+                'points':            pts,
+                'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
+                'name_shield_until': p.get('name_shield_until') or "Expired",
+            })
+
+        print(f"[LB] weekly: returning {len(results)} players")
+        return results
+
     except Exception as e:
         print(f"[ERROR] get_weekly_leaderboard: {e}")
         import traceback
@@ -534,17 +848,31 @@ def get_weekly_leaderboard(limit: int = 10) -> list:
 def get_alltime_leaderboard(limit: int = 10) -> list:
     try:
         r = supabase.table(DB_TABLE) \
-            .select('user_id, username, all_time_points, total_words, is_bot') \
+            .select('user_id, username, all_time_points, total_words, is_bot, shield_status, name_shield_until') \
+            .gt('all_time_points', 0) \
             .order('all_time_points', desc=True) \
             .limit(limit * 5) \
             .execute()
-        return [
-            {'id': p['user_id'], 'username': p.get('username', 'Unknown'),
-             'points': int(p.get('all_time_points') or 0), 'words': int(p.get('total_words') or 0)}
-            for p in (r.data or []) if p.get('is_bot') is not True
-        ][:limit]
+
+        raw = r.data or []
+        print(f"[LB] alltime: {len(raw)} rows returned")
+        results = [
+            {
+                'id':                p['user_id'],
+                'username':          p.get('username', 'Unknown'),
+                'points':            int(p.get('all_time_points') or 0),
+                'words':             int(p.get('total_words') or 0),
+                'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
+                'name_shield_until': p.get('name_shield_until') or "Expired",
+            }
+            for p in raw
+            if not p.get('is_bot') and int(p.get('all_time_points') or 0) > 0
+        ]
+        return results[:limit]
     except Exception as e:
         print(f"[ERROR] get_alltime_leaderboard: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
@@ -648,166 +976,57 @@ def activate_shield(user_id) -> bool:
 
 
 def is_shielded(user: dict) -> bool:
+    """Return True if user has an active (non-disrupted) shield.
+    
+    Shield statuses:
+    - UNPROTECTED: No shield active
+    - ACTIVE: Shield is on
+    - DISRUPTED: Shield was hit, no protection for 1 attack
     """
-    Return True if user has an active, unexpired shield.
-    Checks shield_expires timestamp — if it has passed, shield is gone.
-    """
-    status = user.get('shield_status') or ''
-
-    if 'ACTIVE' not in status:
-        return False
-
-    # Check expiry
-    exp_str = user.get('shield_expires')
-    if not exp_str:
-        # No expiry stored (old-style permanent shield) — treat as active
+    shield_status = user.get('shield_status', 'UNPROTECTED')
+    
+    # Only ACTIVE shields provide protection
+    if shield_status == 'ACTIVE':
         return True
-    try:
-        exp = datetime.fromisoformat(exp_str)
-        return datetime.utcnow() < exp
-    except Exception:
-        return True  # parse error → assume still active
-
-
-# Shield duration options
-SHIELD_DURATIONS = {
-    "1h":   {"label": "1 Hour",   "hours": 1},
-    "3h":   {"label": "3 Hours",  "hours": 3},
-    "12h":  {"label": "12 Hours", "hours": 12},
-    "1d":   {"label": "1 Day",    "hours": 24},
-    "3d":   {"label": "3 Days",   "hours": 72},
-    "7d":   {"label": "7 Days",   "hours": 168},
-}
-
-# Map item type → duration hours
-SHIELD_ITEM_DURATIONS = {
-    "shield":       24,    # generic shield from crates/rewards
-    "1hours":       1,
-    "3hours":       3,
-    "12hours":      12,
-    "1days":        24,
-    "3days":        72,
-    "7days":        168,
-    "shield_potion":24,
-    "free_shield":  24,
-}
-
-
-def get_shield_inventory(user_id: str) -> list:
-    """Return all shield items in the player's inventory."""
-    user = get_user(str(user_id))
-    if not user:
-        return []
-    inv = user.get('inventory', [])
-    if not isinstance(inv, list):
-        return []
-    return [
-        it for it in inv
-        if any(k in (it.get('type') or '').lower()
-               for k in ('shield', '1hours', '3hours', '12hours', '1days', '3days', '7days'))
-        and 'name_shield' not in (it.get('type') or '').lower()
-    ]
-
-
-def activate_shield_item(user_id: str, item_id: int) -> tuple[bool, str, int]:
-    """
-    Activate a specific shield item from inventory.
-    Stores shield_expires as an ISO timestamp.
-    Returns (success, message, hours).
-    """
-    user = get_user(str(user_id))
-    if not user:
-        return False, "User not found", 0
-
-    shield_status = user.get('shield_status') or 'UNPROTECTED'
-    if 'ACTIVE' in shield_status:
-        # Check if already-active shield has expired
-        exp_str = user.get('shield_expires')
-        if exp_str:
-            try:
-                exp = datetime.fromisoformat(exp_str)
-                if datetime.utcnow() < exp:
-                    remaining = exp - datetime.utcnow()
-                    h = int(remaining.total_seconds() // 3600)
-                    m = int((remaining.total_seconds() % 3600) // 60)
-                    return False, f"🛡️ Shield already active! {h}h {m}m remaining.", 0
-            except Exception:
-                pass
-        # Shield status is ACTIVE but no valid expiry — clear it
-        user['shield_status'] = 'UNPROTECTED'
-
-    # Find the item in inventory
-    inv  = user.get('inventory', [])
-    item = next((it for it in inv if it.get('id') == item_id), None)
-    if not item:
-        return False, "Shield item not found in inventory.", 0
-
-    itype = (item.get('type') or '').lower()
-    hours = SHIELD_ITEM_DURATIONS.get(itype, 24)
-
-    # Set expiry
-    expires_at = datetime.utcnow() + timedelta(hours=hours)
-    user['shield_status']  = '🛡️ ACTIVE'
-    user['shield_expires'] = expires_at.isoformat()
-
-    # Remove item from inventory
-    user['inventory'] = [it for it in inv if it.get('id') != item_id]
-
-    try:
-        supabase.table(DB_TABLE).update({
-            'shield_status':  '🛡️ ACTIVE',
-            'shield_expires': expires_at.isoformat(),
-            'inventory':      json.dumps(user['inventory']),
-        }).eq('user_id', str(user_id)).execute()
-    except Exception as e:
-        print(f"[SHIELD ACTIVATE] DB write failed: {e}")
-        return False, "Database error activating shield.", 0
-
-    label = f"{hours}h" if hours < 24 else f"{hours//24}d"
-    return True, f"🛡️ Shield active for {label}!", hours
-
-
-def check_shield_expiry(user_id: str) -> bool:
-    """
-    Check if an active shield has expired and deactivate it.
-    Returns True if shield was expired and cleared.
-    """
-    user = get_user(str(user_id))
-    if not user:
+    
+    # DISRUPTED or UNPROTECTED = no shield
+    if shield_status in ['DISRUPTED', 'UNPROTECTED']:
         return False
-    if 'ACTIVE' not in (user.get('shield_status') or ''):
-        return False
-    exp_str = user.get('shield_expires')
-    if not exp_str:
-        # No expiry stored — shield was set before this system; leave it alone
-        return False
-    try:
-        exp = datetime.fromisoformat(exp_str)
-        if datetime.utcnow() >= exp:
-            # Expired — deactivate
-            supabase.table(DB_TABLE).update({
-                'shield_status':  '⚠️ UNPROTECTED',
-                'shield_expires': None,
-            }).eq('user_id', str(user_id)).execute()
-            print(f"[SHIELD EXPIRY] Cleared expired shield for {user_id}")
-            return True
-    except Exception as e:
-        print(f"[SHIELD EXPIRY] {user_id}: {e}")
+    
+    # Legacy support for old fields
+    exp = user.get('shield_expires')
+    if exp and exp != 'permanent':
+        # Check if expiry time has passed
+        try:
+            if datetime.utcnow() < datetime.fromisoformat(exp):
+                return True
+        except Exception:
+            pass
+    
     return False
 
 
 def activate_shield(user_id: str) -> tuple[bool, str]:
-    """
-    Legacy activate_shield — kept for backwards compat.
-    Now defers to activate_shield_item; if no item in inventory returns an error.
-    """
-    shields = get_shield_inventory(user_id)
-    if not shields:
-        return False, "❌ No shield items in inventory. Buy one from /shop or /battle_items."
-    # Use the first shield found
-    item = shields[0]
-    ok, msg, _ = activate_shield_item(user_id, item['id'])
-    return ok, msg
+    """Activate shield for a player. Returns (success, message)."""
+    user = get_user(user_id)
+    if not user:
+        return False, "User not found"
+    
+    shield_status = user.get('shield_status', 'UNPROTECTED')
+    
+    # Can't activate if shield is DISRUPTED (was just hit)
+    if shield_status == 'DISRUPTED':
+        return False, "⚠️ Your shield is DISRUPTED from an attack. Wait for it to auto-restore."
+    
+    # Already ACTIVE
+    if shield_status == 'ACTIVE':
+        return False, "✅ Your shield is already ACTIVE!"
+    
+    # Activate from UNPROTECTED
+    user['shield_status'] = 'ACTIVE'
+    user.pop('shield_cooldown', None)  # Clear any cooldowns
+    save_user(user_id, user)
+    return True, "✅ Shield activated!"
 
 
 def deactivate_shield(user_id: str) -> tuple[bool, str]:
@@ -1215,67 +1434,3 @@ def reset_all_streaks():
     except Exception as e:
         print(f"[ERROR] reset_all_streaks failed: {e}")
         return 0
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-#  LAST WEEK WINNERS — Supabase table
-#  Table: last_week_winners
-#  Columns: id (serial pk), user_id text, username text,
-#            weekly_points int, level int, recorded_at timestamptz
-# ═══════════════════════════════════════════════════════════════════════════
-
-LWW_TABLE = "last_week_winners"
-
-
-def save_last_week_winners(leaderboard: list) -> bool:
-    """
-    Wipe the last_week_winners table and insert the top-10 players.
-    Called at Sunday midnight by weekly_reset_task.
-    leaderboard: list of dicts with keys id/user_id, username, points.
-    """
-    try:
-        # Wipe existing rows
-        supabase.table(LWW_TABLE).delete().gt('id', 0).execute()
-
-        rows = []
-        for rank, p in enumerate(leaderboard[:10], start=1):
-            uid = p.get('id') or p.get('user_id', '')
-            if not uid:
-                continue
-            # Fetch level from players table
-            level = 1
-            try:
-                pr = supabase.table(DB_TABLE).select('level').eq('user_id', str(uid)).limit(1).execute()
-                if pr.data:
-                    level = int(pr.data[0].get('level') or 1)
-            except Exception:
-                pass
-
-            rows.append({
-                'user_id':       str(uid),
-                'username':      p.get('username', 'Unknown'),
-                'weekly_points': int(p.get('points', 0)),
-                'level':         level,
-            })
-
-        if rows:
-            supabase.table(LWW_TABLE).insert(rows).execute()
-            print(f"[LAST WEEK WINNERS] Saved {len(rows)} winners to Supabase")
-        return True
-    except Exception as e:
-        print(f"[LAST WEEK WINNERS] Save failed: {e}")
-        return False
-
-
-def get_last_week_winners() -> list:
-    """
-    Fetch last week's top players from the Supabase table.
-    Returns list of dicts: {username, weekly_points, level}.
-    """
-    try:
-        r = supabase.table(LWW_TABLE)             .select('user_id, username, weekly_points, level')             .order('weekly_points', desc=True)             .limit(10)             .execute()
-        return r.data or []
-    except Exception as e:
-        print(f"[LAST WEEK WINNERS] Fetch failed: {e}")
-        return []
-

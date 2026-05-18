@@ -873,6 +873,14 @@ async def _send_access_denied_sticker(message):
         pass
 
 
+def _chat_id_for_tg_link(chat_id) -> str:
+    """Return the chat identifier used in Telegram t.me/c/ links."""
+    s = str(chat_id)
+    if s.startswith("-100"):
+        return s[4:]
+    return s.lstrip("-")
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  UTILITY FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════
@@ -927,7 +935,9 @@ async def cmd_trivia(message: types.Message):
     
     # Optional: Send a redirect message in the current topic
     if message.message_thread_id != TRIVIA_TOPIC_ID:
-        await message.answer(f"🧠 *Trivia is starting in the [Trivia Topic](https://t.me/c/{str(message.chat.id)[4:]}/{TRIVIA_TOPIC_ID})!*", parse_mode="Markdown")
+        chat_id_str = _chat_id_for_tg_link(message.chat.id)
+        link_text = f"https://t.me/c/{chat_id_str}/{TRIVIA_TOPIC_ID}" if chat_id_str else "the trivia topic"
+        await message.answer(f"🧠 *Trivia is starting in the [Trivia Topic]({link_text})!*", parse_mode="Markdown")
 
 @dp.message(_cmd("fusion"))
 async def cmd_fusion(message: types.Message):
@@ -941,7 +951,9 @@ async def cmd_fusion(message: types.Message):
     asyncio.create_task(game_loop(message.chat.id))
     
     if message.message_thread_id != FUSION_TOPIC_ID:
-        await message.answer(f"🃏 *Fusion is starting in the [Fusion Topic](https://t.me/c/{str(message.chat.id)[4:]}/{FUSION_TOPIC_ID})!*", parse_mode="Markdown")
+        chat_id_str = _chat_id_for_tg_link(message.chat.id)
+        link_text = f"https://t.me/c/{chat_id_str}/{FUSION_TOPIC_ID}" if chat_id_str else "the fusion topic"
+        await message.answer(f"🃏 *Fusion is starting in the [Fusion Topic]({link_text})!*", parse_mode="Markdown")
 
 
 @dp.message(_cmd("forcerestart"))
@@ -2559,7 +2571,7 @@ async def cmd_profile(message: types.Message):
     resources_str = (
         f"🪵 {base_res.get('wood', 0)} | 🧱 {base_res.get('bronze', 0)} | "
         f"⛓️ {base_res.get('iron', 0)} | 💎 {base_res.get('diamond', 0)} | "
-        f"🏺 {base_res.get('relics', 0)}, {base_res.get('incubus', 0)}"
+        f"🏺 {base_res.get('relics', 0)} | 👹 {base_res.get('incubus', 0)}"
     )
     
     # Check for sector consciousness split
@@ -3511,7 +3523,7 @@ async def cmd_setup_base(message: types.Message):
     user["alliance_id"] = None
     
     # Starting resources vary by sector
-    base_resources_template = {"wood": 20, "bronze": 10, "iron": 0, "diamond": 0, "relics": 0}
+    base_resources_template = {"wood": 20, "bronze": 10, "iron": 0, "diamond": 0, "relics": 0, "incubus": 0}
     
     # Sector bonuses (theme-based resource distribution)
     sector_bonuses = {
@@ -5506,7 +5518,7 @@ async def cb_shield_toggle(callback: types.CallbackQuery):
 async def cb_menu_fusion_info(callback: types.CallbackQuery):
     """Fusion game info and quick-start."""
     await callback.answer()
-    chat_id_str = str(CHECKMATE_HQ_GROUP_ID).lstrip("-100") if CHECKMATE_HQ_GROUP_ID else ""
+    chat_id_str = _chat_id_for_tg_link(CHECKMATE_HQ_GROUP_ID) if CHECKMATE_HQ_GROUP_ID else ""
     fusion_link  = f"https://t.me/c/{chat_id_str}/{FUSION_TOPIC_ID}" if chat_id_str else "the group"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -5535,7 +5547,7 @@ async def cb_menu_fusion_info(callback: types.CallbackQuery):
 async def cb_menu_trivia_info(callback: types.CallbackQuery):
     """Trivia game info and quick-start."""
     await callback.answer()
-    chat_id_str = str(CHECKMATE_HQ_GROUP_ID).lstrip("-100") if CHECKMATE_HQ_GROUP_ID else ""
+    chat_id_str = _chat_id_for_tg_link(CHECKMATE_HQ_GROUP_ID) if CHECKMATE_HQ_GROUP_ID else ""
     trivia_link  = f"https://t.me/c/{chat_id_str}/{TRIVIA_TOPIC_ID}" if chat_id_str else "the group"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -8540,7 +8552,7 @@ def build_player_dashboard(player_name: str, session: dict, user_id: str = None,
     safe_player_name = _safe_name(player_name)
 
     res_parts = []
-    for key, emoji in [('wood','🪵'),('bronze','🧱'),('iron','⛓️'),('diamond','💎'),('relics','🏺')]:
+    for key, emoji in [('wood','🪵'),('bronze','🧱'),('iron','⛓️'),('diamond','💎'),('relics','🏺'),('incubus','👹')]:
         val = resources.get(key, 0)
         if val > 0:
             res_parts.append(f"{emoji}{val}")
@@ -8971,10 +8983,19 @@ async def on_group_message(message: types.Message):
             if u_id not in eng.player_sessions:
                 eng.player_sessions[u_id] = {
                     'pts': 0, 'xp': 0, 'word_count': 0,
-                    'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
-                    'food': 0, 'streak': 0, 'last_word': '', 'last_pts': 0, 'rare_message': ''
+                    'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0, 'incubus': 0},
+                    'food': 0, 'streak': 0, 'last_word': '', 'last_pts': 0, 'rare_message': '', 'consecutive_6plus': 0
                 }
             session = eng.player_sessions[u_id]
+
+            # Award a bonus incubus for each streak of 3 consecutive 6+ letter words.
+            if word_len >= 6:
+                session['consecutive_6plus'] = session.get('consecutive_6plus', 0) + 1
+            else:
+                session['consecutive_6plus'] = 0
+
+            if session['consecutive_6plus'] > 0 and session['consecutive_6plus'] % 3 == 0:
+                resources_awarded['incubus'] = resources_awarded.get('incubus', 0) + 1
 
             # Streak (pure in-memory for speed)
             session['streak'] = session.get('streak', 0) + 1
@@ -8990,7 +9011,7 @@ async def on_group_message(message: types.Message):
                 'food':       session['food'] + food_bonus,
             })
             for res_type, amount in resources_awarded.items():
-                session['resources'][res_type] += amount
+                session['resources'][res_type] = session['resources'].get(res_type, 0) + amount
 
             # Rare drop check (in-memory, no DB needed here)
             rare_item = check_rare_drop()
