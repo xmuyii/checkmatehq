@@ -70,7 +70,7 @@ game_events = {
 }
 
 from save_system import (
-    save_game, reset_game, load_game, restore_game, 
+    save_game, reset_game, load_game, 
     list_saves, list_checkpoints, format_reset_status, format_checkpoint_display
 )
 # Temporary safety fallback to stop the crash
