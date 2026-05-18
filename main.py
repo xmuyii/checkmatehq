@@ -9252,7 +9252,6 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                                     'id':       wp.get('id') or wp.get('user_id', ''),
                                     'is_bot':   False,  # Explicitly mark as non-bot since we filtered
                                 })
-                                })
                             save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'last_week_winners.json')
                             with open(save_path, 'w', encoding='utf-8') as f:
                                 json.dump(winners_to_save, f, ensure_ascii=False)
