@@ -9057,7 +9057,7 @@ async def on_group_message(message: types.Message):
                 eng.dashboard_update_pending[u_id].cancel()
             
             async def _update_dashboard_async():
-                await asyncio.sleep(0.05)  # Small debounce delay to batch updates
+                await asyncio.sleep(0)  # Small debounce delay to batch updates
                 try:
                     dashboard_text = build_player_dashboard(db_name, session, u_id, has_jammer=has_jammer)
                     word_num       = session['word_count']
@@ -9497,32 +9497,39 @@ async def sheets_sync_background_task(bot: Bot, chat_id: int):
             
             try:
                 # Import sync_to_sheets at runtime
-                from sync_to_sheets import update_google_sheet, get_leaderboard_data
+                from sync_to_sheets import (
+                    update_google_sheet,
+                    get_fusion_weekly_leaderboard,
+                    get_fusion_alltime_leaderboard
+                )
                 
-                # Get leaderboard data
-                leaderboard = get_leaderboard_data()
+                # Fetch both leaderboards
+                weekly_lb  = get_fusion_weekly_leaderboard()
+                alltime_lb = get_fusion_alltime_leaderboard()
                 
-                if leaderboard:
-                    # Sync to Google Sheets
-                    update_google_sheet(leaderboard)
-                    
-                    # Format and send update to group
-                    top_50 = leaderboard[:50]
-                    msg = "📊 *LEADERBOARD*\n\n"
-                    msg += "🏆 Top 50 Players:\n"
-                    for idx, player in enumerate(top_50, 1):
-                        username = player.get("username", "Unknown")
-                        points = player.get("points", 0)
-                        msg += f"{idx}. {username} - {points:,} pts\n"
-                    
+                if not weekly_lb and not alltime_lb:
+                    logger.warning("⚠️  No leaderboard data found!")
+                    print("⚠️  No leaderboard data found!")
+                    await asyncio.sleep(1800)
+                    continue
+                
+                # Sync both to Google Sheets
+                update_google_sheet(weekly_lb, alltime_lb)
+                print(f"[SHEETS] Synced {len(weekly_lb)} weekly / {len(alltime_lb)} alltime players")
+                
+                # Post top 10 weekly to group
+                if weekly_lb:
+                    msg = "📊 *FUSION WEEKLY TOP 10*\n━━━━━━━━━━━━━━━\n"
+                    for i, p in enumerate(weekly_lb[:10], 1):
+                        medal = ["🥇","🥈","🥉"][i-1] if i <= 3 else f"{i}."
+                        msg += f"{medal} {p['username']} — {p['points']:,} pts\n"
                     msg += f"\n⏰ Updated: {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
-                    msg += f"\n📈 Total players: {len(leaderboard)}"
-                    
-                    await bot.send_message(chat_id, msg, parse_mode="Markdown")
-                    print(f"[SHEETS] Synced {len(leaderboard)} players to Google Sheets")
-                else:
-                    print("[SHEETS] No leaderboard data to sync")
-                    
+                    try:
+                        await bot.send_message(chat_id, msg, parse_mode="Markdown",
+                                               message_thread_id=LEADERBOARDS_TOPIC_ID)
+                    except Exception as e:
+                        print(f"[SHEETS] Group post failed: {e}")
+                        
             except ImportError:
                 print("[SHEETS WARN] sync_to_sheets module not found - skipping sync")
             except Exception as sync_err:
@@ -9532,8 +9539,7 @@ async def sheets_sync_background_task(bot: Bot, chat_id: int):
             break
         except Exception as e:
             print(f"[SHEETS ERROR] Background task error: {e}")
-            await asyncio.sleep(60)  # Wait 1 min before retrying
-
+            await asyncio.sleep(60)
 
 async def gamemaster_announcement_task(bot: Bot, chat_id: int):
     """Background task: Drop random GameMaster announcements every 7-10 minutes + dynamic event announcements."""
