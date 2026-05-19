@@ -580,12 +580,15 @@ def award_word_score(user_id: str, pts: int, xp: int, bitcoin: int,
             ga_key:                           new_ga,
             f"{game_type}_week_start":        this_week,
         }).eq('user_id', uid).execute()
-    except Exception:
+        print(f"[AWARD_WORD] ✅ Updated {game_type} scores: {gw_key}={new_gw}, {ga_key}={new_ga}")
+    except Exception as e:
         # Game-specific columns don't exist — write core only
+        print(f"[AWARD_WORD] ⚠️ Game-specific update failed ({e}), falling back to core payload only")
         try:
             supabase.table(DB_TABLE).update(payload).eq('user_id', uid).execute()
+            print(f"[AWARD_WORD] ✅ Wrote core payload for {uid}")
         except Exception as e:
-            print(f"[AWARD_WORD] write failed for {uid}: {e}")
+            print(f"[AWARD_WORD] ❌ write failed for {uid}: {e}")
             return user
 
     # Update the in-memory user object for the caller
