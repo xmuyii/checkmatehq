@@ -158,8 +158,14 @@ def _row_to_user(row: dict) -> dict:
     return u
 
 
-def get_user(user_id) -> dict | None:
-    r = supabase.table(DB_TABLE).select('*').eq('user_id', str(user_id)).execute()
+def get_user(user_id, columns='*') -> dict | None:
+    """Fetch user from DB. Pass columns parameter to select only needed ones for performance.
+    
+    Usage:
+        get_user(user_id)  # Full data (backward compatible)
+        get_user(user_id, 'user_id,username,credits,shield_status,level')  # Only needed columns
+    """
+    r = supabase.table(DB_TABLE).select(columns).eq('user_id', str(user_id)).execute()
     return _row_to_user(r.data[0]) if r.data else None
 
 
@@ -495,10 +501,12 @@ def add_bitcoin(user_id, amount: int, username: str = ''):
 
 
 def award_word_score(user_id: str, pts: int, xp: int, bitcoin: int,
-                     resources: dict, username: str = '', game_type: str = 'fusion') -> dict:
+                     resources: dict, username: str = '', game_type: str = 'fusion', user_obj=None) -> dict:
     """
     ONE function, ONE DB read, ONE DB write for the entire word-score pipeline.
     Returns the updated user dict so the caller can use it without re-fetching.
+    
+    Pass user_obj to avoid redundant DB fetch if user was already loaded.
     
     Replaces: add_points() + add_xp() + add_bitcoin() + get_user() + save_user()
     That was 8-10 Supabase round-trips. This is 2 (read + write).
@@ -507,10 +515,14 @@ def award_word_score(user_id: str, pts: int, xp: int, bitcoin: int,
     this_week = _current_week_key()
 
     # ── Single read ────────────────────────────────────────────────────────
-    user = get_user(uid)
-    if not user:
-        register_user(uid, username)
+    # Use passed user object if available, otherwise fetch from DB
+    if user_obj:
+        user = user_obj
+    else:
         user = get_user(uid)
+        if not user:
+            register_user(uid, username)
+            user = get_user(uid)
     if not user:
         return {}
 
@@ -734,14 +746,21 @@ def add_resources_from_word_length(user_id, word_length: int, username: str = ''
     return resources_awarded
 
 
-def update_streak_and_award_food(user_id, correct: bool, username: str = '') -> dict:
+def update_streak_and_award_food(user_id, correct: bool, username: str = '', user_obj=None) -> dict:
     """Track consecutive correct words and award food when streak >= 3.
-    Store streak and food in base_resources JSONB, not as separate columns."""
+    Store streak and food in base_resources JSONB, not as separate columns.
+    
+    Pass user_obj to avoid redundant DB fetch if user was already loaded."""
     uid = str(user_id)
-    user = get_user(uid)
-    if not user:
-        register_user(uid, username)
+    
+    # Use passed user object if available, otherwise fetch from DB
+    if user_obj:
+        user = user_obj
+    else:
         user = get_user(uid)
+        if not user:
+            register_user(uid, username)
+            user = get_user(uid)
     
     # Initialize base_resources if not present
     if not user.get('base_resources'):

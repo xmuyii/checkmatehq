@@ -56,7 +56,7 @@ async def on_group_message(message: types.Message):
         # Check if already used
         if guess in eng.used_words:
             print(f"[SKIP] Already used this round")
-            update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
+            update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""), user_obj=user)
             await message.reply(f"❌ `{guess.upper()}` was already guessed!", parse_mode="Markdown")
             return
         
@@ -91,7 +91,7 @@ async def on_group_message(message: types.Message):
         
         if not is_valid:
             print(f"[INVALID] '{guess}' not in dictionary")
-            update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
+            update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""), user_obj=user)
             await message.reply(f"❌ `{guess.upper()}` is not a valid word.", parse_mode="Markdown")
             return
 
@@ -134,7 +134,7 @@ async def on_group_message(message: types.Message):
             resources_awarded = {'relics': 1}
         
         # Streak/food
-        streak_info = update_streak_and_award_food(u_id, correct=True, username=db_name)
+        streak_info = update_streak_and_award_food(u_id, correct=True, username=db_name, user_obj=user)
         
         # Rare items
         rare_item = check_rare_drop()

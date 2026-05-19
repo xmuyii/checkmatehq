@@ -553,6 +553,7 @@ async def game_loop(chat_id: int, topic_id: int = None):
                 eng.active     = True
                 eng.dashboard_msgs  = {}
                 eng.player_sessions = {}
+                eng.dashboard_update_pending = {}  # Track pending dashboard updates for debouncing
 
                 eng.word1, eng.word2 = await fetch_words()
                 eng.letters = (eng.word1 + eng.word2).lower()
@@ -8950,7 +8951,7 @@ async def on_group_message(message: types.Message):
                 asyncio.create_task(_deduct_entry_credits())
 
             if guess in eng.used_words:
-                update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
+                update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""), user_obj=user)
                 await message.reply(f"❌ `{guess.upper()}` was already guessed!", parse_mode="Markdown")
                 return
 
@@ -8961,7 +8962,7 @@ async def on_group_message(message: types.Message):
             has_jammer = is_perk_active(u_id, "jammer")
 
             if not is_valid:
-                update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""))
+                update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""), user_obj=user)
                 if has_jammer:
                     try:
                         await message.delete()
@@ -9049,52 +9050,80 @@ async def on_group_message(message: types.Message):
                 eng.scores[u_id] = {'name': db_name, 'pts': 0, 'user_id': u_id, 'leveled_up': False}
             eng.scores[u_id]['pts'] += pts
 
-            # ── Send/edit dashboard immediately (no DB wait) ───────────────
-            dashboard_text = build_player_dashboard(db_name, session, u_id, has_jammer=has_jammer)
-            word_num       = session['word_count']
-
-            if u_id in eng.dashboard_msgs and word_num % 4 != 0:
+            # ── Update dashboard in background (non-blocking for word validation) ───
+            # Debounce to prevent queue buildup - only one pending update per player
+            if u_id in eng.dashboard_update_pending:
+                # Cancel previous pending update, new one will replace it
+                eng.dashboard_update_pending[u_id].cancel()
+            
+            async def _update_dashboard_async():
+                await asyncio.sleep(0.05)  # Small debounce delay to batch updates
                 try:
-                    await bot.edit_message_text(
-                        dashboard_text,
-                        chat_id=message.chat.id,
-                        message_id=eng.dashboard_msgs[u_id],
-                        parse_mode="HTML"
-                    )
-                except Exception:
-                    msg = await bot.send_message(
-                        message.chat.id, dashboard_text,
-                        parse_mode="HTML",
-                        message_thread_id=FUSION_TOPIC_ID
-                    )
-                    eng.dashboard_msgs[u_id] = msg.message_id
-            else:
-                if u_id in eng.dashboard_msgs:
-                    try:
-                        await bot.delete_message(
-                            chat_id=message.chat.id,
-                            message_id=eng.dashboard_msgs[u_id]
-                        )
-                    except Exception:
-                        pass
-                msg = await bot.send_message(
-                    message.chat.id, dashboard_text,
-                    parse_mode="HTML",
-                    message_thread_id=FUSION_TOPIC_ID
-                )
-                eng.dashboard_msgs[u_id] = msg.message_id
+                    dashboard_text = build_player_dashboard(db_name, session, u_id, has_jammer=has_jammer)
+                    word_num       = session['word_count']
+
+                    if u_id in eng.dashboard_msgs and word_num % 4 != 0:
+                        try:
+                            await bot.edit_message_text(
+                                dashboard_text,
+                                chat_id=message.chat.id,
+                                message_id=eng.dashboard_msgs[u_id],
+                                parse_mode="HTML"
+                            )
+                        except Exception:
+                            try:
+                                msg = await bot.send_message(
+                                    message.chat.id, dashboard_text,
+                                    parse_mode="HTML",
+                                    message_thread_id=FUSION_TOPIC_ID
+                                )
+                                eng.dashboard_msgs[u_id] = msg.message_id
+                            except Exception as e:
+                                print(f"[DASHBOARD ERROR] Failed to send: {e}")
+                    else:
+                        if u_id in eng.dashboard_msgs:
+                            try:
+                                await bot.delete_message(
+                                    chat_id=message.chat.id,
+                                    message_id=eng.dashboard_msgs[u_id]
+                                )
+                            except Exception:
+                                pass
+                        try:
+                            msg = await bot.send_message(
+                                message.chat.id, dashboard_text,
+                                parse_mode="HTML",
+                                message_thread_id=FUSION_TOPIC_ID
+                            )
+                            eng.dashboard_msgs[u_id] = msg.message_id
+                        except Exception as e:
+                            print(f"[DASHBOARD ERROR] Failed to send: {e}")
+                    
+                    # Clear pending flag after update completes
+                    if u_id in eng.dashboard_update_pending:
+                        del eng.dashboard_update_pending[u_id]
+                except asyncio.CancelledError:
+                    pass  # Update was cancelled by newer one, that's ok
+                except Exception as e:
+                    print(f"[DASHBOARD BACKGROUND ERROR] {e}")
+                    if u_id in eng.dashboard_update_pending:
+                        del eng.dashboard_update_pending[u_id]
+            
+            # Fire dashboard update in background and track it for debouncing
+            task = asyncio.create_task(_update_dashboard_async())
+            eng.dashboard_update_pending[u_id] = task
 
             # ── Fire DB write as background task (non-blocking) ────────────
             async def _save_word_score():
                 try:
                     award_word_score(
                         u_id, pts, xp_awarded, btc_awarded,
-                        resources_awarded, db_name, game_type="fusion"
+                        resources_awarded, db_name, game_type="fusion", user_obj=user
                     )
                     if rare_item:
                         add_unclaimed_item(u_id, rare_item["key"], 1)
                     # Streak DB update (best-effort)
-                    update_streak_and_award_food(u_id, correct=True, username=db_name)
+                    update_streak_and_award_food(u_id, correct=True, username=db_name, user_obj=user)
                 except Exception as e:
                     print(f"[DB SAVE WORD] {e}")
 
@@ -9478,15 +9507,15 @@ async def sheets_sync_background_task(bot: Bot, chat_id: int):
                     update_google_sheet(leaderboard)
                     
                     # Format and send update to group
-                    top_10 = leaderboard[:10]
+                    top_50 = leaderboard[:50]
                     msg = "📊 *LEADERBOARD*\n\n"
-                    msg += "🏆 Top 5 Players:\n"
-                    for idx, player in enumerate(top_10, 1):
+                    msg += "🏆 Top 50 Players:\n"
+                    for idx, player in enumerate(top_50, 1):
                         username = player.get("username", "Unknown")
                         points = player.get("points", 0)
                         msg += f"{idx}. {username} - {points:,} pts\n"
                     
-                    msg += f"\n⏰ Updated: {datetime.utcnow().strftime('%H:%M UTC')}"
+                    msg += f"\n⏰ Updated: {datetime.now(timezone.utc).strftime('%H:%M UTC')}"
                     msg += f"\n📈 Total players: {len(leaderboard)}"
                     
                     await bot.send_message(chat_id, msg, parse_mode="Markdown")
