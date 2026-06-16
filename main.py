@@ -5392,7 +5392,7 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
         ],
         [
             InlineKeyboardButton(text="🎒 Inventory",    callback_data="menu_inventory"),
-            InlineKeyboardButton(text="👥 Alliance",       callback_data="menu_guild"),
+            InlineKeyboardButton(text="👥x Alliance",       callback_data="menu_guild"),
         ],
         [
             InlineKeyboardButton(text="🛍️ Shop",         callback_data="menu_shop"),
