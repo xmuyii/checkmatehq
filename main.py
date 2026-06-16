@@ -5371,15 +5371,18 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
 
     hud = (
         f"╔═══════════════════════════╗\n"
-        f"║  🃏  <b>CHECKMATE HQ</b>  🃏  ║\n"
+        f"║    <b>Zero Dominus</b>    ║\n"
         f"╠═══════════════════════════╣\n"
-        f"║  👤 <b>{username[:18]}</b>\n"
-        f"║  ⭐ Level <b>{level}</b>   💰 <b>{bitcoin:,}</b> BTC\n"
-        f"║  [{xp_bar}] {xp_bar_pct}%\n"
-        f"║  📍 Sector: <b>{sector}</b>\n"
-        f"║  🏰 <b>{base_name[:20]}</b>\n"
+        f"║  👤 <b>{username[:18]}</b>║\n"
+        f"║  [{xp_bar}] {xp_bar_pct}%║\n"
+        f"║  ⭐ Level <b>{level}</b>   ║\n"
+        f"║  💰 <b>{bitcoin:,}</b> bitcoin║\n"
+        f"╠═══════════════════════════╣\n"
+        f"╠═══════════════════════════╣\n"
+        f"║  📍 Sector: <b>{sector}</b>║\n"
+        f"║  🏰 <b>{base_name[:20]}</b>║\n"
         f"║  {shield_icon} Shield: <b>{shield_st}</b>\n"
-        f"║  🎒 Inv: <b>{inv_count}/{inv_slots}</b>{claims_warn}\n"
+        f"║  🎒 Inv: <b>{inv_count}/{inv_slots}</b>\n{claims_warn}\n"
         f"╚═══════════════════════════╝"
     )
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -5389,7 +5392,7 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
         ],
         [
             InlineKeyboardButton(text="🎒 Inventory",    callback_data="menu_inventory"),
-            InlineKeyboardButton(text="🎁 Claims",       callback_data="menu_claims"),
+            InlineKeyboardButton(text="👥 Alliance",       callback_data="menu_guild"),
         ],
         [
             InlineKeyboardButton(text="🛍️ Shop",         callback_data="menu_shop"),
