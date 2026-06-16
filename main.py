@@ -4990,10 +4990,9 @@ async def cmd_start(message: types.Message):
     if user is None:
         user = register_new_user(u_id, message.from_user.first_name)
 
-# Daily login credits
+    # Daily login credits
     _awarded, _amount, _new_bal = claim_daily_login_credits(u_id)
     if _awarded:
-        # ✅ FIX: Removed asyncio.create_task and added await
         await message.answer(
             f"🌅 <b>Daily Login Bonus!</b>  +{_amount} credits\n"
             f"💳 Balance: <b>{_new_bal} credits</b>",
@@ -5017,37 +5016,70 @@ async def cmd_start(message: types.Message):
     xp_bar     = "█" * filled + "░" * (10 - filled)
 
     shield_icon = "🛡️" if "ACTIVE" in shield_st else ("💥" if "DISRUPTED" in shield_st else "⚠️")
-    claims_warn = f"  ⚡ <b>{unclaimed} UNCLAIMED</b>" if unclaimed > 0 else ""
+    claims_warn = f"⚡ <b>{unclaimed} UNCLAIMED</b>" if unclaimed > 0 else ""
 
-    hud = (
-        f"╔═══════════════════════════╗\n"
-        f"║    <b>Zero Dominus</b>    ║\n"
-        f"╠═══════════════════════════╣\n"
-        f"║  👤 <b>{username[:18]}</b>║\n"
-        f"║  [{xp_bar}] {xp_bar_pct}%║\n"
-        f"║  ⭐ Level <b>{level}</b>   ║\n"
-        f"║  💰 <b>{bitcoin:,}</b> bitcoin║\n"
-        f"╠═══════════════════════════╣\n"
-        f"╠═══════════════════════════╣\n"
-        f"║  📍 Sector: <b>{sector}</b>║\n"
-        f"║  🏰 <b>{base_name[:20]}</b>║\n"
-        f"║  {shield_icon} Shield: <b>{shield_st}</b>\n"
-        f"║  🎒 Inv: <b>{inv_count}/{inv_slots}</b>\n{claims_warn}\n"
-        f"╚═══════════════════════════╝"
+    def generate_profile_card(username, xp_bar, xp_bar_pct, level, bitcoin, sector, base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn):
+        # The clean inner width of the card box (excluding the '║  ' and '  ║')
+        INNER_WIDTH = 25 
+
+        def format_line(icon, label, value, is_bold_value=True):
+            """Helper to mathematically pad lines considering Telegram HTML tags."""
+            prefix = f"{icon} " if icon else ""
+            visible_text = f"{prefix}{label}{value}"
+            
+            padding_spaces = INNER_WIDTH - len(visible_text)
+            if padding_spaces < 0:
+                padding_spaces = 0
+                
+            display_value = f"<b>{value}</b>" if is_bold_value else value
+            return f"║  {prefix}{label}{display_value}{' ' * padding_spaces}║\n"
+
+        # --- 1. Header (Centered) ---
+        card =  "╔═══════════════════════════╗\n"
+        card += "║        <b>Zero Dominus</b>        ║\n"
+        card += "╠═══════════════════════════╣\n"
+
+        # --- 2. Dynamic Stat Lines ---
+        card += format_line("👤", "", username[:15], is_bold_value=True)
+        card += format_line("", f"[{xp_bar}] ", f"{xp_bar_pct}%", is_bold_value=False)
+        card += format_line("⭐", "Level ", str(level), is_bold_value=True)
+        card += format_line("💰", "", f"{bitcoin:,} bitcoin", is_bold_value=True)
+        
+        card += "╠═══════════════════════════╣\n"
+        card += "╠═══════════════════════════╣\n"
+        
+        card += format_line("📍", "Sector: ", str(sector), is_bold_value=True)
+        card += format_line("🏰", "", base_name[:15], is_bold_value=True)
+        card += format_line(shield_icon, "Shield: ", str(shield_st), is_bold_value=True)
+        card += format_line("🎒", "Inv: ", f"{inv_count}/{inv_slots}", is_bold_value=True)
+        
+        # --- 3. Handle Special Conditional Warn Line ---
+        if claims_warn.strip():
+            clean_warn = claims_warn.replace("<b>", "").replace("</b>", "").strip()
+            pad = INNER_WIDTH - len(clean_warn)
+            card += f"║  {claims_warn}{' ' * max(0, pad)}║\n"
+            
+        card += "╚═══════════════════════════╝"
+        return card
+
+    # FIX 1: Explicitly invoke the generator function using local variables
+    hud_display = generate_profile_card(
+        username, xp_bar, xp_bar_pct, level, bitcoin, sector, 
+        base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="👤 Profile",    callback_data="menu_profile"),
-            InlineKeyboardButton(text="🏰 My Base",    callback_data="menu_base"),
+            InlineKeyboardButton(text="👤 Profile",      callback_data="menu_profile"),
+            InlineKeyboardButton(text="🏰 My Base",      callback_data="menu_base"),
         ],
         [
-            InlineKeyboardButton(text="🎒 Inventory",  callback_data="menu_inventory"),
+            InlineKeyboardButton(text="🎒 Inventory",    callback_data="menu_inventory"),
             InlineKeyboardButton(text="👥 Alliance",     callback_data="menu_guild"),
         ],
         [
-            InlineKeyboardButton(text="🛍️ Shop",       callback_data="menu_shop"),
-            InlineKeyboardButton(text="⚔️ Battle",     callback_data="menu_battle"),
+            InlineKeyboardButton(text="🛍️ Shop",         callback_data="menu_shop"),
+            InlineKeyboardButton(text="⚔️ Battle",       callback_data="menu_battle"),
         ],
         [
             InlineKeyboardButton(text="🏆 Leaderboards", callback_data="menu_leaderboards"),
@@ -5063,9 +5095,17 @@ async def cmd_start(message: types.Message):
         ],
     ])
 
-    await message.answer(hud, parse_mode="HTML", reply_markup=kb)
+    # FIX 2: Wrap the generated string in monospace pre tags
+    formatted_message = f"<pre>{hud_display}</pre>"
 
-
+    # FIX 3: Deliver utilizing the correct chat identifier payload (u_id)
+    await bot.send_message(
+        chat_id=u_id, 
+        text=formatted_message, 
+        parse_mode="HTML",
+        reply_markup=kb
+    )
+    
 @dp.callback_query(lambda q: q.data == "menu_leaderboards")
 async def cb_menu_leaderboards(callback: types.CallbackQuery):
     """Leaderboard hub — shows all game leaderboards with inline tabs."""
