@@ -5034,6 +5034,7 @@ async def cmd_start(message: types.Message):
         f"║  {shield_icon} Shield: <b>{shield_st}</b>\n"
         f"║  🎒 Inv: <b>{inv_count}/{inv_slots}</b>\n{claims_warn}\n"
         f"╚═══════════════════════════╝"
+    )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
