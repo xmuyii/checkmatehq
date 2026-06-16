@@ -933,7 +933,7 @@ def _cmd(*names):
         if not text: return False
         parts = text.strip().split()
         if not parts: return False
-        if not parts[0].startswith("/"): return False
+        if not (parts[0].startswith("/") or parts[0].startswith("!")): return False
         first = parts[0][1:].lower().split("@")[0]
         return first in ns
     return F.text.func(check)
@@ -1670,9 +1670,6 @@ TRIVIA_QUESTIONS_PER_GAME = 10
 TRIVIA_QUESTION_DURATION = 10   # seconds per question
 TRIVIA_ANSWER_DISPLAY_TIME = 2  # seconds to show result before next question
 TRIVIA_ROUND_TIMEOUT = 300      # 5-minute ceiling (safety net)
-TRIVIA_TOPIC_ID = 36623  # Get from group settings
-FUSION_TOPIC_ID = 36621  # Get from group settings
-LEADERBOARDS_TOPIC_ID = 36626
 async def trivia_game_loop(chat_id: int):
     import traceback as _tb
     trivia_eng = get_trivia_engine(chat_id)
@@ -8816,8 +8813,8 @@ async def on_group_message(message: types.Message):
         u_id = str(message.from_user.id)
         current_topic = message.message_thread_id
 
-        # Skip commands — they have their own handlers
-        if text.startswith("!") or text.startswith("/"):
+        # Skip slash commands — they have their own @dp.message handlers registered above
+        if text.startswith("/"):
             return
 
         # ─────────────────────────────────────────────────────────────────
@@ -8933,7 +8930,17 @@ async def on_group_message(message: types.Message):
 
             # ── Credits check: deduct CREDITS_TO_PLAY on first word of round ─
             if u_id not in eng.player_sessions:
-                cr_bal = int(user.get('credits', 0))
+                cr_bal = int(user.get('credits') or 0)
+                if cr_bal < CREDITS_TO_PLAY:
+                    # Attempt a lazy grant for players who pre-date the credits column
+                    # (their row has NULL credits). Give them the daily bonus silently
+                    # so they aren't locked out on their very first attempt.
+                    if user.get('credits') is None:
+                        try:
+                            add_credits(u_id, CREDITS_DAILY_LOGIN, "first-time credit grant")
+                            cr_bal = CREDITS_DAILY_LOGIN
+                        except Exception:
+                            cr_bal = 0
                 if cr_bal < CREDITS_TO_PLAY:
                     await message.reply(
                         f"💳 <b>Not enough credits!</b>\n"
