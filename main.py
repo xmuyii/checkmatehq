@@ -4880,9 +4880,9 @@ async def cmd_start(message: types.Message):
         card += "╠═══════════════════════════╣\n"
 
         # --- 2. Dynamic Stat Lines ---
-        card += format_line("👤", "", username[:15], is_bold_value=True)
-        card += format_line("⭐", "Level ", str(level), is_bold_value=True)
-        card += format_line("⚔️", "Power ", str(level), is_bold_value=True)
+        card += format_line("👤", "Commander", username[:15], is_bold_value=True)
+        card += format_line("⭐", "Level: ", str(level), is_bold_value=True)
+        card += format_line("⚔️", "Power: ", str(level), is_bold_value=True)
         card += format_line("🗃", "Gold ", str(level), is_bold_value=True)
         
         card += "╠═══════════════════════════╣\n"
@@ -5847,7 +5847,7 @@ async def cb_menu_profile(callback: types.CallbackQuery):
             InlineKeyboardButton(text="🌅 Claim Daily",    callback_data="credits_daily"),
         ],
         [
-            InlineKeyboardButton(text="🔄 Change Commander name",     callback_data=""),
+            InlineKeyboardButton(text="🔄 Change Commander name",     callback_data="change_commander_name"),
             InlineKeyboardButton(text="💳 Credits Info",    callback_data="credits_info"),
         ],
         [InlineKeyboardButton(text="⬅️ Back",               callback_data="menu_back")],
@@ -5883,7 +5883,10 @@ async def cb_menu_profile(callback: types.CallbackQuery):
         reply_markup=markup
     )
     await callback.answer()
-
+@dp.callback_query(lambda q: q.data == "change_commander_name")
+async def callback_change_commander_name(callback: types.CallbackQuery):
+    """Handle changing commander name."""
+    await callback.answer("Coming soon!", show_alert=True)
 
 @dp.callback_query(lambda q: q.data == "menu_shop")
 async def cb_menu_shop(callback: types.CallbackQuery):
