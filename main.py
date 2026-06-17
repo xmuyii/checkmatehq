@@ -2733,7 +2733,7 @@ async def callback_show_traps(callback: types.CallbackQuery):
     await callback.answer()
 
 
-@dp.callback_query(lambda q: q.data.startswith("build_"))
+@dp.callback_query(lambda q: q.data.startswith("build_") and not q.data.startswith("build_confirm_") and q.data != "build_menu")
 async def callback_build_structure(callback: types.CallbackQuery):
     """Build selected structure."""
     u_id = str(callback.from_user.id)
