@@ -25,7 +25,7 @@ BUILDING_TYPES: Dict[str, dict] = {
     # ── Military ──────────────────────────────────────────────────────────
     "training_grounds": {
         "name":        "⚔️ Training Grounds",
-        "description": "Increases troop capacity. Each level adds 500 soldier slots.",
+        "description": "Increases your troop capacity. Each level adds 500 soldier slots.",
         "category":    "military",
         "unlock_base_level": 1,
         "max_level":   10,
@@ -173,21 +173,6 @@ BUILDING_TYPES: Dict[str, dict] = {
         },
         "bonus": lambda lvl: {"extra_trap_capacity": 250 * lvl},
         "build_time_secs": lambda lvl: 75 * lvl,
-    },
-
-    "watchtower": {
-        "name":        "🗼 Watchtower",
-        "description": "Early warning: reveals when a scout is sent against you. "
-                       "Each level increases scout detection range.",
-        "category":    "defence",
-        "unlock_base_level": 2,
-        "max_level":   10,
-        "cost_per_level": lambda lvl: {
-            "wood":   100 * lvl,
-            "bronze": 50  * lvl,
-        },
-        "bonus": lambda lvl: {"scout_detection_bonus": lvl},
-        "build_time_secs": lambda lvl: 90 * lvl,
     },
 
     "walls": {

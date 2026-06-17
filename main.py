@@ -2554,90 +2554,6 @@ async def cmd_challenges(message: types.Message):
     await message.answer(msg, parse_mode="Markdown")
   
 
-@dp.message(_cmd("profile"))
-async def cmd_profile(message: types.Message):
-    if message.chat.type != "private":
-        await _send_access_denied_sticker(message); return
-    u_id = str(message.from_user.id)
-    profile = get_profile(u_id)
-    if not profile:
-        await _send_unreg_sticker(message); return
-    
-    xp_pct = (profile['xp_progress'] / profile['xp_needed'] * 100) if profile['xp_needed'] > 0 else 0
-    xp_bar = progress_bar(profile['xp_progress'], profile['xp_needed'], width=15)
-    
-    # Shield status (Phase 2A)
-    user = get_user(u_id)
-    shield_status = user.get('shield_status', '⚠️ UNPROTECTED')
-    if shield_status == '💥 DISRUPTED':
-        shield_status_str = "💥 DISRUPTED (1 attack remaining)"
-    elif shield_status == '⚠️ UNPROTECTED':
-        cooldown = user.get('shield_cooldown')
-        if cooldown:
-            try:
-                remaining = (datetime.fromisoformat(cooldown) - datetime.utcnow()).total_seconds()
-                if remaining > 0:
-                    hours = int(remaining / 3600)
-                    minutes = int((remaining % 3600) / 60)
-                    shield_status_str = f"⚠️ UNPROTECTED (Cooldown: {hours}Hrs {minutes}Mins to activate shield)"
-                else:
-                    shield_status_str = "⚠️ UNPROTECTED (Ready to activate shield)"
-            except Exception:
-                shield_status_str = "⚠️ UNPROTECTED"
-        else:
-            shield_status_str = "⚠️ UNPROTECTED"
-    else:
-        shield_status_str = "🛡️ ACTIVE"
-    
-    # Format base resources
-    base_res = profile.get('base_resources', {})
-    base_name = profile.get('base_name') or "Nameless Base"
-    resources_str = (
-        f"🪵 {base_res.get('wood', 0)} | 🧱 {base_res.get('bronze', 0)} | "
-        f"⛓️ {base_res.get('iron', 0)} | 💎 {base_res.get('diamond', 0)} | "
-        f"🏺 {base_res.get('relics', 0)} | 👹 {base_res.get('incubus', 0)}"
-    )
-    
-    # Check for sector consciousness split
-    current_sector = profile.get('sector')
-    base_sector = user.get('sector')
-    sector_split_msg = ""
-    if current_sector and base_sector and current_sector != base_sector:
-        try:
-            sector_split_msg = consciousness_split_awareness(current_sector, base_sector, profile['username'])
-            sector_split_msg = "\n\n" + sector_split_msg
-        except:
-            pass
-    
-    await message.answer(
-        f"🃏 *GameMaster:* \"Staring at your own reflection. Fine.\"\n"
-        f"{divider()}\n\n"
-        f"👤 *{profile['username']}* — *LEVEL {profile['level']}*\n\n"
-        f"⭐ XP Progress:\n{xp_bar}\n"
-        f"💰 Bitcoin: *{profile['bitcoin']}*\n"
-        f"📍 Current Sector: _{profile.get('sector_display','Not Assigned')}_\n"
-        f"🏰 Base Sector: _{get_sector_display(base_sector)}_\n"
-        f"🛡️ Shield Status: {shield_status_str}\n\n"
-        f"{divider()}\n\n"
-        f"📊 *BATTLE RECORDS*\n"
-        f"├─ This Week: *{profile['weekly_points']}* pts\n"
-        f"└─ All-Time: *{profile['all_time_points']}* pts\n\n"
-        f"🏰 *{base_name}*\n"
-        f"├─ Resources: {resources_str}\n"
-        f"└─ Food: 🌽 *{profile.get('base_food', 0)}*\n\n"
-        f"📦 *INVENTORY* ({profile['inventory_count']}/{profile['backpack_slots']} slots)\n"
-        f"├─ Unclaimed: *{profile['unclaimed_count']}* ⚠️\n"
-        f"└─ Crates: *{profile['crate_count']}* | Shields: *{profile['shield_count']}*\n"
-        f"{divider()}{sector_split_msg}",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="📈 Check Prestige", callback_data="prestige_info")],
-            [InlineKeyboardButton(text="🎓 Training", callback_data="train_menu"), 
-             InlineKeyboardButton(text="🏰 Build", callback_data="build_menu")],
-        ])
-    )
-
-
 @dp.message(_cmd("prestige"))
 async def cmd_prestige(message: types.Message):
     """Prestige (reset level) for bonuses."""
@@ -2732,9 +2648,10 @@ async def callback_build_menu(callback: types.CallbackQuery):
     keyboard = [
         [InlineKeyboardButton(text="🏰 Build Structure", callback_data="show_building_list"),
          InlineKeyboardButton(text="🔱 Build Trap", callback_data="show_trap_list")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_base")]
     ]
     
-    msg = f"🏰 *BASE DEVELOPMENT*\n\nBase Level: {base_level}\n\nChoose what to build:"
+    msg = f"🏰 *CONSTRUCTION*\n\nBase Level: {base_level}\n\nChoose what to build:"
     
     await callback.message.edit_text(
         msg,
@@ -2742,6 +2659,7 @@ async def callback_build_menu(callback: types.CallbackQuery):
         parse_mode="Markdown"
     )
     await callback.answer()
+    
 
 
 @dp.callback_query(lambda q: q.data == "show_building_list")
@@ -2768,7 +2686,7 @@ async def callback_show_buildings(callback: types.CallbackQuery):
             callback_data=f"build_{building_id}"
         )
         keyboard.append([button])
-    
+    keyboard.append([InlineKeyboardButton(text="⬅️ Back", callback_data="build_menu")])
     msg = f"🏰 *AVAILABLE BUILDINGS* (Level {base_level})\n\nSelect to build:"
     
     await callback.message.edit_text(
@@ -2803,7 +2721,7 @@ async def callback_show_traps(callback: types.CallbackQuery):
             callback_data=f"trap_{trap_id}"
         )
         keyboard.append([button])
-    
+    keyboard.append([InlineKeyboardButton(text="⬅️ Back", callback_data="build_menu")])
     msg = f"🔱 *AVAILABLE TRAPS* (Level {base_level})\n\nSelect to build:"
     
     await callback.message.edit_text(
@@ -2824,6 +2742,12 @@ async def callback_build_structure(callback: types.CallbackQuery):
         return
     
     building_id = callback.data.replace("build_", "")
+    
+    # Validate building exists first
+    if building_id not in BUILDING_TYPES:
+        await callback.answer(f"❌ Unknown building: {building_id}", show_alert=True)
+        return
+    
     xp = user.get("xp", 0)
     base_level = max(1, 1 + (xp // 1000))
     
@@ -2863,6 +2787,11 @@ async def callback_build_confirm(callback: types.CallbackQuery):
         return
     
     building_id = callback.data.replace("build_confirm_", "")
+    
+    # Validate building exists
+    if building_id not in BUILDING_TYPES:
+        await callback.answer(f"❌ Unknown building: {building_id}", show_alert=True)
+        return
     
     current_buildings = user.get("buildings", {})
     current_level = current_buildings.get(building_id, 0)
@@ -3970,98 +3899,6 @@ async def cmd_base(message: types.Message):
     await message.answer(info, parse_mode="Markdown")
 
 
-@dp.message(_cmd("build"))
-async def cmd_build(message: types.Message):
-    """Build structures inside your base for bonuses."""
-    if message.chat.type != "private":
-        await _send_access_denied_sticker(message)
-        return
-    
-    u_id = str(message.from_user.id)
-    user = get_user(u_id)
-    
-    if not user:
-        await _send_unreg_sticker(message)
-        return
-    
-    if not user.get("base_name"):
-        await message.answer("🏰 *GameMaster:* \"You have no base. Use `!setup_base [sector] [name]` first.\"", parse_mode="Markdown")
-        return
-    
-    # Calculate base level
-    xp = user.get("xp", 0)
-    base_level = max(1, 1 + (xp // 1000))
-    
-    # Parse command: !build [building_name]
-    args = message.text.strip().split(maxsplit=1)
-    
-    if len(args) < 2:
-        # Show menu
-        current_buildings = user.get("buildings", {})
-        menu = format_buildings_menu(base_level, current_buildings)
-        await message.answer(menu, parse_mode="Markdown")
-        return
-    
-    building_name = args[1].lower().replace(" ", "_").replace("-", "_")
-    
-    # Check if building exists
-    can_build, error_msg = can_build_building(building_name, base_level)
-    if not can_build:
-        await message.answer(f"❌ {error_msg}", parse_mode="Markdown")
-        return
-    
-    # Get current buildings
-    buildings = user.get("buildings", {})
-    current_level = buildings.get(building_name, 0)
-    
-    # Calculate cost for next level
-    cost = calculate_building_cost(building_name, current_level + 1)
-    
-    # Check if player has resources
-    base_res = user.get("base_resources", {})
-    if isinstance(base_res, str):
-        import json as json_lib
-        try:
-            base_res = json_lib.loads(base_res)
-        except:
-            base_res = {}
-    
-    resources = base_res.get("resources", {})
-    
-    for resource, amount in cost.items():
-        if resources.get(resource, 0) < amount:
-            await message.answer(
-                f"❌ Insufficient {resource}!\n"
-                f"Need: {amount}\n"
-                f"Have: {resources.get(resource, 0)}",
-                parse_mode="Markdown"
-            )
-            return
-    
-    # Deduct resources and build
-    for resource, amount in cost.items():
-        resources[resource] = resources.get(resource, 0) - amount
-    
-    buildings[building_name] = current_level + 1
-    
-    base_res["resources"] = resources
-    user["buildings"] = buildings
-    user["base_resources"] = base_res
-    
-    save_user(u_id, user)
-    
-    building_info = BUILDING_TYPES.get(building_name, {})
-    
-    await message.answer(
-        f"✅ **CONSTRUCTION COMPLETE!**\n\n"
-        f"{building_info.get('name', building_name)}\n"
-        f"Level: {buildings[building_name]}\n\n"
-        f"*Bonus:* {building_info.get('description', 'N/A')}\n\n"
-        f"🃏 *GameMaster:* \"Your infrastructure grows stronger. The game notices.\"",
-        parse_mode="Markdown"
-    )
-
-
 @dp.message(_cmd("scout"))
 async def cmd_scout(message: types.Message):
     """Scout a target player to reveal their army and traps."""
@@ -4998,6 +4835,8 @@ async def cmd_start(message: types.Message):
             f"💳 Balance: <b>{_new_bal} credits</b>",
             parse_mode="HTML"
         )
+        
+
 
     username   = _safe_name(user.get("username") or message.from_user.first_name or "Operative")
     level      = user.get("level", 1)
@@ -5021,6 +4860,7 @@ async def cmd_start(message: types.Message):
     def generate_profile_card(username, xp_bar, xp_bar_pct, level, bitcoin, sector, base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn):
         # The clean inner width of the card box (excluding the '║  ' and '  ║')
         INNER_WIDTH = 25 
+        
 
         def format_line(icon, label, value, is_bold_value=True):
             """Helper to mathematically pad lines considering Telegram HTML tags."""
@@ -5033,7 +4873,7 @@ async def cmd_start(message: types.Message):
                 
             display_value = f"<b>{value}</b>" if is_bold_value else value
             return f"║  {prefix}{label}{display_value}{' ' * padding_spaces}║\n"
-
+    
         # --- 1. Header (Centered) ---
         card =  "╔═══════════════════════════╗\n"
         card += "║        <b>Zero Dominus</b>        ║\n"
@@ -5041,14 +4881,17 @@ async def cmd_start(message: types.Message):
 
         # --- 2. Dynamic Stat Lines ---
         card += format_line("👤", "", username[:15], is_bold_value=True)
-        card += format_line("", f"[{xp_bar}] ", f"{xp_bar_pct}%", is_bold_value=False)
         card += format_line("⭐", "Level ", str(level), is_bold_value=True)
-        card += format_line("💰", "", f"{bitcoin:,} bitcoin", is_bold_value=True)
+        card += format_line("⚔️", "Power ", str(level), is_bold_value=True)
+        card += format_line("🗃", "Gold ", str(level), is_bold_value=True)
         
         card += "╠═══════════════════════════╣\n"
         card += "╠═══════════════════════════╣\n"
-        
         card += format_line("📍", "Sector: ", str(sector), is_bold_value=True)
+        card += format_line("📍", "Building, Research, ttraining in progress, Alliance help (1 of 9)", str(sector), is_bold_value=True)
+        card += format_line("📍", "Next mission ", str(sector), is_bold_value=True)
+        card += format_line("📍", "Ongoing Events- Real time counting", str(sector), is_bold_value=True)
+        card += format_line("📍", "Free gift ", str(sector), is_bold_value=True)
         card += format_line("🏰", "", base_name[:15], is_bold_value=True)
         card += format_line(shield_icon, "Shield: ", str(shield_st), is_bold_value=True)
         card += format_line("🎒", "Inv: ", f"{inv_count}/{inv_slots}", is_bold_value=True)
@@ -5070,20 +4913,18 @@ async def cmd_start(message: types.Message):
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="👤 Profile",      callback_data="menu_profile"),
+            InlineKeyboardButton(text="👤 Commander",      callback_data="menu_profile"),
             InlineKeyboardButton(text="🏰 My Base",      callback_data="menu_base"),
         ],
         [
-            InlineKeyboardButton(text="🎒 Inventory",    callback_data="menu_inventory"),
+            InlineKeyboardButton(text="🎒 Items",    callback_data="menu_inventory"),
             InlineKeyboardButton(text="👥 Alliance",     callback_data="menu_guild"),
         ],
         [
-            InlineKeyboardButton(text="🛍️ Shop",         callback_data="menu_shop"),
-            InlineKeyboardButton(text="⚔️ Battle",       callback_data="menu_battle"),
+            InlineKeyboardButton(text="⚔️ Power",       callback_data="menu_battle"),
         ],
         [
             InlineKeyboardButton(text="🏆 Leaderboards", callback_data="menu_leaderboards"),
-            InlineKeyboardButton(text="🗺️ Map/Sectors",  callback_data="menu_map"),
         ],
         [
             InlineKeyboardButton(text="🧬 Research Lab", callback_data="menu_research"),
@@ -5105,7 +4946,7 @@ async def cmd_start(message: types.Message):
         parse_mode="HTML",
         reply_markup=kb
     )
-    
+
 @dp.callback_query(lambda q: q.data == "menu_leaderboards")
 async def cb_menu_leaderboards(callback: types.CallbackQuery):
     """Leaderboard hub — shows all game leaderboards with inline tabs."""
@@ -5400,66 +5241,108 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
     bitcoin    = user.get("bitcoin", 0)
     sector     = user.get("sector", "—")
     base_name  = user.get("base_name") or "No Base"
-    shield_st  = user.get("shield_status") or "⚠️ UNPROTECTED"
+    shield_st  = user.get("shield_status") or "⚠️ UNPROTECTED"  # guard against None from DB
     unclaimed_raw = user.get("unclaimed_items", [])
     unclaimed  = len(unclaimed_raw) if isinstance(unclaimed_raw, list) else 0
     inv_raw    = user.get("inventory", [])
     inv_count  = len(inv_raw) if isinstance(inv_raw, list) else 0
     inv_slots  = user.get("backpack_slots", 5)
-    xp_bar_pct = min(100, int(xp % 100))
+    xp_bar_pct = min(100, int((xp % 100)))
     filled     = xp_bar_pct // 10
     xp_bar     = "█" * filled + "░" * (10 - filled)
-    shield_icon = "🛡️" if "ACTIVE" in shield_st else ("💥" if "DISRUPTED" in shield_st else "⚠️")
-    claims_warn = f"  ⚡ <b>{unclaimed} UNCLAIMED</b>" if unclaimed > 0 else ""
 
-    hud = (
-        f"╔═══════════════════════════╗\n"
-        f"║    <b>Zero Dominus</b>    ║\n"
-        f"╠═══════════════════════════╣\n"
-        f"║  👤 <b>{username[:18]}</b>║\n"
-        f"║  [{xp_bar}] {xp_bar_pct}%║\n"
-        f"║  ⭐ Level <b>{level}</b>   ║\n"
-        f"║  💰 <b>{bitcoin:,}</b> bitcoin║\n"
-        f"╠═══════════════════════════╣\n"
-        f"╠═══════════════════════════╣\n"
-        f"║  📍 Sector: <b>{sector}</b>║\n"
-        f"║  🏰 <b>{base_name[:20]}</b>║\n"
-        f"║  {shield_icon} Shield: <b>{shield_st}</b>\n"
-        f"║  🎒 Inv: <b>{inv_count}/{inv_slots}</b>\n{claims_warn}\n"
-        f"╚═══════════════════════════╝"
+    shield_icon = "🛡️" if "ACTIVE" in shield_st else ("💥" if "DISRUPTED" in shield_st else "⚠️")
+    claims_warn = f"⚡ <b>{unclaimed} UNCLAIMED</b>" if unclaimed > 0 else ""
+
+    def generate_profile_card(username, xp_bar, xp_bar_pct, level, bitcoin, sector, base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn):
+        # The clean inner width of the card box (excluding the '║  ' and '  ║')
+        INNER_WIDTH = 25 
+        
+
+        def format_line(icon, label, value, is_bold_value=True):
+            """Helper to mathematically pad lines considering Telegram HTML tags."""
+            prefix = f"{icon} " if icon else ""
+            visible_text = f"{prefix}{label}{value}"
+            
+            padding_spaces = INNER_WIDTH - len(visible_text)
+            if padding_spaces < 0:
+                padding_spaces = 0
+                
+            display_value = f"<b>{value}</b>" if is_bold_value else value
+            return f"║  {prefix}{label}{display_value}{' ' * padding_spaces}║\n"
+    
+        # --- 1. Header (Centered) ---
+        card =  "╔═══════════════════════════╗\n"
+        card += "║        <b>Zero Dominus</b>        ║\n"
+        card += "╠═══════════════════════════╣\n"
+
+        # --- 2. Dynamic Stat Lines ---
+        card += format_line("👤", "", username[:15], is_bold_value=True)
+        card += format_line("⭐", "Level ", str(level), is_bold_value=True)
+        card += format_line("⚔️", "Power ", str(level), is_bold_value=True)
+        card += format_line("🗃", "Gold ", str(level), is_bold_value=True)
+        
+        card += "╠═══════════════════════════╣\n"
+        card += "╠═══════════════════════════╣\n"
+        card += format_line("📍", "Sector: ", str(sector), is_bold_value=True)
+        card += format_line("📍", "Building, Research, ttraining in progress, Alliance help (1 of 9)", str(sector), is_bold_value=True)
+        card += format_line("📍", "Next mission ", str(sector), is_bold_value=True)
+        card += format_line("📍", "Ongoing Events- Real time counting", str(sector), is_bold_value=True)
+        card += format_line("📍", "Free gift ", str(sector), is_bold_value=True)
+        card += format_line("🏰", "", base_name[:15], is_bold_value=True)
+        card += format_line(shield_icon, "Shield: ", str(shield_st), is_bold_value=True)
+        card += format_line("🎒", "Inv: ", f"{inv_count}/{inv_slots}", is_bold_value=True)
+        
+        # --- 3. Handle Special Conditional Warn Line ---
+        if claims_warn.strip():
+            clean_warn = claims_warn.replace("<b>", "").replace("</b>", "").strip()
+            pad = INNER_WIDTH - len(clean_warn)
+            card += f"║  {claims_warn}{' ' * max(0, pad)}║\n"
+            
+        card += "╚═══════════════════════════╝"
+        return card
+
+    # FIX 1: Explicitly invoke the generator function using local variables
+    hud_display = generate_profile_card(
+        username, xp_bar, xp_bar_pct, level, bitcoin, sector, 
+        base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn
     )
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="👤 Profile",      callback_data="menu_profile"),
+            InlineKeyboardButton(text="👤 Commander",      callback_data="menu_profile"),
             InlineKeyboardButton(text="🏰 My Base",      callback_data="menu_base"),
         ],
         [
-            InlineKeyboardButton(text="🎒 Inventory",    callback_data="menu_inventory"),
-            InlineKeyboardButton(text="👥 Alliance",       callback_data="menu_guild"),
+            InlineKeyboardButton(text="🎒 Items",    callback_data="menu_inventory"),
+            InlineKeyboardButton(text="👥 Alliance",     callback_data="menu_guild"),
         ],
         [
-            InlineKeyboardButton(text="🛍️ Shop",         callback_data="menu_shop"),
-            InlineKeyboardButton(text="⚔️ Battle",       callback_data="menu_battle"),
+            InlineKeyboardButton(text="⚔️ Power",       callback_data="menu_battle"),
         ],
         [
             InlineKeyboardButton(text="🏆 Leaderboards", callback_data="menu_leaderboards"),
-            InlineKeyboardButton(text="🗺️ Map/Sectors",  callback_data="menu_map"),
         ],
         [
             InlineKeyboardButton(text="🧬 Research Lab", callback_data="menu_research"),
             InlineKeyboardButton(text="⚙️ Account",      callback_data="menu_account"),
         ],
         [
-            InlineKeyboardButton(text="🎮 Fusion",       callback_data="menu_fusion_info"),
-            InlineKeyboardButton(text="🧠 Trivia",       callback_data="menu_trivia_info"),
+            InlineKeyboardButton(text="🎮 Fusion Game",  callback_data="menu_fusion_info"),
+            InlineKeyboardButton(text="🧠 Trivia Game",  callback_data="menu_trivia_info"),
         ],
     ])
-    try:
-        await callback.message.edit_text(hud, parse_mode="HTML", reply_markup=kb)
-    except TelegramBadRequest:
-        await callback.message.answer(hud, parse_mode="HTML", reply_markup=kb)
 
+    # FIX 2: Wrap the generated string in monospace pre tags
+    formatted_message = f"<pre>{hud_display}</pre>"
 
+    # FIX 3: Deliver utilizing the correct chat identifier payload (u_id)
+    await bot.send_message(
+        chat_id=u_id, 
+        text=formatted_message, 
+        parse_mode="HTML",
+        reply_markup=kb
+    )
 @dp.callback_query(lambda q: q.data == "menu_claims")
 async def cb_menu_claims_shortcut(callback: types.CallbackQuery):
     """Shortcut from HUD to claims."""
@@ -5847,13 +5730,22 @@ async def cb_menu_base(callback: types.CallbackQuery):
     food = base_res.get("food", 0)
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏗️ Build", callback_data="base_build")],
+        [InlineKeyboardButton(text="🏗️ Buildings", callback_data="build_menu")],
+        InlineKeyboardButton(text="🗺️ Map/Sectors",  callback_data="menu_map"),
         [InlineKeyboardButton(text="🛡️ Defense", callback_data="base_defense")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
     ])
     
     await callback.message.edit_text(
         f"🏰 *{base_name}* (Level {base_level})\n\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"🏘 *Buildings:*\n\n"
+        f"🪵 Wood: **{wood}**\n"
+        f"🧱 Bronze: **{bronze}**\n"
+        f"⛓️ Iron: **{iron}**\n"
+        f"💎 Diamond: **{diamond}**\n"
+        f"🌽 Food: **{food}**\n"
+        f"━━━━━━━━━━━━━━━━━",
         f"━━━━━━━━━━━━━━━━━\n"
         f"*Resources:*\n"
         f"🪵 Wood: **{wood}**\n"
@@ -5927,6 +5819,7 @@ async def cb_menu_profile(callback: types.CallbackQuery):
     username        = _safe_name(user.get("username", "Unknown"))
     level           = user.get("level", 1)
     xp              = user.get("xp", 0)
+    energy          = user.get("energy", 0)
     all_time_points = user.get("all_time_points", 0)
     weekly_points   = user.get("weekly_points", 0)
     total_words     = user.get("total_words", 0)
@@ -5937,29 +5830,55 @@ async def cb_menu_profile(callback: types.CallbackQuery):
     shield_icon     = "🛡️" if "ACTIVE" in shield_st else ("💥" if "DISRUPTED" in shield_st else "⚠️")
     xp_bar_pct      = min(100, int(xp % 100))
     xp_bar          = "█" * (xp_bar_pct // 10) + "░" * (10 - xp_bar_pct // 10)
-
+    energy_bar_pct  = min(100, int(energy % 100))
+    energy_bar      = "█" * (energy_bar_pct // 10) + "░" * (10 - energy_bar_pct // 10)
+    
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🌅 Claim Daily",     callback_data="credits_daily"),
+            InlineKeyboardButton(text="🎖 Add XP",     callback_data="credits_daily"),
+            InlineKeyboardButton(text="⚡️ Add Energy",    callback_data="credits_info"),
+        ],
+        [
+            InlineKeyboardButton(text="⚔️ Equip",     callback_data="credits_daily"),
+            InlineKeyboardButton(text="💊 Commander boosts",    callback_data="credits_info"),
+        ],
+        [
+            InlineKeyboardButton(text="⚔️ Skill Points",     callback_data="credits_daily"),
+            InlineKeyboardButton(text="🌅 Claim Daily",    callback_data="credits_daily"),
+        ],
+        [
+            InlineKeyboardButton(text="🔄 Change Commander name",     callback_data=""),
             InlineKeyboardButton(text="💳 Credits Info",    callback_data="credits_info"),
         ],
         [InlineKeyboardButton(text="⬅️ Back",               callback_data="menu_back")],
     ])
 
     await callback.message.edit_text(
-        f"👤 <b>{username}</b>  —  Level <b>{level}</b>\n"
+        f"*[ COMMANDER PROFILE ]*\n"
+        f"Level: {level}\n"
         f"[{xp_bar}] {xp_bar_pct}%\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"⭐ XP: <b>{xp:,}</b>\n"
-        f"💰 Bitcoin: <b>{user.get('bitcoin', 0):,}</b>\n"
-        f"💳 Credits: <b>{credits}</b>\n"
-        f"{shield_icon} Shield: <b>{shield_st}</b>\n"
+        f"Energy level:[{energy_bar}] {energy_bar_pct}%\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 All-Time: <b>{all_time_points:,}</b> pts\n"
+        f"* COMMANDER INVENTORY *\n"
+        f"📊GUN:\n"
+        f"📊ARMOUR:\n"
+        f"📊HELMET:\n"
+        f"📊BOOTS:\n"
+        f"📊MAGAZINE:\n"
+        f"📊MAGAZINE:\n"
+        f"📊LOCKED\n"
+        f"📊LOCKED\n"
+        f"━━━━━━━━━━━━━━━━━━━━━"
+        f"COMMANDER BOOSTS"
+        f"SKILL POINTS: "
+        f"ACTIVATED SKILL POINTS"
+        f"━━━━━━━━━━━━━━━━━━━━━"   
         f"📈 Weekly:   <b>{weekly_points:,}</b> pts\n"
         f"📝 Words:    <b>{total_words:,}</b>\n"
         f"🏆 Wins: <b>{wins}</b>  💀 Losses: <b>{losses}</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━",
+        f"💳 Credits: <b>{credits}</b>\n"
+        f"👤 <b>{username}</b>\n",
         parse_mode="HTML",
         reply_markup=markup
     )
@@ -6102,6 +6021,8 @@ async def cb_menu_inventory(callback: types.CallbackQuery):
     inv = user.get("inventory", [])
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📦 My Items", callback_data="inv_open")],
+        [InlineKeyboardButton(text="⚡ Store", callback_data="menu_shop")],
         [InlineKeyboardButton(text="📦 Open Crate", callback_data="inv_open")],
         [InlineKeyboardButton(text="⚡ Use Item", callback_data="inv_use")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
@@ -6487,58 +6408,6 @@ async def cb_profile_achievements(callback: types.CallbackQuery):
         reply_markup=markup
     )
     await callback.answer()
-
-
-# ━━━━━ BASE SUBMENUS ━━━━━
-
-@dp.callback_query(lambda q: q.data == "base_build")
-async def cb_base_build(callback: types.CallbackQuery):
-    """Show building options."""
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📦 Storage", callback_data="build_storage")],
-        [InlineKeyboardButton(text="🛠️ Workshop", callback_data="build_workshop")],
-        [InlineKeyboardButton(text="🌾 Farm", callback_data="build_farm")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_base")],
-    ])
-    
-    await callback.message.edit_text(
-        "🏗️ *CONSTRUCTION*\n\n"
-        "━━━━━━━━━━━━━━━━━\n"
-        "*Build structures to boost your base.*",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-    await callback.answer()
-
-
-@dp.callback_query(lambda q: q.data == "base_defense")
-async def cb_base_defense(callback: types.CallbackQuery):
-    """Show defense options."""
-    u_id = str(callback.from_user.id)
-    user = get_user(u_id)
-    
-    if not user:
-        await callback.answer("User not found", show_alert=True)
-        return
-    
-    defense_level = user.get("defense_level", 1)
-    
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛡️ Raise Defense", callback_data="defense_raise")],
-        [InlineKeyboardButton(text="👥 Deploy Troops", callback_data="defense_troops")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_base")],
-    ])
-    
-    await callback.message.edit_text(
-        f"🛡️ *DEFENSE*\n\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"**Defense Level:** {defense_level}\n\n"
-        f"*Strengthen your defenses against raids.*",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-    await callback.answer()
-
 
 # ━━━━━ RESOURCES SUBMENUS ━━━━━
 

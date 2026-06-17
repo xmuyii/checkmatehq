@@ -233,6 +233,8 @@ def register_user(user_id, username: str):
             'total_words': 0,
             'bitcoin': 0,
             'xp': 0,
+            'energy': 1000,
+            'gold': 0,
             'level': 1,
             'last_level': 1,
             'backpack_slots': 5,
@@ -1339,6 +1341,8 @@ def get_profile(user_id) -> dict | None:
     inv      = user.get('inventory', [])
     uncl     = user.get('unclaimed_items', [])
     xp       = user.get('xp', 0)
+    energy   = user.get('energy', 0)
+    gold   = user.get('gold', 0)
     level    = user.get('level', 1)
     xp_prog  = xp % 100
     shielded = is_shielded(user)
@@ -1359,6 +1363,8 @@ def get_profile(user_id) -> dict | None:
         'weekly_points':   user.get('weekly_points', 0),
         'total_words':     user.get('total_words', 0),
         'sector':          user.get('sector'),
+        'energy':          user.get('energy'),
+        'gold':          user.get('gold'),
         'sector_display':  get_sector_display(user.get('sector')),
         'backpack_slots':  user.get('backpack_slots', 5),
         'inventory_count': len(inv),
