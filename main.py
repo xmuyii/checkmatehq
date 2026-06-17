@@ -92,7 +92,7 @@ def get_recent_events(event_type: str, minutes: int = 15) -> list:
     if event_type not in game_events:
         return []
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
-    return [e for e in game_events[event_type] if e.get('time', datetime.utcnow()) > cutoff]
+    return [e for e in game_events[event_type] if e.get('time', datetime.now(timezone.utc)) > cutoff]
 
 # ── Addictive Mechanics ────────────────────────────────────────────────────
 from addictive_mechanics import (
@@ -945,6 +945,7 @@ def _cmd(*names):
 # Constants
 TRIVIA_TOPIC_ID = 36623
 FUSION_TOPIC_ID = 36621
+LEADERBOARDS_TOPIC_ID = 36624  # Leaderboard announcements topic
 
 @dp.message(_cmd("trivia"))
 async def cmd_trivia(message: types.Message):
@@ -1118,20 +1119,20 @@ async def cb_credits_info(callback: types.CallbackQuery):
     await callback.answer()
     await callback.message.edit_text(
         f"💳 <b>CREDIT SYSTEM</b>\n━━━━━━━━━━━━━━━━━\n\n"
-        f"<b>Earning credits:</b>\n"
-        f"• Daily login: +50 credits\n"
-        f"• #1 on scoreboard: +50\n"
-        f"• #2: +45  •  #3: +30\n"
-        f"• #4: +20  •  #5: +10\n"
-        f"• #6-10: +5 each\n\n"
-        f"<b>Spending credits:</b>\n"
-        f"• Fusion round entry: {CREDITS_TO_PLAY} credits\n\n"
-        f"<b>Buying credits:</b>\n"
-        f"1000 credits = ₦1,000\n"
+        f"<b>Here is how you can earn credits:</b>\n\n\n"
+        f"• Daily login: Gain +50 credits\n"
+        f"• Win #1 on scoreboard: Gain +50 credits\n"
+        f"• Win #2 on scoreboard: Gain +45 credits\n"
+        f"• Win #3 on scoreboard: Gain +30 credits\n"
+        f"• Win #4 on scoreboard: Gain +20 credits\n"
+        f"• Win #5 on scoreboard: Gain +10 credits\n"
+        f"• Win #6-10 on scoreboard: Gain +5 credits each\n\n\n"
+        f"<b>Top-up Credits:</b>\n\n"
+        f"Buy 1000 credits = ₦1,000\n"
         f"Contact admin to top up.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")
+            InlineKeyboardButton(text="⬅️ Back", callback_data="menu_profile")
         ]])
     )
 
@@ -5731,7 +5732,7 @@ async def cb_menu_base(callback: types.CallbackQuery):
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏗️ Buildings", callback_data="build_menu")],
-        InlineKeyboardButton(text="🗺️ Map/Sectors",  callback_data="menu_map"),
+        [InlineKeyboardButton(text="🗺️ Map/Sectors",  callback_data="menu_map")],
         [InlineKeyboardButton(text="🛡️ Defense", callback_data="base_defense")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
     ])
@@ -9931,7 +9932,7 @@ async def hourly_leaderboard_broadcast_task(bot: Bot, chat_id: int):
                             if ns:
                                 try:
                                     from datetime import datetime as _dt
-                                    if _dt.utcnow() < _dt.fromisoformat(ns):
+                                    if datetime.now(timezone.utc) < _dt.fromisoformat(ns):
                                         name     = "🔐 Anonymous"
                                         shield_i = "🛡️"
                                 except Exception:
