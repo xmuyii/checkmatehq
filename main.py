@@ -32,6 +32,7 @@ import html as _html
 from datetime import datetime, timezone, timedelta
 import httpx
 import os
+from power_system import calculate_battle_outcome
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton
@@ -44,7 +45,7 @@ from formatting import (
 )
 # ── Trivia System ─────────────────────────────────────────────────────────
 from trivia_system import TriviaEngine, get_trivia_engine, TRIVIA_QUESTIONS, BOSS_QUESTIONS
-
+from power_system import calculate_player_power, get_power_breakdown, format_power_display
 from new_features import (
     get_shop_items,
     generate_daily_quests,
@@ -225,6 +226,16 @@ try:
     print("✅ Build system loaded")
 except Exception as e:
     print(f"⚠️  Build system failed ({e})")
+
+# ── Power System (Combat & Battle Calculations) ─────────────────────────────
+try:
+    from power_system import (
+        calculate_player_power, get_power_breakdown, format_power_display,
+        calculate_battle_outcome, get_power_tier
+    )
+    print("✅ Power system loaded")
+except Exception as e:
+    print(f"⚠️  Power system failed ({e})")
 
 # ── Weapon System (Combat & Sabotage) ────────────────────────────────────────
 try:
@@ -1366,6 +1377,31 @@ async def cmd_mystats(message: types.Message):
     except Exception as e:
         print(f"[ERROR] cmd_mystats: {e}")
         await message.answer("❌ Error retrieving stats. Try again.", parse_mode="Markdown")
+
+
+@dp.message(_cmd("power"))
+async def cmd_power(message: types.Message):
+    """Display player's power level and breakdown."""
+    u_id = str(message.from_user.id)
+    user = get_user(u_id)
+    
+    if not user:
+        await _send_unreg_sticker(message)
+        return
+    
+    try:
+        total_power = calculate_player_power(user)
+        power_tier = get_power_tier(total_power)
+        breakdown = get_power_breakdown(user)
+        
+        msg = format_power_display(user)
+        msg += f"\n{power_tier}"
+        
+        await message.answer(msg, parse_mode="Markdown")
+        
+    except Exception as e:
+        print(f"[ERROR] cmd_power: {e}")
+        await message.answer("❌ Error calculating power. Try again.", parse_mode="Markdown")
 
 
 @dp.message(_cmd("vault"))
@@ -4844,6 +4880,8 @@ async def cmd_start(message: types.Message):
     xp         = user.get("xp", 0)
     bitcoin    = user.get("bitcoin", 0)
     sector     = user.get("sector", "—")
+    totalpower = calculate_player_power(user)
+    gold       = user.get("gold", 0) 
     base_name  = user.get("base_name") or "No Base"
     shield_st  = user.get("shield_status") or "⚠️ UNPROTECTED"  # guard against None from DB
     unclaimed_raw = user.get("unclaimed_items", [])
@@ -4883,8 +4921,8 @@ async def cmd_start(message: types.Message):
         # --- 2. Dynamic Stat Lines ---
         card += format_line("👤", "Commander", username[:15], is_bold_value=True)
         card += format_line("⭐", "Level: ", str(level), is_bold_value=True)
-        card += format_line("⚔️", "Power: ", str(level), is_bold_value=True)
-        card += format_line("🗃", "Gold ", str(level), is_bold_value=True)
+        card += format_line("⚔️", "Power: ", str(totalpower), is_bold_value=True)
+        card += format_line("🗃", "Gold ", str(gold), is_bold_value=True)
         
         card += "╠═══════════════════════════╣\n"
         card += "╠═══════════════════════════╣\n"
@@ -5237,7 +5275,10 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
         await callback.answer("Session expired. Type /start", show_alert=True); return
 
     username   = _safe_name(user.get("username") or "Operative")
+    
     level      = user.get("level", 1)
+    totalpower = calculate_player_power(user)
+    gold       = user.get("gold", 0) 
     xp         = user.get("xp", 0)
     bitcoin    = user.get("bitcoin", 0)
     sector     = user.get("sector", "—")
@@ -5280,8 +5321,8 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
         # --- 2. Dynamic Stat Lines ---
         card += format_line("👤", "", username[:15], is_bold_value=True)
         card += format_line("⭐", "Level ", str(level), is_bold_value=True)
-        card += format_line("⚔️", "Power ", str(level), is_bold_value=True)
-        card += format_line("🗃", "Gold ", str(level), is_bold_value=True)
+        card += format_line("⚔️", "Power ", str(totalpower), is_bold_value=True)
+        card += format_line("🗃", "Gold ", str(gold), is_bold_value=True)
         
         card += "╠═══════════════════════════╣\n"
         card += "╠═══════════════════════════╣\n"
@@ -5859,7 +5900,7 @@ async def cb_menu_profile(callback: types.CallbackQuery):
         f"Level: {level}\n"
         f"[{xp_bar}] {xp_bar_pct}%\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"Energy level:[{energy_bar}] {energy_bar_pct}%\n"
+        f"Energy level:{energy} [{energy_bar}] {energy_bar_pct}%\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"* COMMANDER INVENTORY *\n"
         f"📊GUN:\n"
