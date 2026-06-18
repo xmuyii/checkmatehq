@@ -2752,7 +2752,7 @@ async def callback_build_menu(callback: types.CallbackQuery):
     if not user:
         await callback.answer("Not registered", show_alert=True)
         return
-    
+    buildings = user.get("buildings", {})
     xp = user.get("xp", 0)
     base_level = max(1, 1 + (xp // 1000))
     
@@ -2765,7 +2765,7 @@ async def callback_build_menu(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_base")]
     ]
     
-    msg = f"🏰 *CONSTRUCTION*\n\nBase Level: {base_level}\n\nBuildings in Progress:\n{format_building_queue_display(user)}\n\nChoose what to build:"
+    msg = f"🏰 *CONSTRUCTION*\n\nBase Level: {base_level}\n\nBuildings:\n{buildings}{format_building_queue_display(user)}\n\nChoose what to build:"
     
     await callback.message.edit_text(
         msg,
@@ -5035,6 +5035,7 @@ async def cmd_start(message: types.Message):
         
         card += "╠═══════════════════════════╣\n"
         card += "╠═══════════════════════════╣\n"
+        card += format_building_queue_display(user)
         card += format_line("📍", "Sector: ", str(sector), is_bold_value=True)
         card += format_line("📍", "Building, Research, ttraining in progress, Alliance help (1 of 9)", str(sector), is_bold_value=True)
         card += format_line("📍", "Next mission ", str(sector), is_bold_value=True)
@@ -5436,7 +5437,7 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
         card += "╠═══════════════════════════╣\n"
         card += "╠═══════════════════════════╣\n"
         card += format_line("📍", "Sector: ", str(sector), is_bold_value=True)
-        card += format_line("📍", "Building, Research, ttraining in progress, Alliance help (1 of 9)", str(sector), is_bold_value=True)
+        card += format_line({format_building_queue_display(user)})
         card += format_line("📍", "Next mission ", str(sector), is_bold_value=True)
         card += format_line("📍", "Ongoing Events- Real time counting", str(sector), is_bold_value=True)
         card += format_line("📍", "Free gift ", str(sector), is_bold_value=True)
@@ -5869,6 +5870,8 @@ async def cb_menu_base(callback: types.CallbackQuery):
         await callback.answer("User not found", show_alert=True)
         return
     
+    
+    buildings = user.get("buildings", {})
     base_name = user.get("base_name", "Unknown")
     base_level = user.get("base_level", 1)
     base_res = user.get("base_resources", {})
@@ -5891,11 +5894,8 @@ async def cb_menu_base(callback: types.CallbackQuery):
         f"🏰 *{base_name}* (Level {base_level})\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"🏘 *Buildings:*\n\n"
-        f"🪵 Wood: **{wood}**\n"
-        f"🧱 Bronze: **{bronze}**\n"
-        f"⛓️ Iron: **{iron}**\n"
-        f"💎 Diamond: **{diamond}**\n"
-        f"🌽 Food: **{food}**\n"
+        f"\n{format_building_queue_display(user)}\n\n"
+        f"{buildings}"
         f"━━━━━━━━━━━━━━━━━",
         f"━━━━━━━━━━━━━━━━━\n"
         f"*Resources:*\n"
