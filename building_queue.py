@@ -165,6 +165,7 @@ def get_building_progress(user: dict, building_id: str) -> Optional[dict]:
         "building_id": building_id,
         "target_level": build_info["target_level"],
         "total_time": total_secs,
+        "build_time_secs": total_secs,  # Backward compatibility
         "elapsed_time": elapsed,
         "remaining_time": remaining,
         "progress_pct": progress_pct,
@@ -194,8 +195,8 @@ def complete_building(user: dict, building_id: str) -> dict:
     if building_id not in queue:
         return user
     
-    build_info = queue[building_id]
-    target_level = build_info["target_level"]
+    build_info = queue.get(building_id, {})
+    target_level = build_info.get("target_level", 1)
     
     # Update buildings
     if "buildings" not in user:
@@ -204,15 +205,16 @@ def complete_building(user: dict, building_id: str) -> dict:
     user["buildings"][building_id] = target_level
     
     # Remove from queue
-    del user["building_queue"][building_id]
+    if building_id in user["building_queue"]:
+        del user["building_queue"][building_id]
     
     return user
 
 
 def format_build_progress_bar(progress: dict) -> str:
     """Format a nice progress bar for building display."""
-    pct = progress["progress_pct"]
-    remaining = progress["remaining_time"]
+    pct = progress.get("progress_pct", 0)
+    remaining = progress.get("remaining_time", 0)
     
     # Convert seconds to HH:MM:SS
     hours = int(remaining // 3600)
@@ -246,10 +248,12 @@ def format_building_queue_display(user: dict) -> str:
     
     for prog in progress_list:
         from build_system import BUILDING_TYPES
-        building = BUILDING_TYPES.get(prog["building_id"], {})
-        building_name = building.get("name", prog["building_id"].replace("_", " ").title())
+        building_id = prog.get("building_id", "unknown")
+        target_level = prog.get("target_level", 1)
+        building = BUILDING_TYPES.get(building_id, {})
+        building_name = building.get("name", building_id.replace("_", " ").title())
         
-        msg += f"{building_name} → Lv{prog['target_level']}\n"
+        msg += f"{building_name} → Lv{target_level}\n"
         msg += f"{format_build_progress_bar(prog)}\n\n"
     
     msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"

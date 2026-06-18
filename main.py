@@ -2950,7 +2950,8 @@ async def callback_build_confirm(callback: types.CallbackQuery):
     msg += f"Bonus: {building['description']}\n\n"
     
     if prog:
-        msg += f"⏱️ Build Time: {prog['build_time_secs'] // 60} minutes\n"
+        build_time = prog.get('build_time_secs') or prog.get('total_time', 0)
+        msg += f"⏱️ Build Time: {build_time // 60} minutes\n"
         msg += f"{format_build_progress_bar(prog)}\n\n"
     
     msg += "💡 You can check progress with /base command"
