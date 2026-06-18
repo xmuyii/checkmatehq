@@ -285,7 +285,8 @@ try:
     from building_queue import (
         can_build_prerequisite, start_building, get_building_progress,
         get_all_building_progress, format_build_progress_bar,
-        format_building_queue_display, complete_building, BUILDING_PREREQUISITES
+        format_building_queue_display, complete_building, BUILDING_PREREQUISITES,
+        format_completed_buildings
     )
     print("✅ Building queue system loaded")
 except Exception as e:
@@ -2765,7 +2766,9 @@ async def callback_build_menu(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_base")]
     ]
     
-    msg = f"🏰 *CONSTRUCTION*\n\nBase Level: {base_level}\n\nBuildings:\n{buildings}{format_building_queue_display(user)}\n\nChoose what to build:"
+    completed_buildings_display = format_completed_buildings(user)
+    
+    msg = f"🏰 *CONSTRUCTION*\n\nBase Level: {base_level}\n\n{completed_buildings_display}\n{format_building_queue_display(user)}\n\nChoose what to build:"
     
     await callback.message.edit_text(
         msg,
@@ -5437,7 +5440,7 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
         card += "╠═══════════════════════════╣\n"
         card += "╠═══════════════════════════╣\n"
         card += format_line("📍", "Sector: ", str(sector), is_bold_value=True)
-        card += format_line({format_building_queue_display(user)})
+        card += format_building_queue_display(user)
         card += format_line("📍", "Next mission ", str(sector), is_bold_value=True)
         card += format_line("📍", "Ongoing Events- Real time counting", str(sector), is_bold_value=True)
         card += format_line("📍", "Free gift ", str(sector), is_bold_value=True)
@@ -5457,7 +5460,8 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
     # FIX 1: Explicitly invoke the generator function using local variables
     hud_display = generate_profile_card(
         username, xp_bar, xp_bar_pct, level, bitcoin, sector, 
-        base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn
+        base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn, total_power,
+        gold,
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -5883,6 +5887,8 @@ async def cb_menu_base(callback: types.CallbackQuery):
     diamond = res.get("diamond", 0)
     food = base_res.get("food", 0)
     
+    completed_buildings_display = format_completed_buildings(user)
+    
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏗️ Buildings", callback_data="build_menu")],
         [InlineKeyboardButton(text="🗺️ Map/Sectors",  callback_data="menu_map")],
@@ -5893,10 +5899,8 @@ async def cb_menu_base(callback: types.CallbackQuery):
     await callback.message.edit_text(
         f"🏰 *{base_name}* (Level {base_level})\n\n"
         f"━━━━━━━━━━━━━━━━━\n"
-        f"🏘 *Buildings:*\n\n"
-        f"\n{format_building_queue_display(user)}\n\n"
-        f"{buildings}"
-        f"━━━━━━━━━━━━━━━━━",
+        f"{completed_buildings_display}\n"
+        f"{format_building_queue_display(user)}\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"*Resources:*\n"
         f"🪵 Wood: **{wood}**\n"

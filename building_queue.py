@@ -123,6 +123,10 @@ def start_building(building_id: str, current_level: int, user: dict) -> dict:
     Start building a structure.
     Returns updated user dict with building_queue entry.
     """
+    # Ensure buildings dict exists
+    if "buildings" not in user:
+        user["buildings"] = {}
+    
     if "building_queue" not in user:
         user["building_queue"] = {}
     
@@ -244,7 +248,7 @@ def format_building_queue_display(user: dict) -> str:
         return ""
     
     msg = "\n🏗️ *BUILDINGS IN PROGRESS*\n"
-    msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    msg += "━━━━━━━━━━━━━━━━━━\n"
     
     for prog in progress_list:
         from build_system import BUILDING_TYPES
@@ -256,5 +260,31 @@ def format_building_queue_display(user: dict) -> str:
         msg += f"{building_name} → Lv{target_level}\n"
         msg += f"{format_build_progress_bar(prog)}\n\n"
     
-    msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    msg += "━━━━━━━━━━━━━━━━━━━\n"
+    return msg
+
+
+def format_completed_buildings(user: dict) -> str:
+    """Format completed buildings with their levels for display."""
+    buildings = user.get("buildings", {})
+    
+    # Defensive: handle case where buildings is stored as JSON string
+    if isinstance(buildings, str):
+        try:
+            import json
+            buildings = json.loads(buildings)
+        except:
+            buildings = {}
+    
+    if not buildings:
+        return ""
+    
+    from build_system import BUILDING_TYPES
+    
+    msg = "🏗️ *COMPLETED BUILDINGS:*\n"
+    for building_id, level in sorted(buildings.items()):
+        building = BUILDING_TYPES.get(building_id, {})
+        building_name = building.get("name", building_id.replace("_", " ").title())
+        msg += f"  • {building_name}: **Level {level}**\n"
+    
     return msg
