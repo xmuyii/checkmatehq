@@ -96,6 +96,13 @@ def check_base_hq_upgrade(user: dict) -> bool:
     Returns True if all buildings are at next level.
     """
     current_buildings = user.get("buildings", {})
+    # Defensive: handle case where buildings is stored as JSON string
+    if isinstance(current_buildings, str):
+        try:
+            import json
+            current_buildings = json.loads(current_buildings)
+        except:
+            current_buildings = {}
     if not current_buildings:
         return False
     
@@ -103,9 +110,10 @@ def check_base_hq_upgrade(user: dict) -> bool:
     hq_level = get_base_hq_level(user)
     
     # Check if all buildings are at least hq_level + 1
-    for building_id, level in current_buildings.items():
-        if level <= hq_level:
-            return False
+    if isinstance(current_buildings, dict):
+        for building_id, level in current_buildings.items():
+            if level <= hq_level:
+                return False
     
     return True
 

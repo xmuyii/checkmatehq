@@ -32,10 +32,18 @@ def calculate_player_power(user: dict) -> int:
     
     # 2. Building Power (each building level adds power)
     buildings = user.get('buildings', {})
-    for building_id, level in buildings.items():
-        if building_id in BUILDING_TYPES:
-            # Each building level adds 50 power (500 power per max level building)
-            power += level * 50
+    # Defensive: handle case where buildings is stored as JSON string
+    if isinstance(buildings, str):
+        try:
+            import json
+            buildings = json.loads(buildings)
+        except:
+            buildings = {}
+    if isinstance(buildings, dict):
+        for building_id, level in buildings.items():
+            if building_id in BUILDING_TYPES:
+                # Each building level adds 50 power (500 power per max level building)
+                power += level * 50
     
     # 3. Military Power (troops are power)
     military = user.get('military', {})

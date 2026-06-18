@@ -113,8 +113,8 @@ def _row_to_user(row: dict) -> dict:
         elif val is None:
             u[k] = []
     
-    # Parse military, traps, buffs JSONB fields
-    for k in ('military', 'traps', 'buffs', 'weapons'):
+    # Parse military, traps, buffs, buildings, weapons JSONB fields
+    for k in ('military', 'traps', 'buffs', 'weapons', 'buildings'):
         val = u.get(k, '{}')
         if isinstance(val, str):
             try:

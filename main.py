@@ -130,6 +130,24 @@ def check_and_complete_buildings(user: dict) -> dict:
         print(f"[WARNING] Building completion check failed: {e}")
         return user
 
+
+async def safe_answer(callback, text: str = None, show_alert: bool = False) -> bool:
+    """Safely answer a callback query, handling timeout errors gracefully.
+    
+    Returns True if successful, False if query timed out.
+    """
+    try:
+        await callback.answer(text=text, show_alert=show_alert)
+        return True
+    except Exception as e:
+        if "query is too old" in str(e) or "query ID is invalid" in str(e) or "timeout" in str(e):
+            # Silently ignore timeout errors - these happen when user closes the keyboard
+            return False
+        else:
+            # Log other exceptions
+            print(f"[WARNING] Callback answer failed: {e}")
+            return False
+
 # ── Addictive Mechanics ────────────────────────────────────────────────────
 from addictive_mechanics import (
     handle_daily_login, get_combo_multiplier, increment_combo, reset_combo,
@@ -357,6 +375,19 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', CONFIG_SUPABASE_KEY)
 bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher()
 dp.include_router(initiation_router)
+
+# ── Global Error Handler for Callback Timeout Errors ────────────────────
+@dp.errors
+async def handle_telegram_errors(update, exception):
+    """Handle Telegram API errors, especially callback timeouts."""
+    error_str = str(exception)
+    
+    # Silently ignore query timeout errors (common when user closes keyboard)
+    if "query is too old" in error_str or "query ID is invalid" in error_str or "timeout" in error_str:
+        return  # Don't log these - they're normal
+    
+    # Log other errors for debugging
+    print(f"[ERROR] {type(exception).__name__}: {error_str}")
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  STICKER FILE IDs (Telegram)
@@ -2741,7 +2772,7 @@ async def callback_build_menu(callback: types.CallbackQuery):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         parse_mode="Markdown"
     )
-    await callback.answer()
+    await safe_answer(callback)
     
 
 
@@ -2751,7 +2782,7 @@ async def callback_show_buildings(callback: types.CallbackQuery):
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
-        await callback.answer("Not registered", show_alert=True)
+        await safe_answer(callback, "Not registered", show_alert=True)
         return
     
     xp = user.get("xp", 0)
@@ -2786,7 +2817,7 @@ async def callback_show_traps(callback: types.CallbackQuery):
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
-        await callback.answer("Not registered", show_alert=True)
+        await safe_answer(callback, "Not registered", show_alert=True)
         return
     
     xp = user.get("xp", 0)
@@ -2812,7 +2843,7 @@ async def callback_show_traps(callback: types.CallbackQuery):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         parse_mode="Markdown"
     )
-    await callback.answer()
+    await safe_answer(callback)
 
 
 @dp.callback_query(lambda q: q.data.startswith("build_") and not q.data.startswith("build_confirm_") and q.data != "build_menu")
@@ -2821,14 +2852,14 @@ async def callback_build_structure(callback: types.CallbackQuery):
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
-        await callback.answer("Not registered", show_alert=True)
+        await safe_answer(callback, "Not registered", show_alert=True)
         return
     
     building_id = callback.data.replace("build_", "")
     
     # Validate building exists first
     if building_id not in BUILDING_TYPES:
-        await callback.answer(f"❌ Unknown building: {building_id}", show_alert=True)
+        await safe_answer(callback, f"❌ Unknown building: {building_id}", show_alert=True)
         return
     
     xp = user.get("xp", 0)
@@ -2836,7 +2867,7 @@ async def callback_build_structure(callback: types.CallbackQuery):
     
     can_build, error = can_build_building(building_id, base_level)
     if not can_build:
-        await callback.answer(f"❌ {error}", show_alert=True)
+        await safe_answer(callback, f"❌ {error}", show_alert=True)
         return
     
     # Calculate cost
@@ -2857,7 +2888,7 @@ async def callback_build_structure(callback: types.CallbackQuery):
              InlineKeyboardButton(text="❌ Cancel", callback_data="build_menu")],
         ])
     )
-    await callback.answer()
+    await safe_answer(callback)
 
 
 @dp.callback_query(lambda q: q.data.startswith("build_confirm_"))
@@ -2866,14 +2897,14 @@ async def callback_build_confirm(callback: types.CallbackQuery):
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
-        await callback.answer("Not registered", show_alert=True)
+        await safe_answer(callback, "Not registered", show_alert=True)
         return
     
     building_id = callback.data.replace("build_confirm_", "")
     
     # Validate building exists
     if building_id not in BUILDING_TYPES:
-        await callback.answer(f"❌ Unknown building: {building_id}", show_alert=True)
+        await safe_answer(callback, f"❌ Unknown building: {building_id}", show_alert=True)
         return
     
     current_buildings = user.get("buildings", {})
@@ -2882,7 +2913,7 @@ async def callback_build_confirm(callback: types.CallbackQuery):
     # Check prerequisites
     can_prereq, prereq_error = can_build_prerequisite(building_id, current_buildings)
     if not can_prereq:
-        await callback.answer(f"❌ {prereq_error}", show_alert=True)
+        await safe_answer(callback, f"❌ {prereq_error}", show_alert=True)
         return
     
     cost = calculate_building_cost(building_id, current_level + 1)
@@ -2895,7 +2926,7 @@ async def callback_build_confirm(callback: types.CallbackQuery):
     for res_type, needed in cost.items():
         available = resources.get(res_type, 0)
         if available < needed:
-            await callback.answer(
+            await safe_answer(callback,
                 f"❌ Need {needed} {res_type.upper()}, only have {available}",
                 show_alert=True
             )
@@ -2925,7 +2956,7 @@ async def callback_build_confirm(callback: types.CallbackQuery):
     msg += "💡 You can check progress with /base command"
     
     await callback.message.edit_text(msg, parse_mode="Markdown")
-    await callback.answer()
+    await safe_answer(callback)
 
 
 @dp.callback_query(lambda q: q.data.startswith("trap_"))
@@ -2934,7 +2965,7 @@ async def callback_build_trap(callback: types.CallbackQuery):
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
-        await callback.answer("Not registered", show_alert=True)
+        await safe_answer(callback, "Not registered", show_alert=True)
         return
     
     trap_id = callback.data.replace("trap_", "")
@@ -2943,7 +2974,7 @@ async def callback_build_trap(callback: types.CallbackQuery):
     
     can_build, error = can_build_trap(trap_id, base_level)
     if not can_build:
-        await callback.answer(f"❌ {error}", show_alert=True)
+        await safe_answer(callback, f"❌ {error}", show_alert=True)
         return
     
     trap = TRAP_TYPES[trap_id]
@@ -2961,7 +2992,7 @@ async def callback_build_trap(callback: types.CallbackQuery):
              InlineKeyboardButton(text="❌ Cancel", callback_data="show_trap_list")],
         ])
     )
-    await callback.answer()
+    await safe_answer(callback)
 
 
 @dp.callback_query(lambda q: q.data.startswith("trap_confirm_"))
