@@ -189,6 +189,22 @@ BUILDING_TYPES: Dict[str, dict] = {
         "bonus": lambda lvl: {"raid_resource_protection_pct": 5 * lvl},
         "build_time_secs": lambda lvl: 120 * lvl,
     },
+        "base_hq": {
+        "name":        "🏰 Headquaters",
+        "description": "Increases your base level, unlocking more buildings and higher capacities.  "
+                       "Each level increases your base level by 1 (max 10).",
+        "category":    "military",
+        "unlock_base_level": 1,
+        "max_level":   10,
+        "cost_per_level": lambda lvl: {
+            "wood":   40  * lvl,
+            "bronze": 20  * lvl,
+        },
+        "bonus": lambda lvl: {
+            "power":  100 * lvl,
+        },
+        "build_time_secs": lambda lvl: 45 * lvl,
+    },
 }
 
 
