@@ -192,8 +192,8 @@ def save_user(user_id, data: dict):
     d.pop('shield_cooldown', None)  # Shield cooldown doesn't exist in schema
     d.pop('prestige', None)  # Prestige tier is in-memory only, not in DB
     
-    # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources, weapons)
-    for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs', 'weapons'):
+    # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources, weapons, buildings)
+    for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs', 'weapons', 'buildings'):
         if isinstance(d.get(k), (list, dict)):
             d[k] = json.dumps(d[k])
     
@@ -234,6 +234,7 @@ def register_user(user_id, username: str):
             'bitcoin': 0,
             'xp': 0,
             'energy': 1000,
+            'power': 0,
             'gold': 0,
             'level': 1,
             'last_level': 1,
@@ -1364,7 +1365,9 @@ def get_profile(user_id) -> dict | None:
         'total_words':     user.get('total_words', 0),
         'sector':          user.get('sector'),
         'energy':          user.get('energy'),
-        'gold':          user.get('gold'),
+        'power':           user.get('power'),
+        'buildings':       user.get('buildings', {}),
+        'gold':            user.get('gold'),
         'sector_display':  get_sector_display(user.get('sector')),
         'backpack_slots':  user.get('backpack_slots', 5),
         'inventory_count': len(inv),

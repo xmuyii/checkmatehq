@@ -95,6 +95,41 @@ def get_recent_events(event_type: str, minutes: int = 15) -> list:
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     return [e for e in game_events[event_type] if e.get('time', datetime.now(timezone.utc)) > cutoff]
 
+
+def check_and_complete_buildings(user: dict) -> dict:
+    """Check building queue and complete any finished buildings.
+    
+    Returns modified user dict with completed buildings.
+    """
+    try:
+        building_queue = user.get('building_queue', {})
+        if not building_queue:
+            return user
+        
+        now = datetime.utcnow()
+        completed = []
+        
+        for building_id, queue_data in list(building_queue.items()):
+            if isinstance(queue_data, dict) and 'completion_time' in queue_data:
+                completion_time = queue_data['completion_time']
+                
+                # Handle ISO format string
+                if isinstance(completion_time, str):
+                    try:
+                        completion_time = datetime.fromisoformat(completion_time.replace('Z', '+00:00'))
+                    except:
+                        continue
+                
+                if completion_time <= now:
+                    # Complete this building
+                    user = complete_building(user, building_id)
+                    completed.append(building_id)
+        
+        return user
+    except Exception as e:
+        print(f"[WARNING] Building completion check failed: {e}")
+        return user
+
 # ── Addictive Mechanics ────────────────────────────────────────────────────
 from addictive_mechanics import (
     handle_daily_login, get_combo_multiplier, increment_combo, reset_combo,
@@ -226,6 +261,17 @@ try:
     print("✅ Build system loaded")
 except Exception as e:
     print(f"⚠️  Build system failed ({e})")
+
+# ── Building Queue System (Timers & Progression) ──────────────────────────────
+try:
+    from building_queue import (
+        can_build_prerequisite, start_building, get_building_progress,
+        get_all_building_progress, format_build_progress_bar,
+        format_building_queue_display, complete_building, BUILDING_PREREQUISITES
+    )
+    print("✅ Building queue system loaded")
+except Exception as e:
+    print(f"⚠️  Building queue system failed ({e})")
 
 # ── Power System (Combat & Battle Calculations) ─────────────────────────────
 try:
@@ -2688,7 +2734,7 @@ async def callback_build_menu(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_base")]
     ]
     
-    msg = f"🏰 *CONSTRUCTION*\n\nBase Level: {base_level}\n\nChoose what to build:"
+    msg = f"🏰 *CONSTRUCTION*\n\nBase Level: {base_level}\n\nBuildings in Progress:\n{format_building_queue_display(user)}\n\nChoose what to build:"
     
     await callback.message.edit_text(
         msg,
@@ -2816,7 +2862,7 @@ async def callback_build_structure(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda q: q.data.startswith("build_confirm_"))
 async def callback_build_confirm(callback: types.CallbackQuery):
-    """Confirm and execute building."""
+    """Confirm and start building with timer."""
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
@@ -2832,6 +2878,13 @@ async def callback_build_confirm(callback: types.CallbackQuery):
     
     current_buildings = user.get("buildings", {})
     current_level = current_buildings.get(building_id, 0)
+    
+    # Check prerequisites
+    can_prereq, prereq_error = can_build_prerequisite(building_id, current_buildings)
+    if not can_prereq:
+        await callback.answer(f"❌ {prereq_error}", show_alert=True)
+        return
+    
     cost = calculate_building_cost(building_id, current_level + 1)
     
     # Get base resources
@@ -2848,20 +2901,30 @@ async def callback_build_confirm(callback: types.CallbackQuery):
             )
             return
     
-    # Deduct and build
+    # Deduct resources
     for res_type, needed in cost.items():
         resources[res_type] -= needed
     
-    current_buildings[building_id] = current_level + 1
-    user["buildings"] = current_buildings
+    # Start building (don't complete instantly)
+    user = start_building(building_id, current_level, user)
+    
     save_user(u_id, user)
     
+    # Get progress info
+    prog = get_building_progress(user, building_id)
     building = BUILDING_TYPES[building_id]
-    await callback.message.edit_text(
-        f"✅ *{building['name']}* BUILT!\n\n"
-        f"Level: {current_level + 1}\n"
-        f"Bonus: {building['description']}"
-    )
+    
+    msg = f"🏗️ *{building['name']}* — CONSTRUCTION STARTED!\n\n"
+    msg += f"Level: {current_level + 1}\n"
+    msg += f"Bonus: {building['description']}\n\n"
+    
+    if prog:
+        msg += f"⏱️ Build Time: {prog['build_time_secs'] // 60} minutes\n"
+        msg += f"{format_build_progress_bar(prog)}\n\n"
+    
+    msg += "💡 You can check progress with /base command"
+    
+    await callback.message.edit_text(msg, parse_mode="Markdown")
     await callback.answer()
 
 
@@ -3816,6 +3879,10 @@ async def cmd_base(message: types.Message):
     if not user:
         await _send_unreg_sticker(message); return
     
+    # Check and complete any finished buildings
+    user = check_and_complete_buildings(user)
+    save_user(u_id, user)
+    
     if not user.get("base_name"):
         await message.answer("🃏 *GameMaster:* \"You haven't claimed a base. Use `!setup_base [Name]`\"", parse_mode="Markdown"); return
     
@@ -3901,6 +3968,9 @@ async def cmd_base(message: types.Message):
     # Get sector
     sector = user.get("sector", "Unknown")
     
+    # Get building progress info
+    building_queue_display = format_building_queue_display(user)
+    
     # Build comprehensive base info with dynamic formatting
     info = (
         f"{divider()}\n"
@@ -3909,6 +3979,13 @@ async def cmd_base(message: types.Message):
         f"⚡️ POWER: {total_power} | 🎖️ WAR POINTS: {war_points}\n"
         f"📍 SECTOR: {sector}\n\n"
         f"{divider()}\n\n"
+    )
+    
+    # Add building progress if there are active constructions
+    if building_queue_display:
+        info += f"🏗️ *CONSTRUCTION IN PROGRESS*\n{building_queue_display}\n\n"
+    
+    info += (
         f"🪵 *RESOURCES*\n"
         f"├─ 🌲 Wood: *{resources.get('wood', 0)}*\n"
         f"├─ 🧱 Bronze: *{resources.get('bronze', 0)}*\n"
@@ -5331,7 +5408,7 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
         card += format_line("📍", "Next mission ", str(sector), is_bold_value=True)
         card += format_line("📍", "Ongoing Events- Real time counting", str(sector), is_bold_value=True)
         card += format_line("📍", "Free gift ", str(sector), is_bold_value=True)
-        card += format_line("🏰", "", base_name[:15], is_bold_value=True)
+        card += format_line("🏰", "", base_name[:16], is_bold_value=True)
         card += format_line(shield_icon, "Shield: ", str(shield_st), is_bold_value=True)
         card += format_line("🎒", "Inv: ", f"{inv_count}/{inv_slots}", is_bold_value=True)
         
