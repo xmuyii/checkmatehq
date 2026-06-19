@@ -5919,8 +5919,8 @@ async def cb_menu_base(callback: types.CallbackQuery):
     completed_buildings_display = format_completed_buildings(user)
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
-       [[InlineKeyboardButton(text="🏗️ Buildings", callback_data="building_menu")],
-        [InlineKeyboardButton(text="🏗️ Build", callback_data="build_menu")]],
+       [InlineKeyboardButton(text="🏗️ Buildings", callback_data="building_menu"),
+        InlineKeyboardButton(text="🏗️ Build", callback_data="build_menu")],
         [InlineKeyboardButton(text="🗺️ Map/Sectors",  callback_data="menu_map")],
         [InlineKeyboardButton(text="🛡️ Defense", callback_data="base_defense")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
