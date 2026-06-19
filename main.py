@@ -5526,9 +5526,8 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
     # FIX 2: Wrap the generated string in monospace pre tags
     formatted_message = f"<pre>{hud_display}</pre>"
 
-    # FIX 3: Deliver utilizing the correct chat identifier payload (u_id)
-    await bot.send_message(
-        chat_id=u_id, 
+    # FIX 3: Edit the existing message instead of sending a new one
+    await callback.message.edit_text(
         text=formatted_message, 
         parse_mode="HTML",
         reply_markup=kb
