@@ -5,7 +5,7 @@ Manages building construction timers, prerequisites, and progress.
 Buildings take time to build and show progress on user interface.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Tuple
 import json
 
@@ -74,7 +74,7 @@ def can_build_prerequisite(building_id: str, current_buildings: dict) -> Tuple[b
     for prereq in prerequisites:
         if prereq == "base_hq":
             # Base HQ must exist (level 1+)
-            if current_buildings.get("base_hq", 0) < 1:
+            if current_buildings.get("base_hq", 1) < 1:
                 return False, f"Requires Base HQ to be built"
         else:
             # Other buildings must be at same level or built
@@ -86,7 +86,7 @@ def can_build_prerequisite(building_id: str, current_buildings: dict) -> Tuple[b
 
 def get_base_hq_level(user: dict) -> int:
     """Get the Base HQ level (upgraded by building all structures to that level)."""
-    return user.get("base_hq_level", 0)
+    return user.get("base_hq_level", 1)
 
 
 def check_base_hq_upgrade(user: dict) -> bool:
@@ -142,12 +142,11 @@ def start_building(building_id: str, current_level: int, user: dict) -> dict:
             user["building_queue"] = {}
     
     build_time_secs = BUILD_TIMES.get(building_id, 300)  # Default 5 min
-    completion_time = (datetime.utcnow() + timedelta(seconds=build_time_secs)).isoformat()
-    
+    completion_time = datetime.now(timezone.utc) + timedelta(seconds=build_time_secs).isoformat()
     user["building_queue"][building_id] = {
         "target_level": current_level + 1,
         "completion_time": completion_time,
-        "started_at": datetime.utcnow().isoformat(),
+        "started_at": datetime.now(timezone.utc),
         "build_time_secs": build_time_secs,
     }
     
@@ -166,7 +165,7 @@ def get_building_progress(user: dict, building_id: str) -> Optional[dict]:
     build_info = queue[building_id]
     completion_time_str = build_info["completion_time"]
     completion_time = datetime.fromisoformat(completion_time_str)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     if now >= completion_time:
         return None  # Already complete

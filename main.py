@@ -2819,11 +2819,10 @@ async def callback_show_buildings(callback: types.CallbackQuery):
         await safe_answer(callback, "Not registered", show_alert=True)
         return
     
-    xp = user.get("xp", 0)
-    base_level = max(1, 1 + (xp // 1000))
+    base_hq_level = user.get("base_hq_level", 1)
     current_buildings = user.get("buildings", {})
     
-    available = get_available_buildings(base_level)
+    available = get_available_buildings(base_hq_level)
     
     # Create buttons for each building
     keyboard = []
@@ -2835,7 +2834,7 @@ async def callback_show_buildings(callback: types.CallbackQuery):
         )
         keyboard.append([button])
     keyboard.append([InlineKeyboardButton(text="⬅️ Back", callback_data="build_menu")])
-    msg = f"🏰 *AVAILABLE BUILDINGS* (Level {base_level})\n\nSelect to build:"
+    msg = f"🏰 *AVAILABLE BUILDINGS* (Level {base_hq_level})\n\nSelect to build:"
     
     await callback.message.edit_text(
         msg,
@@ -2989,9 +2988,15 @@ async def callback_build_confirm(callback: types.CallbackQuery):
         msg += f"{format_build_progress_bar(prog)}\n\n"
     
     msg += "💡 You can check progress with /base command"
+    keyboard = [
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_base")]
+    ]
     
-    await callback.message.edit_text(msg, parse_mode="Markdown")
+    await callback.message.edit_text(msg,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode="Markdown"
     await safe_answer(callback)
+    
 
 
 @dp.callback_query(lambda q: q.data.startswith("trap_"))

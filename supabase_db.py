@@ -245,7 +245,7 @@ def register_user(user_id, username: str):
             'sector': None,
             'completed_tutorial': False,
             'base_name': random_base_name,
-            'base_hq_level': 0,
+            'base_hq_level': 1,
             'buildings': json.dumps({}),
             'building_queue': json.dumps({}),
             'base_resources': json.dumps({
