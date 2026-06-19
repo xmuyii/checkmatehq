@@ -212,6 +212,12 @@ def complete_building(user: dict, building_id: str) -> dict:
     if building_id in user["building_queue"]:
         del user["building_queue"][building_id]
     
+    # Check if Base HQ should be upgraded
+    # Base HQ level = minimum level of all buildings
+    if check_base_hq_upgrade(user):
+        current_hq_level = get_base_hq_level(user)
+        user["base_hq_level"] = current_hq_level + 1
+    
     return user
 
 

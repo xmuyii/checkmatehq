@@ -4992,7 +4992,7 @@ async def cmd_start(message: types.Message):
     xp         = user.get("xp", 0)
     bitcoin    = user.get("bitcoin", 0)
     sector     = user.get("sector", "—")
-    totalpower = calculate_player_power(user)
+    total_power = calculate_player_power(user)
     gold       = user.get("gold", 0) 
     base_name  = user.get("base_name") or "No Base"
     shield_st  = user.get("shield_status") or "⚠️ UNPROTECTED"  # guard against None from DB
@@ -5033,7 +5033,7 @@ async def cmd_start(message: types.Message):
         # --- 2. Dynamic Stat Lines ---
         card += format_line("👤", "Commander", username[:15], is_bold_value=True)
         card += format_line("⭐", "Level: ", str(level), is_bold_value=True)
-        card += format_line("⚔️", "Power: ", str(totalpower), is_bold_value=True)
+        card += format_line("⚔️", "Power: ", str(total_power), is_bold_value=True)
         card += format_line("🗃", "Gold ", str(gold), is_bold_value=True)
         
         card += "╠═══════════════════════════╣\n"
@@ -5390,7 +5390,7 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
     username   = _safe_name(user.get("username") or "Operative")
     
     level      = user.get("level", 1)
-    totalpower = calculate_player_power(user)
+    total_power = calculate_player_power(user)
     gold       = user.get("gold", 0) 
     xp         = user.get("xp", 0)
     bitcoin    = user.get("bitcoin", 0)
@@ -5409,7 +5409,7 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
     shield_icon = "🛡️" if "ACTIVE" in shield_st else ("💥" if "DISRUPTED" in shield_st else "⚠️")
     claims_warn = f"⚡ <b>{unclaimed} UNCLAIMED</b>" if unclaimed > 0 else ""
 
-    def generate_profile_card(username, xp_bar, xp_bar_pct, level, bitcoin, sector, base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn):
+    def generate_profile_card(username, xp_bar, xp_bar_pct, level, bitcoin, sector, base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn, total_power, gold):
         # The clean inner width of the card box (excluding the '║  ' and '  ║')
         INNER_WIDTH = 25 
         
@@ -5434,7 +5434,7 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
         # --- 2. Dynamic Stat Lines ---
         card += format_line("👤", "", username[:15], is_bold_value=True)
         card += format_line("⭐", "Level ", str(level), is_bold_value=True)
-        card += format_line("⚔️", "Power ", str(totalpower), is_bold_value=True)
+        card += format_line("⚔️", "Power ", str(total_power), is_bold_value=True)
         card += format_line("🗃", "Gold ", str(gold), is_bold_value=True)
         
         card += "╠═══════════════════════════╣\n"

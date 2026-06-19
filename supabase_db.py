@@ -114,7 +114,7 @@ def _row_to_user(row: dict) -> dict:
             u[k] = []
     
     # Parse military, traps, buffs, buildings, weapons JSONB fields
-    for k in ('military', 'traps', 'buffs', 'weapons', 'buildings'):
+    for k in ('military', 'traps', 'buffs', 'weapons', 'buildings', 'building_queue'):
         val = u.get(k, '{}')
         if isinstance(val, str):
             try:
@@ -192,8 +192,8 @@ def save_user(user_id, data: dict):
     d.pop('shield_cooldown', None)  # Shield cooldown doesn't exist in schema
     d.pop('prestige', None)  # Prestige tier is in-memory only, not in DB
     
-    # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources, weapons, buildings)
-    for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs', 'weapons', 'buildings'):
+    # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources, weapons, buildings, building_queue)
+    for k in ('inventory', 'unclaimed_items', 'military', 'traps', 'buffs', 'weapons', 'buildings', 'building_queue'):
         if isinstance(d.get(k), (list, dict)):
             d[k] = json.dumps(d[k])
     
@@ -245,6 +245,9 @@ def register_user(user_id, username: str):
             'sector': None,
             'completed_tutorial': False,
             'base_name': random_base_name,
+            'base_hq_level': 0,
+            'buildings': json.dumps({}),
+            'building_queue': json.dumps({}),
             'base_resources': json.dumps({
                 'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0, 'incubus': 0},
                 'food': 0,
