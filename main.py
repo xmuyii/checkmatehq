@@ -2994,7 +2994,7 @@ async def callback_build_confirm(callback: types.CallbackQuery):
     
     await callback.message.edit_text(msg,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
-        parse_mode="Markdown"
+        parse_mode="Markdown")
     await safe_answer(callback)
     
 
