@@ -2777,7 +2777,38 @@ async def callback_build_menu(callback: types.CallbackQuery):
     )
     await safe_answer(callback)
     
-
+@dp.callback_query(lambda q: q.data == "building_menu")
+async def callback_build_menu(callback: types.CallbackQuery):
+    """Show building/trap menu with inline select."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered", show_alert=True)
+        return
+    buildings = user.get("buildings", {})
+    xp = user.get("xp", 0)
+    base_level = max(1, 1 + (xp // 1000))
+    
+    available_buildings = get_available_buildings(base_level)
+    available_traps = get_available_traps(base_level)
+    
+    keyboard = [
+        [InlineKeyboardButton(text="🧬 Research Lab", callback_data="menu_research"),
+         InlineKeyboardButton(text="🔱 Build Trap", callback_data="show_trap_list")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_base")]
+    ]
+    
+    completed_buildings_display = format_completed_buildings(user)
+    
+    msg = f"🏰 *CONSTRUCTION*\n\nBase Level: {base_level}\n\n{completed_buildings_display}\n{format_building_queue_display(user)}\n\nChoose what to build:"
+    
+    await callback.message.edit_text(
+        msg,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
+        parse_mode="Markdown"
+    )
+    await safe_answer(callback)
+    
 
 @dp.callback_query(lambda q: q.data == "show_building_list")
 async def callback_show_buildings(callback: types.CallbackQuery):
@@ -5031,10 +5062,10 @@ async def cmd_start(message: types.Message):
         card += "╠═══════════════════════════╣\n"
 
         # --- 2. Dynamic Stat Lines ---
-        card += format_line("👤", "Commander", username[:15], is_bold_value=True)
+        card += format_line("👤", "Commander: ", username[:15], is_bold_value=True)
         card += format_line("⭐", "Level: ", str(level), is_bold_value=True)
         card += format_line("⚔️", "Power: ", str(total_power), is_bold_value=True)
-        card += format_line("🗃", "Gold ", str(gold), is_bold_value=True)
+        card += format_line("🗃", "Gold: ", str(gold), is_bold_value=True)
         
         card += "╠═══════════════════════════╣\n"
         card += "╠═══════════════════════════╣\n"
@@ -5079,7 +5110,6 @@ async def cmd_start(message: types.Message):
             InlineKeyboardButton(text="🏆 Leaderboards", callback_data="menu_leaderboards"),
         ],
         [
-            InlineKeyboardButton(text="🧬 Research Lab", callback_data="menu_research"),
             InlineKeyboardButton(text="⚙️ Account",      callback_data="menu_account"),
         ],
         [
@@ -5432,10 +5462,10 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
         card += "╠═══════════════════════════╣\n"
 
         # --- 2. Dynamic Stat Lines ---
-        card += format_line("👤", "", username[:15], is_bold_value=True)
-        card += format_line("⭐", "Level ", str(level), is_bold_value=True)
-        card += format_line("⚔️", "Power ", str(total_power), is_bold_value=True)
-        card += format_line("🗃", "Gold ", str(gold), is_bold_value=True)
+        card += format_line("👤", "Commander: ", username[:15], is_bold_value=True)
+        card += format_line("⭐", "Level: ", str(level), is_bold_value=True)
+        card += format_line("⚔️", "Power: ", str(total_power), is_bold_value=True)
+        card += format_line("🗃", "Gold: ", str(gold), is_bold_value=True)
         
         card += "╠═══════════════════════════╣\n"
         card += "╠═══════════════════════════╣\n"
@@ -5480,7 +5510,6 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
             InlineKeyboardButton(text="🏆 Leaderboards", callback_data="menu_leaderboards"),
         ],
         [
-            InlineKeyboardButton(text="🧬 Research Lab", callback_data="menu_research"),
             InlineKeyboardButton(text="⚙️ Account",      callback_data="menu_account"),
         ],
         [
@@ -5890,7 +5919,8 @@ async def cb_menu_base(callback: types.CallbackQuery):
     completed_buildings_display = format_completed_buildings(user)
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏗️ Buildings", callback_data="build_menu")],
+       [[InlineKeyboardButton(text="🏗️ Buildings", callback_data="building_menu")],
+        [InlineKeyboardButton(text="🏗️ Build", callback_data="build_menu")]],
         [InlineKeyboardButton(text="🗺️ Map/Sectors",  callback_data="menu_map")],
         [InlineKeyboardButton(text="🛡️ Defense", callback_data="base_defense")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],

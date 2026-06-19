@@ -99,10 +99,10 @@ def check_base_hq_upgrade(user: dict) -> bool:
     # Defensive: handle case where buildings is stored as JSON string
     if isinstance(current_buildings, str):
         try:
-            import json
             current_buildings = json.loads(current_buildings)
         except:
             current_buildings = {}
+    
     if not current_buildings:
         return False
     
@@ -123,12 +123,23 @@ def start_building(building_id: str, current_level: int, user: dict) -> dict:
     Start building a structure.
     Returns updated user dict with building_queue entry.
     """
-    # Ensure buildings dict exists
+    # Ensure buildings dict exists and is a dict (not JSON string)
     if "buildings" not in user:
         user["buildings"] = {}
+    elif isinstance(user["buildings"], str):
+        try:
+            user["buildings"] = json.loads(user["buildings"])
+        except:
+            user["buildings"] = {}
     
+    # Ensure building_queue dict exists and is a dict (not JSON string)
     if "building_queue" not in user:
         user["building_queue"] = {}
+    elif isinstance(user["building_queue"], str):
+        try:
+            user["building_queue"] = json.loads(user["building_queue"])
+        except:
+            user["building_queue"] = {}
     
     build_time_secs = BUILD_TIMES.get(building_id, 300)  # Default 5 min
     completion_time = (datetime.utcnow() + timedelta(seconds=build_time_secs)).isoformat()
@@ -195,7 +206,24 @@ def complete_building(user: dict, building_id: str) -> dict:
     Complete a building construction.
     Returns updated user dict, or unchanged user if not building.
     """
+    # Ensure buildings dict is a dict (not JSON string)
+    buildings = user.get("buildings", {})
+    if isinstance(buildings, str):
+        try:
+            buildings = json.loads(buildings)
+        except:
+            buildings = {}
+    user["buildings"] = buildings
+    
+    # Ensure building_queue dict is a dict (not JSON string)
     queue = user.get("building_queue", {})
+    if isinstance(queue, str):
+        try:
+            queue = json.loads(queue)
+        except:
+            queue = {}
+    user["building_queue"] = queue
+    
     if building_id not in queue:
         return user
     
@@ -203,14 +231,11 @@ def complete_building(user: dict, building_id: str) -> dict:
     target_level = build_info.get("target_level", 1)
     
     # Update buildings
-    if "buildings" not in user:
-        user["buildings"] = {}
-    
-    user["buildings"][building_id] = target_level
+    buildings[building_id] = target_level
     
     # Remove from queue
-    if building_id in user["building_queue"]:
-        del user["building_queue"][building_id]
+    if building_id in queue:
+        del queue[building_id]
     
     # Check if Base HQ should be upgraded
     # Base HQ level = minimum level of all buildings
