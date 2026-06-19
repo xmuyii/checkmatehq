@@ -142,11 +142,11 @@ def start_building(building_id: str, current_level: int, user: dict) -> dict:
             user["building_queue"] = {}
     
     build_time_secs = BUILD_TIMES.get(building_id, 300)  # Default 5 min
-    completion_time = datetime.now(timezone.utc) + timedelta(seconds=build_time_secs).isoformat()
+    completion_time = (datetime.utcnow() + timedelta(seconds=build_time_secs)).isoformat()
     user["building_queue"][building_id] = {
         "target_level": current_level + 1,
         "completion_time": completion_time,
-        "started_at": datetime.now(timezone.utc),
+        "started_at": datetime.utcnow().isoformat(),
         "build_time_secs": build_time_secs,
     }
     
@@ -165,7 +165,7 @@ def get_building_progress(user: dict, building_id: str) -> Optional[dict]:
     build_info = queue[building_id]
     completion_time_str = build_info["completion_time"]
     completion_time = datetime.fromisoformat(completion_time_str)
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     
     if now >= completion_time:
         return None  # Already complete
