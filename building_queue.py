@@ -165,13 +165,18 @@ def get_building_progress(user: dict, building_id: str) -> Optional[dict]:
     build_info = queue[building_id]
     completion_time_str = build_info["completion_time"]
     completion_time = datetime.fromisoformat(completion_time_str)
+    if completion_time.tzinfo is None:
+        completion_time = completion_time.replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
     
     if now >= completion_time:
         return None  # Already complete
     
     total_secs = build_info["build_time_secs"]
-    elapsed = (now - datetime.fromisoformat(build_info["started_at"])).total_seconds()
+    started_at = datetime.fromisoformat(build_info["started_at"])
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=timezone.utc)
+    elapsed = (now - started_at).total_seconds()
     remaining = total_secs - elapsed
     progress_pct = (elapsed / total_secs) * 100 if total_secs > 0 else 0
     
