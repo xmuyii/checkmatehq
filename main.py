@@ -2202,7 +2202,7 @@ async def cmd_tutorial(message: types.Message):
 4 letters = 🪵 Wood
 5 letters = 🧱 Bronze  
 6 letters = ⛓️ Iron
-7 letters = 💎 Diamond
+7 letters = 💎 Stone
 8+ letters = 🏺 Relics
 
 **CHESS:**
@@ -2736,9 +2736,9 @@ async def callback_train_menu(callback: types.CallbackQuery):
             [InlineKeyboardButton(text="👹 Police and Dogs (5 wood)", callback_data="train_pawn"),
              InlineKeyboardButton(text="🗡️ Knights (15 wood + 5 bronze)", callback_data="train_knight")],
             [InlineKeyboardButton(text="⚜️ Bishops (10 bronze + 3 iron)", callback_data="train_bishop"),
-             InlineKeyboardButton(text="🏰 Rooks (10 iron + 2 diamond)", callback_data="train_rook")],
-            [InlineKeyboardButton(text="👑 Queens (20 iron + 5 diamond)", callback_data="train_queen"),
-             InlineKeyboardButton(text="⚔️ Kings (15 diamond + 1 relic)", callback_data="train_king")],
+             InlineKeyboardButton(text="🏰 Rooks (10 iron + 2 stone)", callback_data="train_rook")],
+            [InlineKeyboardButton(text="👑 Queens (20 iron + 5 stone)", callback_data="train_queen"),
+             InlineKeyboardButton(text="⚔️ Kings (15 stone + 1 relic)", callback_data="train_king")],
         ]),
         parse_mode="Markdown"
     )
@@ -3647,7 +3647,7 @@ async def cmd_setup_base(message: types.Message):
     user["alliance_id"] = None
     
     # Starting resources vary by sector
-    base_resources_template = {"wood": 20, "bronze": 10, "iron": 0, "diamond": 0, "relics": 0, "incubus": 0}
+    base_resources_template = {"wood": 20, "bronze": 10, "iron": 0, "stone": 0, "relics": 0, "incubus": 0}
     
     # Sector bonuses (theme-based resource distribution)
     sector_bonuses = {
@@ -3657,9 +3657,9 @@ async def cmd_setup_base(message: types.Message):
         4: {"bronze": 15},  # Balanced
         5: {"iron": 5},     # Rare iron
         6: {"iron": 5},     # Rare iron
-        7: {"diamond": 2},  # Very rare diamond
+        7: {"stone": 2},  # Very rare stone
         8: {"bronze": 20},  # Balanced
-        9: {"diamond": 3},  # Void sector has rarest
+        9: {"stone": 3},  # Void sector has rarest
     }
     
     # Apply sector bonus
@@ -3793,7 +3793,7 @@ async def cmd_research_lab(message: types.Message):
         "resource_extraction": {
             "name": "🪓 Deep Mining",
             "desc": "Resource gathering yield increased by 50%",
-            "cost": {"diamond": 20, "wood": 200},
+            "cost": {"stone": 20, "wood": 200},
             "bonus": {"resource_yield": 0.50}
         },
         "population_growth": {
@@ -3805,7 +3805,7 @@ async def cmd_research_lab(message: types.Message):
         "trap_efficiency": {
             "name": "🔩 Trap Mastery",
             "desc": "Traps deal 60% more damage to invaders",
-            "cost": {"iron": 150, "diamond": 25},
+            "cost": {"iron": 150, "stone": 25},
             "bonus": {"trap_damage": 0.60}
         }
     }
@@ -4061,7 +4061,7 @@ async def cmd_base(message: types.Message):
         f"├─ 🌲 Wood: *{resources.get('wood', 0)}*\n"
         f"├─ 🧱 Bronze: *{resources.get('bronze', 0)}*\n"
         f"├─ ⛓️ Iron: *{resources.get('iron', 0)}*\n"
-        f"├─ 💎 Diamond: *{resources.get('diamond', 0)}*\n"
+        f"├─ 💎 Stone: *{resources.get('stone', 0)}*\n"
         f"├─ 🏺 Relics: *{resources.get('relics', 0)}*\n"
         f"└─ 🌽 Food: *{food}*\n\n"
         f"⚔️ *MILITARY* ({total_troops} troops)\n"
@@ -4818,7 +4818,7 @@ async def cmd_fake_stats(message: types.Message):
             "wood": wood,
             "bronze": bronze,
             "iron": iron,
-            "diamond": 0,
+            "stone": 0,
             "relics": 0
         },
         "deception_chance": 0.85  # 85% of scouts see fake stats
@@ -5907,6 +5907,9 @@ async def cb_menu_base(callback: types.CallbackQuery):
         await callback.answer("User not found", show_alert=True)
         return
     
+    # Check and complete any finished buildings
+    user = check_and_complete_buildings(user)
+    save_user(u_id, user)
     
     buildings = user.get("buildings", {})
     base_name = user.get("base_name", "Unknown")
@@ -5917,7 +5920,7 @@ async def cb_menu_base(callback: types.CallbackQuery):
     wood = res.get("wood", 0)
     bronze = res.get("bronze", 0)
     iron = res.get("iron", 0)
-    diamond = res.get("diamond", 0)
+    stone = res.get("stone", 0)
     food = base_res.get("food", 0)
     
     completed_buildings_display = format_completed_buildings(user)
@@ -5940,7 +5943,7 @@ async def cb_menu_base(callback: types.CallbackQuery):
         f"🪵 Wood: **{wood}**\n"
         f"🧱 Bronze: **{bronze}**\n"
         f"⛓️ Iron: **{iron}**\n"
-        f"💎 Diamond: **{diamond}**\n"
+        f"💎 Stone: **{stone}**\n"
         f"🌽 Food: **{food}**\n"
         f"━━━━━━━━━━━━━━━━━",
         parse_mode="Markdown",
@@ -5965,7 +5968,7 @@ async def cb_menu_resources(callback: types.CallbackQuery):
     woods = res.get("wood", 0)
     bronze = res.get("bronze", 0)
     iron = res.get("iron", 0)
-    diamond = res.get("diamond", 0)
+    stone = res.get("stone", 0)
     relics = res.get("relics", 0)
     food = base_res.get("food", 0)
     streak = base_res.get("current_streak", 0)
@@ -5982,7 +5985,7 @@ async def cb_menu_resources(callback: types.CallbackQuery):
         f"🪵 Wood: **{woods}**\n"
         f"🧱 Bronze: **{bronze}**\n"
         f"⛓️ Iron: **{iron}**\n"
-        f"💎 Diamond: **{diamond}**\n"
+        f"💎 Stone: **{stone}**\n"
         f"🏺 Relics: **{relics}**\n\n"
         f"*Supplies:*\n"
         f"🌽 Food: **{food}**\n"
@@ -6283,7 +6286,7 @@ async def cb_shop_weapons(callback: types.CallbackQuery):
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚔️ Iron Sword - 300₿₿", callback_data="buy_weapon_sword")],
         [InlineKeyboardButton(text="🏹 Bronze Bow - 600₿₿", callback_data="buy_weapon_bow")],
-        [InlineKeyboardButton(text="💣 Diamond Bomb - 2000₿₿", callback_data="buy_weapon_bomb")],
+        [InlineKeyboardButton(text="💣 Stone Bomb - 2000₿₿", callback_data="buy_weapon_bomb")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_shop")],
     ])
     
@@ -6331,7 +6334,7 @@ async def cb_purchase(callback: types.CallbackQuery):
     costs = {
         "shield_iron": 500,
         "shield_bronze": 1000,
-        "shield_diamond": 5000,
+        "shield_stone": 5000,
         "weapon_sword": 300,
         "weapon_bow": 600,
         "weapon_bomb": 2000,
@@ -6548,7 +6551,7 @@ async def cb_account_reset_confirm(callback: types.CallbackQuery):
         "shield_status" : "🛡️ ACTIVE",
         "unclaimed_items" : {},
         "base_resources": {
-            "resources": {"wood": 100, "bronze": 50, "iron": 25, "diamond": 10, "relics": 0},
+            "resources": {"wood": 100, "bronze": 50, "iron": 25, "stone": 10, "relics": 0},
             "food": 100,
             "current_streak": 0
         },
@@ -6700,7 +6703,7 @@ async def cb_inv_open(callback: types.CallbackQuery):
         return
     
     # Simulate crate opening
-    rewards = ["Wood x50", "Bronze x25", "Diamond x5", "Bitcoin x100"]
+    rewards = ["Wood x50", "Bronze x25", "Stone x5", "Bitcoin x100"]
     reward = rewards[int(time.time()) % len(rewards)]
     
     await callback.answer(f"🎁 You got: {reward}!", show_alert=True)
@@ -6892,7 +6895,7 @@ def get_shop_items():
         "wood": {"name": "🌲 Wood", "price": 10, "category": "resource"},
         "bronze": {"name": "🧱 Bronze", "price": 20, "category": "resource"},
         "iron": {"name": "⛓️ Iron", "price": 50, "category": "resource"},
-        "diamond": {"name": "💎 Diamond", "price": 100, "category": "resource"},
+        "stone": {"name": "💎 Stone", "price": 100, "category": "resource"},
         
         # SHIELDS
         "basic_shield": {"name": "🛡️ Basic Shield", "price": 500, "category": "shield", "effect": "10% damage reduction"},
@@ -7161,13 +7164,13 @@ async def cmd_mine(message: types.Message):
     sector_info = {
         1: {"name": "Badlands-8", "resources": ["wood", "bronze"], "min_troops": 5},
         2: {"name": "Crimson Wastes", "resources": ["bronze", "iron"], "min_troops": 10},
-        3: {"name": "Obsidian Peaks", "resources": ["iron", "diamond"], "min_troops": 15},
+        3: {"name": "Obsidian Peaks", "resources": ["iron", "stone"], "min_troops": 15},
         4: {"name": "Shattered Valley", "resources": ["bronze", "wood", "iron"], "min_troops": 8},
-        5: {"name": "Frozen Abyss", "resources": ["iron", "diamond"], "min_troops": 20},
-        6: {"name": "Molten Gorge", "resources": ["diamond", "relics"], "min_troops": 25},
+        5: {"name": "Frozen Abyss", "resources": ["iron", "stone"], "min_troops": 20},
+        6: {"name": "Molten Gorge", "resources": ["stone", "relics"], "min_troops": 25},
         7: {"name": "Twilight Marshes", "resources": ["wood", "relics"], "min_troops": 18},
-        8: {"name": "Silent Forest", "resources": ["wood", "bronze", "diamond"], "min_troops": 22},
-        9: {"name": "Void Canyon", "resources": ["relics", "diamond", "iron"], "min_troops": 30}
+        8: {"name": "Silent Forest", "resources": ["wood", "bronze", "stone"], "min_troops": 22},
+        9: {"name": "Void Canyon", "resources": ["relics", "stone", "iron"], "min_troops": 30}
     }
     
     # Show available sectors
@@ -7220,13 +7223,13 @@ async def cmd_map(message: types.Message):
     sector_info = {
         1: {"name": "Badlands-8", "resources": ["wood", "bronze"], "emoji": "🏜️"},
         2: {"name": "Crimson Wastes", "resources": ["bronze", "iron"], "emoji": "🔴"},
-        3: {"name": "Obsidian Peaks", "resources": ["iron", "diamond"], "emoji": "⛰️"},
+        3: {"name": "Obsidian Peaks", "resources": ["iron", "stone"], "emoji": "⛰️"},
         4: {"name": "Shattered Valley", "resources": ["bronze", "wood", "iron"], "emoji": "💔"},
-        5: {"name": "Frozen Abyss", "resources": ["iron", "diamond"], "emoji": "❄️"},
-        6: {"name": "Molten Gorge", "resources": ["diamond", "relics"], "emoji": "🔥"},
+        5: {"name": "Frozen Abyss", "resources": ["iron", "stone"], "emoji": "❄️"},
+        6: {"name": "Molten Gorge", "resources": ["stone", "relics"], "emoji": "🔥"},
         7: {"name": "Twilight Marshes", "resources": ["wood", "relics"], "emoji": "🌙"},
-        8: {"name": "Silent Forest", "resources": ["wood", "bronze", "diamond"], "emoji": "🌲"},
-        9: {"name": "Void Canyon", "resources": ["relics", "diamond", "iron"], "emoji": "🌑"}
+        8: {"name": "Silent Forest", "resources": ["wood", "bronze", "stone"], "emoji": "🌲"},
+        9: {"name": "Void Canyon", "resources": ["relics", "stone", "iron"], "emoji": "🌑"}
     }
     
     # Check if currently mining
@@ -7716,9 +7719,9 @@ async def cb_research(callback: types.CallbackQuery):
         researches = {
             "armor_plating": {"name": "⚙️ Armor Plating", "cost": {"iron": 100, "bronze": 50}},
             "speed_training": {"name": "⚡ Speed Training", "cost": {"wood": 150, "bronze": 100}},
-            "resource_extraction": {"name": "🪓 Deep Mining", "cost": {"diamond": 20, "wood": 200}},
+            "resource_extraction": {"name": "🪓 Deep Mining", "cost": {"stone": 20, "wood": 200}},
             "population_growth": {"name": "👨‍👩‍👧‍👦 Breeding Program", "cost": {"food": 200, "bronze": 150}},
-            "trap_efficiency": {"name": "🔩 Trap Mastery", "cost": {"iron": 150, "diamond": 25}}
+            "trap_efficiency": {"name": "🔩 Trap Mastery", "cost": {"iron": 150, "stone": 25}}
         }
         
         if research_key not in researches:
@@ -7932,9 +7935,9 @@ async def cb_train_unit(callback: types.CallbackQuery):
             "Police and Dogs": {"name": "👹 Police and Dogs", "cost": {"wood": 5}},
             "knight": {"name": "🗡️ Knights", "cost": {"wood": 15, "bronze": 5}},
             "bishop": {"name": "⚜️ Bishops", "cost": {"bronze": 10, "iron": 3}},
-            "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "diamond": 2}},
-            "queen": {"name": "👑 Queens", "cost": {"iron": 20, "diamond": 5}},
-            "king": {"name": "⚔️ Kings", "cost": {"diamond": 15, "relics": 1}}
+            "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "stone": 2}},
+            "queen": {"name": "👑 Queens", "cost": {"iron": 20, "stone": 5}},
+            "king": {"name": "⚔️ Kings", "cost": {"stone": 15, "relics": 1}}
         }
         
         if unit_key not in units:
@@ -7988,9 +7991,9 @@ async def cb_train_confirm(callback: types.CallbackQuery):
             "Police and Dogs": {"name": "👹 Police and Dogs", "cost": {"wood": 5}},
             "knight": {"name": "🗡️ Knights", "cost": {"wood": 15, "bronze": 5}},
             "bishop": {"name": "⚜️ Bishops", "cost": {"bronze": 10, "iron": 3}},
-            "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "diamond": 2}},
-            "queen": {"name": "👑 Queens", "cost": {"iron": 20, "diamond": 5}},
-            "king": {"name": "⚔️ Kings", "cost": {"diamond": 15, "relics": 1}}
+            "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "stone": 2}},
+            "queen": {"name": "👑 Queens", "cost": {"iron": 20, "stone": 5}},
+            "king": {"name": "⚔️ Kings", "cost": {"stone": 15, "relics": 1}}
         }
         
         if unit_key not in units:
@@ -8066,13 +8069,13 @@ async def cb_mine_sector(callback: types.CallbackQuery):
         sector_info = {
             1: {"name": "Badlands-8", "resources": ["wood", "bronze"], "min_troops": 5, "multiplier": 1.0},
             2: {"name": "Crimson Wastes", "resources": ["bronze", "iron"], "min_troops": 10, "multiplier": 1.2},
-            3: {"name": "Obsidian Peaks", "resources": ["iron", "diamond"], "min_troops": 15, "multiplier": 1.5},
+            3: {"name": "Obsidian Peaks", "resources": ["iron", "stone"], "min_troops": 15, "multiplier": 1.5},
             4: {"name": "Shattered Valley", "resources": ["bronze", "wood", "iron"], "min_troops": 8, "multiplier": 1.1},
-            5: {"name": "Frozen Abyss", "resources": ["iron", "diamond"], "min_troops": 20, "multiplier": 1.25},
-            6: {"name": "Molten Gorge", "resources": ["diamond", "relics"], "min_troops": 25, "multiplier": 1.6},
+            5: {"name": "Frozen Abyss", "resources": ["iron", "stone"], "min_troops": 20, "multiplier": 1.25},
+            6: {"name": "Molten Gorge", "resources": ["stone", "relics"], "min_troops": 25, "multiplier": 1.6},
             7: {"name": "Twilight Marshes", "resources": ["wood", "relics"], "min_troops": 18, "multiplier": 1.3},
-            8: {"name": "Silent Forest", "resources": ["wood", "bronze", "diamond"], "min_troops": 22, "multiplier": 1.35},
-            9: {"name": "Void Canyon", "resources": ["relics", "diamond", "iron"], "min_troops": 30, "multiplier": 2.0}
+            8: {"name": "Silent Forest", "resources": ["wood", "bronze", "stone"], "min_troops": 22, "multiplier": 1.35},
+            9: {"name": "Void Canyon", "resources": ["relics", "stone", "iron"], "min_troops": 30, "multiplier": 2.0}
         }
         
         if sector_id not in sector_info:
@@ -8133,13 +8136,13 @@ async def cb_mine_start(callback: types.CallbackQuery):
         sector_info = {
             1: {"name": "Badlands-8", "resources": ["wood", "bronze"], "multiplier": 1.0},
             2: {"name": "Crimson Wastes", "resources": ["bronze", "iron"], "multiplier": 1.2},
-            3: {"name": "Obsidian Peaks", "resources": ["iron", "diamond"], "multiplier": 1.5},
+            3: {"name": "Obsidian Peaks", "resources": ["iron", "stone"], "multiplier": 1.5},
             4: {"name": "Shattered Valley", "resources": ["bronze", "wood", "iron"], "multiplier": 1.1},
-            5: {"name": "Frozen Abyss", "resources": ["iron", "diamond"], "multiplier": 1.25},
-            6: {"name": "Molten Gorge", "resources": ["diamond", "relics"], "multiplier": 1.6},
+            5: {"name": "Frozen Abyss", "resources": ["iron", "stone"], "multiplier": 1.25},
+            6: {"name": "Molten Gorge", "resources": ["stone", "relics"], "multiplier": 1.6},
             7: {"name": "Twilight Marshes", "resources": ["wood", "relics"], "multiplier": 1.3},
-            8: {"name": "Silent Forest", "resources": ["wood", "bronze", "diamond"], "multiplier": 1.35},
-            9: {"name": "Void Canyon", "resources": ["relics", "diamond", "iron"], "multiplier": 2.0}
+            8: {"name": "Silent Forest", "resources": ["wood", "bronze", "stone"], "multiplier": 1.35},
+            9: {"name": "Void Canyon", "resources": ["relics", "stone", "iron"], "multiplier": 2.0}
         }
         
         # Generate 5 mining drops (one every 2 minutes for 10 minutes)
@@ -8683,7 +8686,7 @@ def build_player_dashboard(player_name: str, session: dict, user_id: str = None,
     safe_player_name = _safe_name(player_name)
 
     res_parts = []
-    for key, emoji in [('wood','🪵'),('bronze','🧱'),('iron','⛓️'),('diamond','💎'),('relics','🏺'),('incubus','👹')]:
+    for key, emoji in [('wood','🪵'),('bronze','🧱'),('iron','⛓️'),('stone','💎'),('relics','🏺'),('incubus','👹')]:
         val = resources.get(key, 0)
         if val > 0:
             res_parts.append(f"{emoji}{val}")
@@ -9113,7 +9116,7 @@ async def on_group_message(message: types.Message):
             xp_awarded  = pts * 2
             btc_awarded = max(pts // 2, 1)
 
-            resource_map = {4: 'wood', 5: 'bronze', 6: 'iron', 7: 'diamond'}
+            resource_map = {4: 'wood', 5: 'bronze', 6: 'iron', 7: 'stone'}
             resources_awarded = {}
             if word_len in resource_map:
                 resources_awarded[resource_map[word_len]] = 1
@@ -9124,7 +9127,7 @@ async def on_group_message(message: types.Message):
             if u_id not in eng.player_sessions:
                 eng.player_sessions[u_id] = {
                     'pts': 0, 'xp': 0, 'word_count': 0,
-                    'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0, 'incubus': 0},
+                    'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'stone': 0, 'relics': 0, 'incubus': 0},
                     'food': 0, 'streak': 0, 'last_word': '', 'last_pts': 0, 'rare_message': '', 'consecutive_6plus': 0
                 }
             session = eng.player_sessions[u_id]
@@ -9572,7 +9575,7 @@ async def sector_status_task(bot: Bot, chat_id: int):
         ("🪵", "Wood", "up 15%"),
         ("🧱", "Bronze", "down 8%"),
         ("⛓️", "Iron", "up 22%"),
-        ("💎", "Diamond", "up 45%"),
+        ("💎", "Stone", "up 45%"),
         ("🏺", "Relics", "down 12%"),
     ]
     
@@ -9674,7 +9677,7 @@ async def gamemaster_announcement_task(bot: Bot, chat_id: int):
         
         f"{divider()}\n🔬 *SCIENCE = POWER = DOMINANCE*\n{divider()}\n\nThe research lab isn't just a building—it's an *IQ test*. Spend your precious resources on upgrades that'll make you 30% better at war. Or don't. I'll enjoy watching you lose. The choice is yours. 🧪\n{divider()}",
         
-        "💎 *HOARD EVERYTHING LIKE YOUR LIFE DEPENDS ON IT*\n\nWood. Bronze. Iron. Diamond. Relics. \n\nEvery resource is a *weapon*. Every crate is a gift from me (you're welcome). Every item is *power*. Stop wasting them on stupid stuff. Build empires or die trying. 💰",
+        "💎 *HOARD EVERYTHING LIKE YOUR LIFE DEPENDS ON IT*\n\nWood. Bronze. Iron. Stone. Relics. \n\nEvery resource is a *weapon*. Every crate is a gift from me (you're welcome). Every item is *power*. Stop wasting them on stupid stuff. Build empires or die trying. 💰",
         
         f"{divider()}\n👑 *SECTOR WARS ARE COMING*\n{divider()}\n\nYou think Sector 1 is tough? Try Sector 9. Better resources = better rewards = *actual* power. Teleport to a high sector and watch yourself get *obliterated*. Or train harder and actually win. I'm *dying* to see which. 🌍\n{divider()}",
         
@@ -9760,26 +9763,26 @@ async def mining_task(bot: Bot, chat_id: int):
     sector_info = {
         1: {"name": "Badlands-8", "resources": ["wood", "bronze"], "multiplier": 1.0},
         2: {"name": "Crimson Wastes", "resources": ["bronze", "iron"], "multiplier": 1.2},
-        3: {"name": "Obsidian Peaks", "resources": ["iron", "diamond"], "multiplier": 1.5},
+        3: {"name": "Obsidian Peaks", "resources": ["iron", "stone"], "multiplier": 1.5},
         4: {"name": "Shattered Valley", "resources": ["bronze", "wood", "iron"], "multiplier": 1.1},
-        5: {"name": "Frozen Abyss", "resources": ["iron", "diamond"], "multiplier": 1.25},
-        6: {"name": "Molten Gorge", "resources": ["diamond", "relics"], "multiplier": 1.6},
+        5: {"name": "Frozen Abyss", "resources": ["iron", "stone"], "multiplier": 1.25},
+        6: {"name": "Molten Gorge", "resources": ["stone", "relics"], "multiplier": 1.6},
         7: {"name": "Twilight Marshes", "resources": ["wood", "relics"], "multiplier": 1.3},
-        8: {"name": "Silent Forest", "resources": ["wood", "bronze", "diamond"], "multiplier": 1.35},
-        9: {"name": "Void Canyon", "resources": ["relics", "diamond", "iron"], "multiplier": 2.0}
+        8: {"name": "Silent Forest", "resources": ["wood", "bronze", "stone"], "multiplier": 1.35},
+        9: {"name": "Void Canyon", "resources": ["relics", "stone", "iron"], "multiplier": 2.0}
     }
     
     # Resource amounts per drop (scales with multiplier and troops)
     base_drops = {
         1: {"wood": 5, "bronze": 3},
         2: {"bronze": 5, "iron": 2},
-        3: {"iron": 4, "diamond": 1},
+        3: {"iron": 4, "stone": 1},
         4: {"bronze": 4, "wood": 5, "iron": 2},
-        5: {"iron": 5, "diamond": 2},
-        6: {"diamond": 3, "relics": 1},
+        5: {"iron": 5, "stone": 2},
+        6: {"stone": 3, "relics": 1},
         7: {"wood": 6, "relics": 1},
-        8: {"wood": 5, "bronze": 4, "diamond": 1},
-        9: {"relics": 2, "diamond": 2, "iron": 3}
+        8: {"wood": 5, "bronze": 4, "stone": 1},
+        9: {"relics": 2, "stone": 2, "iron": 3}
     }
     
     while True:

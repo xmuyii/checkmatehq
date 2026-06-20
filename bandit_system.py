@@ -177,39 +177,39 @@ BANDIT_STATS = {
     "Flame Marauder": {"hp": 55, "attack": 20, "loot": {"bronze": 25, "iron": 12}, "threat": "🟡 MEDIUM"},
     
     # Tier 3 (Obsidian Peaks - Level 10+)
-    "Peak Assassin": {"hp": 70, "attack": 25, "loot": {"iron": 20, "diamond": 5}, "threat": "🔴 HIGH"},
+    "Peak Assassin": {"hp": 70, "attack": 25, "loot": {"iron": 20, "stone": 5}, "threat": "🔴 HIGH"},
     "Stone Guard": {"hp": 80, "attack": 22, "loot": {"iron": 30}, "threat": "🔴 HIGH"},
-    "Apex Predator": {"hp": 90, "attack": 28, "loot": {"iron": 25, "diamond": 8}, "threat": "🔴 HIGH"},
+    "Apex Predator": {"hp": 90, "attack": 28, "loot": {"iron": 25, "stone": 8}, "threat": "🔴 HIGH"},
     
     # Tier 4 (Shattered Valley - Level 11+)
     "Valley Thug": {"hp": 60, "attack": 20, "loot": {"iron": 15, "bronze": 10}, "threat": "🟡 MEDIUM"},
     "Chaos Cultist": {"hp": 65, "attack": 23, "loot": {"iron": 20, "bronze": 15}, "threat": "🟡 MEDIUM"},
-    "Shadow Operative": {"hp": 70, "attack": 26, "loot": {"iron": 25, "diamond": 5}, "threat": "🔴 HIGH"},
+    "Shadow Operative": {"hp": 70, "attack": 26, "loot": {"iron": 25, "stone": 5}, "threat": "🔴 HIGH"},
     
     # Tier 5 (Frozen Abyss - Level 13+)
-    "Frost Wraith": {"hp": 85, "attack": 28, "loot": {"diamond": 10, "iron": 20}, "threat": "🔴 HIGH"},
-    "Ice Cultist": {"hp": 95, "attack": 32, "loot": {"diamond": 15, "iron": 25}, "threat": "🔴 HIGH"},
-    "Frozen Soul": {"hp": 100, "attack": 35, "loot": {"diamond": 20}, "threat": "🔴 CRITICAL"},
+    "Frost Wraith": {"hp": 85, "attack": 28, "loot": {"stone": 10, "iron": 20}, "threat": "🔴 HIGH"},
+    "Ice Cultist": {"hp": 95, "attack": 32, "loot": {"stone": 15, "iron": 25}, "threat": "🔴 HIGH"},
+    "Frozen Soul": {"hp": 100, "attack": 35, "loot": {"stone": 20}, "threat": "🔴 CRITICAL"},
     
     # Tier 6 (Molten Gorge - Level 15+)
-    "Lava Lord": {"hp": 120, "attack": 45, "loot": {"diamond": 30, "relics": 5}, "threat": "💀 DEADLY"},
-    "Inferno Knight": {"hp": 130, "attack": 50, "loot": {"diamond": 35, "relics": 8}, "threat": "💀 DEADLY"},
-    "Magma Overlord": {"hp": 150, "attack": 60, "loot": {"diamond": 50, "relics": 10}, "threat": "💀 DEADLY"},
+    "Lava Lord": {"hp": 120, "attack": 45, "loot": {"stone": 30, "relics": 5}, "threat": "💀 DEADLY"},
+    "Inferno Knight": {"hp": 130, "attack": 50, "loot": {"stone": 35, "relics": 8}, "threat": "💀 DEADLY"},
+    "Magma Overlord": {"hp": 150, "attack": 60, "loot": {"stone": 50, "relics": 10}, "threat": "💀 DEADLY"},
     
     # Tier 7 (Twilight Marshes - Level 14+)
-    "Marsh Phantom": {"hp": 110, "attack": 38, "loot": {"relics": 8, "diamond": 15}, "threat": "🔴 HIGH"},
-    "Cursed Wisp": {"hp": 105, "attack": 40, "loot": {"relics": 10, "diamond": 20}, "threat": "🔴 HIGH"},
-    "Specter Knight": {"hp": 125, "attack": 48, "loot": {"relics": 15, "diamond": 30}, "threat": "💀 DEADLY"},
+    "Marsh Phantom": {"hp": 110, "attack": 38, "loot": {"relics": 8, "stone": 15}, "threat": "🔴 HIGH"},
+    "Cursed Wisp": {"hp": 105, "attack": 40, "loot": {"relics": 10, "stone": 20}, "threat": "🔴 HIGH"},
+    "Specter Knight": {"hp": 125, "attack": 48, "loot": {"relics": 15, "stone": 30}, "threat": "💀 DEADLY"},
     
     # Tier 8 (Silent Forest - Level 12+)
-    "Beast Guardian": {"hp": 75, "attack": 24, "loot": {"wood": 30, "diamond": 8}, "threat": "🟡 MEDIUM"},
-    "Forest Warden": {"hp": 85, "attack": 28, "loot": {"wood": 40, "diamond": 12}, "threat": "🔴 HIGH"},
-    "Primal Avenger": {"hp": 95, "attack": 32, "loot": {"wood": 50, "diamond": 15}, "threat": "🔴 HIGH"},
+    "Beast Guardian": {"hp": 75, "attack": 24, "loot": {"wood": 30, "stone": 8}, "threat": "🟡 MEDIUM"},
+    "Forest Warden": {"hp": 85, "attack": 28, "loot": {"wood": 40, "stone": 12}, "threat": "🔴 HIGH"},
+    "Primal Avenger": {"hp": 95, "attack": 32, "loot": {"wood": 50, "stone": 15}, "threat": "🔴 HIGH"},
     
     # Tier 9 (Void Canyon - Level 20+)
-    "Void Entity": {"hp": 200, "attack": 70, "loot": {"relics": 50, "diamond": 100}, "threat": "☠️ GODLIKE"},
-    "Cosmic Horror": {"hp": 220, "attack": 80, "loot": {"relics": 75, "diamond": 120}, "threat": "☠️ GODLIKE"},
-    "Eldritch Titan": {"hp": 250, "attack": 100, "loot": {"relics": 100, "diamond": 150}, "threat": "☠️ GODLIKE"},
+    "Void Entity": {"hp": 200, "attack": 70, "loot": {"relics": 50, "stone": 100}, "threat": "☠️ GODLIKE"},
+    "Cosmic Horror": {"hp": 220, "attack": 80, "loot": {"relics": 75, "stone": 120}, "threat": "☠️ GODLIKE"},
+    "Eldritch Titan": {"hp": 250, "attack": 100, "loot": {"relics": 100, "stone": 150}, "threat": "☠️ GODLIKE"},
 }
 
 # ═══════════════════════════════════════════════════════════════════════════

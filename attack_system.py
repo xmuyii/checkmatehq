@@ -254,7 +254,7 @@ def format_battle_report(
                         "wood": "🌲",
                         "bronze": "🧱",
                         "iron": "⛓️",
-                        "diamond": "💎",
+                        "stone": "💎",
                         "relics": "🏺"
                     }
                     emoji = emoji_map.get(resource, "?")
@@ -310,7 +310,7 @@ def format_raid_notification(
                 "wood": "🌲",
                 "bronze": "🧱",
                 "iron": "⛓️",
-                "diamond": "💎",
+                "stone": "💎",
                 "relics": "🏺"
             }
             for resource, amount in resources_stolen.items():

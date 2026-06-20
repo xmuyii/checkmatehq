@@ -43,11 +43,11 @@ SECTOR_DETAILS = {
     3: {
         "name": "Obsidian Peaks",
         "emoji": "⛰️",
-        "resources": ["iron", "diamond"],
-        "buffs": {"iron_gathering": 1.4, "diamond_gathering": 1.25},
+        "resources": ["iron", "stone"],
+        "buffs": {"iron_gathering": 1.4, "stone_gathering": 1.25},
         "perks": [
             "✅ 1.4x iron gathering bonus",
-            "✅ 1.25x diamond gathering bonus",
+            "✅ 1.25x stone gathering bonus",
             "✅ Premium drops",
         ],
         "hazards": [
@@ -55,7 +55,7 @@ SECTOR_DETAILS = {
             "⚠️ Strong hostile forces",
             "⚠️ Extreme cold slows mining",
         ],
-        "unique_drops": ["⚒️ Iron Ore", "💎 Obsidian Diamond", "👑 Rare Crown Fragment"],
+        "unique_drops": ["⚒️ Iron Ore", "💎 Obsidian Stone", "👑 Rare Crown Fragment"],
         "difficulty": "⭐⭐⭐ Hard",
         "recommended_level": "8+",
     },
@@ -80,11 +80,11 @@ SECTOR_DETAILS = {
     5: {
         "name": "Frozen Abyss",
         "emoji": "❄️",
-        "resources": ["iron", "diamond"],
-        "buffs": {"iron_gathering": 1.35, "diamond_gathering": 1.2},
+        "resources": ["iron", "stone"],
+        "buffs": {"iron_gathering": 1.35, "stone_gathering": 1.2},
         "perks": [
             "✅ 1.35x iron gathering bonus",
-            "✅ 1.2x diamond gathering bonus",
+            "✅ 1.2x stone gathering bonus",
             "✅ Frozen treasures",
         ],
         "hazards": [
@@ -92,17 +92,17 @@ SECTOR_DETAILS = {
             "⚠️ Resource deterioration over time",
             "⚠️ Heavy attacks from ice creatures",
         ],
-        "unique_drops": ["❄️ Frozen Core", "💎 Ice Diamond", "🧊 Permafrost Ore"],
+        "unique_drops": ["❄️ Frozen Core", "💎 Ice Stone", "🧊 Permafrost Ore"],
         "difficulty": "⭐⭐⭐ Hard",
         "recommended_level": "10+",
     },
     6: {
         "name": "Molten Gorge",
         "emoji": "🔥",
-        "resources": ["diamond", "relics"],
-        "buffs": {"diamond_gathering": 1.5, "relics_gathering": 1.4},
+        "resources": ["stone", "relics"],
+        "buffs": {"stone_gathering": 1.5, "relics_gathering": 1.4},
         "perks": [
-            "✅ 1.5x diamond gathering bonus",
+            "✅ 1.5x stone gathering bonus",
             "✅ 1.4x relics gathering bonus",
             "✅ Extremely valuable drops",
             "✅ Legendary items here",
@@ -113,7 +113,7 @@ SECTOR_DETAILS = {
             "⚠️ Deadly lava flows",
             "⚠️ Boss-tier monsters",
         ],
-        "unique_drops": ["🌋 Lava Diamond", "🏺 Ancient Relic", "👑 Molten Crown"],
+        "unique_drops": ["🌋 Lava Stone", "🏺 Ancient Relic", "👑 Molten Crown"],
         "difficulty": "⭐⭐⭐⭐⭐ EXTREME",
         "recommended_level": "15+",
     },
@@ -139,12 +139,12 @@ SECTOR_DETAILS = {
     8: {
         "name": "Silent Forest",
         "emoji": "🌲",
-        "resources": ["wood", "bronze", "diamond"],
-        "buffs": {"wood_gathering": 1.3, "bronze_gathering": 1.15, "diamond_gathering": 1.1},
+        "resources": ["wood", "bronze", "stone"],
+        "buffs": {"wood_gathering": 1.3, "bronze_gathering": 1.15, "stone_gathering": 1.1},
         "perks": [
             "✅ 1.3x wood gathering",
             "✅ 1.15x bronze gathering",
-            "✅ 1.1x diamond gathering",
+            "✅ 1.1x stone gathering",
             "✅ Diverse drops",
         ],
         "hazards": [
@@ -159,11 +159,11 @@ SECTOR_DETAILS = {
     9: {
         "name": "Void Canyon",
         "emoji": "🌑",
-        "resources": ["relics", "diamond", "iron"],
-        "buffs": {"relics_gathering": 1.6, "diamond_gathering": 1.4, "iron_gathering": 1.2},
+        "resources": ["relics", "stone", "iron"],
+        "buffs": {"relics_gathering": 1.6, "stone_gathering": 1.4, "iron_gathering": 1.2},
         "perks": [
             "✅ 1.6x relics gathering bonus (HIGHEST)",
-            "✅ 1.4x diamond gathering bonus",
+            "✅ 1.4x stone gathering bonus",
             "✅ 1.2x iron gathering bonus",
             "✅ THE most valuable sector",
             "✅ Cosmic items unique to void",

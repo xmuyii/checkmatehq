@@ -60,7 +60,7 @@ def get_shop_items():
         "wood": {"name": "🌲 Wood", "price": 10, "category": "resource"},
         "bronze": {"name": "🧱 Bronze", "price": 20, "category": "resource"},
         "iron": {"name": "⛓️ Iron", "price": 50, "category": "resource"},
-        "diamond": {"name": "💎 Diamond", "price": 100, "category": "resource"},
+        "stone": {"name": "💎 Stone", "price": 100, "category": "resource"},
         
         # SHIELDS
         "basic_shield": {"name": "🛡️ Basic Shield", "price": 500, "category": "shield", "effect": "10% damage reduction"},
@@ -262,12 +262,12 @@ SECTOR_RESOURCE_BONUSES = {
     1: {"resource": "wood", "bonus": 5},
     2: {"resource": "bronze", "bonus": 4},
     3: {"resource": "iron", "bonus": 3},
-    4: {"resource": "diamond", "bonus": 7},
+    4: {"resource": "stone", "bonus": 7},
     5: {"resource": "gold", "bonus": 1},
     6: {"resource": "wood", "bonus": 8},
     7: {"resource": "iron", "bonus": 6},
     8: {"resource": "iron", "bonus": 10},
-    9: {"resource": "diamond", "bonus": 4},
+    9: {"resource": "stone", "bonus": 4},
     10: {"resource": "bronze", "bonus": 9},
 }
 

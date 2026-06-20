@@ -82,7 +82,7 @@ BUILDING_TYPES: Dict[str, dict] = {
         "cost_per_level": lambda lvl: {
             "bronze": 80  * lvl,
             "iron":   40  * lvl,
-            "diamond": 5  * lvl,
+            "stone": 5  * lvl,
         },
         "bonus": lambda lvl: {"deploy_speedup_secs": 5 * lvl},
         "build_time_secs": lambda lvl: 120 * lvl,
@@ -97,7 +97,7 @@ BUILDING_TYPES: Dict[str, dict] = {
         "cost_per_level": lambda lvl: {
             "bronze": 100 * lvl,
             "iron":   60  * lvl,
-            "diamond": 8  * lvl,
+            "stone": 8  * lvl,
         },
         "bonus": lambda lvl: {"attack_cooldown_reduction_mins": 10 * lvl},
         "build_time_secs": lambda lvl: 150 * lvl,

@@ -38,7 +38,7 @@ def create_alliance(leader_id: str, alliance_name: str) -> Tuple[bool, str]:
         "leader_id": leader_id,
         "members": [leader_id],
         "created_at": datetime.utcnow().isoformat(),
-        "treasury": {"wood": 0, "bronze": 0, "iron": 0, "diamond": 0, "relics": 0},
+        "treasury": {"wood": 0, "bronze": 0, "iron": 0, "stone": 0, "relics": 0},
     }
     
     # Update leader
@@ -125,7 +125,7 @@ def share_resources(
     if not sender:
         return False, "Sender not found"
     
-    if resource_type not in ["wood", "bronze", "iron", "diamond", "relics"]:
+    if resource_type not in ["wood", "bronze", "iron", "stone", "relics"]:
         return False, f"Invalid resource: {resource_type}"
     
     if amount <= 0:

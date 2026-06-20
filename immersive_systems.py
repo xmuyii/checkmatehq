@@ -462,8 +462,8 @@ SHOP_CATALOG = {
         "price_per_unit": 2.0,
         "description": "Rare. Powerful. Unbreakable."
     },
-    "diamond": {
-        "name": "💎 DIAMOND",
+    "stone": {
+        "name": "💎 STONE",
         "quantities": [10, 50, 100, 500],
         "price_per_unit": 5.0,
         "description": "Elite tier. Legendary units demand it."

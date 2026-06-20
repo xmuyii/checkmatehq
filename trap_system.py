@@ -42,7 +42,7 @@ TRAP_TYPES = {
     "tesla_tower": {
         "name": "⚡ TESLA TOWER",
         "description": "Area damage. Damage: 80-120 (multiple targets)",
-        "cost": {"iron": 75, "diamond": 10, "bronze": 100},
+        "cost": {"iron": 75, "stone": 10, "bronze": 100},
         "damage_range": (80, 120),
         "min_level": 7,
         "capacity": 2,
@@ -51,7 +51,7 @@ TRAP_TYPES = {
     "inferno": {
         "name": "🔥 INFERNO",
         "description": "Apocalyptic. Damage: 150-250 (all enemies)",
-        "cost": {"diamond": 25, "iron": 100, "bronze": 150},
+        "cost": {"stone": 25, "iron": 100, "bronze": 150},
         "damage_range": (150, 250),
         "min_level": 9,
         "capacity": 1,
@@ -69,7 +69,7 @@ TRAP_TYPES = {
     "lava_moat": {
         "name": "🌋 LAVA MOAT",
         "description": "Perimeter defense. Damage: 50-80",
-        "cost": {"iron": 40, "diamond": 5},
+        "cost": {"iron": 40, "stone": 5},
         "damage_range": (50, 80),
         "min_level": 6,
         "capacity": 3,
@@ -78,7 +78,7 @@ TRAP_TYPES = {
     "void_lattice": {
         "name": "🌑 VOID LATTICE",
         "description": "Cosmic barrier. Damage: 200-300",
-        "cost": {"diamond": 50, "iron": 150},
+        "cost": {"stone": 50, "iron": 150},
         "damage_range": (200, 300),
         "min_level": 10,
         "capacity": 1,

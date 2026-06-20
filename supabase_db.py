@@ -136,13 +136,13 @@ def _row_to_user(row: dict) -> dict:
     else:
         base_res = dict(val) if val else {}
     
-    # CRITICAL: Ensure base_resources has complete resource types (wood, bronze, iron, diamond, relics)
-    # NOT silver - we use diamond as the 4th tier
+    # CRITICAL: Ensure base_resources has complete resource types (wood, bronze, iron, stone, relics)
+    # NOT silver - we use stone as the 4th tier
     if 'resources' not in base_res or not isinstance(base_res.get('resources'), dict):
         base_res['resources'] = {}
     
     # Ensure ALL resource types exist (don't rely on stored value which might have old structure)
-    default_resources = {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0, 'incubus': 0}
+    default_resources = {'wood': 0, 'bronze': 0, 'iron': 0, 'stone': 0, 'relics': 0, 'incubus': 0}
     stored_resources = base_res.get('resources', {})
     
     # Merge: keep stored values but ensure all keys exist
@@ -249,7 +249,7 @@ def register_user(user_id, username: str):
             'buildings': json.dumps({}),
             'building_queue': json.dumps({}),
             'base_resources': json.dumps({
-                'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0, 'incubus': 0},
+                'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'stone': 0, 'relics': 0, 'incubus': 0},
                 'food': 0,
                 'current_streak': 0
             }),
@@ -393,7 +393,7 @@ def ensure_bot_exists(username: str, initial_points: int = 0):
         'unclaimed_items': json.dumps([]),
         'base_name': random_base_name,
         'base_resources': json.dumps({
-            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0},
+            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'stone': 0, 'relics': 0},
             'food': 0,
             'current_streak': 0
         }),
@@ -726,7 +726,7 @@ def use_bitcoin(user_id, amount: int) -> bool:
 
 
 def add_resources_from_word_length(user_id, word_length: int, username: str = '') -> dict:
-    """Award resources based on word length: 3L→Wood, 4L→Bronze, 5L→Iron, 6L→Diamond, 7L→Relics"""
+    """Award resources based on word length: 3L→Wood, 4L→Bronze, 5L→Iron, 6L→Stone, 7L→Relics"""
     uid = str(user_id)
     user = get_user(uid)
     if not user:
@@ -735,7 +735,7 @@ def add_resources_from_word_length(user_id, word_length: int, username: str = ''
     
     # Initialize resources if not present
     if 'resources' not in user or not isinstance(user.get('resources'), dict):
-        user['resources'] = {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0, 'incubus': 0}
+        user['resources'] = {'wood': 0, 'bronze': 0, 'iron': 0, 'stone': 0, 'relics': 0, 'incubus': 0}
     
     resources_awarded = {}
     
@@ -750,8 +750,8 @@ def add_resources_from_word_length(user_id, word_length: int, username: str = ''
         user['resources']['iron'] = user['resources'].get('iron', 0) + 1
         resources_awarded['iron'] = 1
     elif word_length == 6:
-        user['resources']['diamond'] = user['resources'].get('diamond', 0) + 1
-        resources_awarded['diamond'] = 1  # Different from the 'bitcoin' currency
+        user['resources']['stone'] = user['resources'].get('stone', 0) + 1
+        resources_awarded['stone'] = 1  # Different from the 'bitcoin' currency
     elif word_length >= 7:
         user['resources']['relics'] = user['resources'].get('relics', 0) + 1
         resources_awarded['relics'] = 1
@@ -779,7 +779,7 @@ def update_streak_and_award_food(user_id, correct: bool, username: str = '', use
     # Initialize base_resources if not present
     if not user.get('base_resources'):
         user['base_resources'] = {
-            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0, 'incubus': 0},
+            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'stone': 0, 'relics': 0, 'incubus': 0},
             'food': 0,
             'current_streak': 0
         }
@@ -787,7 +787,7 @@ def update_streak_and_award_food(user_id, correct: bool, username: str = '', use
     base_res = user['base_resources']
     if not isinstance(base_res, dict):
         base_res = {
-            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'diamond': 0, 'relics': 0, 'incubus': 0},
+            'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'stone': 0, 'relics': 0, 'incubus': 0},
             'food': 0,
             'current_streak': 0
         }
@@ -1241,8 +1241,8 @@ def add_randomized_gift(user_id):
             base_res = user.get('base_resources', {})
             resources = base_res.get('resources', {})
             # Random resource boost
-            res_choice = random.choice(['wood', 'bronze', 'iron', 'diamond'])
-            amount = random.randint(50, 200) if res_choice != 'diamond' else random.randint(10, 50)
+            res_choice = random.choice(['wood', 'bronze', 'iron', 'stone'])
+            amount = random.randint(50, 200) if res_choice != 'stone' else random.randint(10, 50)
             resources[res_choice] = resources.get(res_choice, 0) + amount
             base_res['resources'] = resources
             user['base_resources'] = base_res

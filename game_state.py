@@ -208,7 +208,7 @@ def reset_player_progress(user_id: str, reset_level: str = "soft") -> Tuple[bool
             user["inventory"] = []
             user["weapons"] = []
             user["base_resources"] = {
-                "resources": {"wood": 20, "bronze": 10, "iron": 0, "diamond": 0, "relics": 0},
+                "resources": {"wood": 20, "bronze": 10, "iron": 0, "stone": 0, "relics": 0},
                 "food": 50,
                 "current_streak": 0
             }

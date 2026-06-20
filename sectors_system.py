@@ -46,10 +46,10 @@ SECTORS = {
     3: {
         "name": "Obsidian Peaks",
         "emoji": "⛰️",
-        "resources": ["iron", "diamond"],
+        "resources": ["iron", "stone"],
         "multiplier": 1.5,
         "buffs": {
-            "diamond": 2.0,     # x2 diamond
+            "stone": 2.0,     # x2 stone
             "xp": 0.0,          # No XP gained (only resources)
             "score": 2.0,       # x2 points per word!
         },
@@ -74,10 +74,10 @@ SECTORS = {
     5: {
         "name": "Frozen Abyss",
         "emoji": "❄️",
-        "resources": ["iron", "diamond"],
+        "resources": ["iron", "stone"],
         "multiplier": 1.8,
         "buffs": {
-            "diamond": 3.0,     # x3 diamond
+            "stone": 3.0,     # x3 stone
             "xp": 0.5,          # -50% XP
             "score": 1.2,
         },
@@ -88,7 +88,7 @@ SECTORS = {
     6: {
         "name": "Molten Gorge",
         "emoji": "🔥",
-        "resources": ["diamond", "relics"],
+        "resources": ["stone", "relics"],
         "multiplier": 2.0,
         "buffs": {
             "relics": 2.0,      # x2 relics
@@ -116,7 +116,7 @@ SECTORS = {
     8: {
         "name": "Silent Forest",
         "emoji": "🌲",
-        "resources": ["wood", "bronze", "diamond"],
+        "resources": ["wood", "bronze", "stone"],
         "multiplier": 1.4,
         "buffs": {
             "bronze": 6.0,      # x6 bronze
@@ -130,7 +130,7 @@ SECTORS = {
     9: {
         "name": "Void Canyon",
         "emoji": "🌑",
-        "resources": ["relics", "diamond", "iron"],
+        "resources": ["relics", "stone", "iron"],
         "multiplier": 2.0,
         "buffs": {
             "all": 1.0,         # Neutral - all normal
@@ -148,7 +148,7 @@ SECTORS = {
         i: {
             "name": f"Hidden Sector {i}",
             "emoji": "🔒",
-            "resources": ["wood", "bronze", "iron", "diamond", "relics"],
+            "resources": ["wood", "bronze", "iron", "stone", "relics"],
             "multiplier": 1.0 + (i % 5) * 0.2,  # Varied multipliers
             "buffs": {
                 "score": 1.0 + (i % 3) * 0.5,  # Some have score bonuses
@@ -166,7 +166,7 @@ SECTORS = {
     60: {
         "name": "Golden Vault",
         "emoji": "🏆",
-        "resources": ["relics", "diamond"],
+        "resources": ["relics", "stone"],
         "multiplier": 3.0,
         "buffs": {
             "relics": 5.0,      # x5 relics!
@@ -179,10 +179,10 @@ SECTORS = {
     61: {
         "name": "Emerald Chamber",
         "emoji": "💚",
-        "resources": ["diamond", "relics"],
+        "resources": ["stone", "relics"],
         "multiplier": 2.8,
         "buffs": {
-            "diamond": 5.0,     # x5 diamond
+            "stone": 5.0,     # x5 stone
             "score": 2.8,
         },
         "discovery": "Emerald",
@@ -203,15 +203,15 @@ SECTORS = {
     },
     
     63: {
-        "name": "Diamond Cathedral",
+        "name": "Stone Cathedral",
         "emoji": "💎",
-        "resources": ["diamond"],
+        "resources": ["stone"],
         "multiplier": 4.0,
         "buffs": {
-            "diamond": 10.0,    # x10 diamond
+            "stone": 10.0,    # x10 stone
             "score": 4.0,
         },
-        "discovery": "Diamond",
+        "discovery": "Stone",
         "hidden": False,
     },
     
