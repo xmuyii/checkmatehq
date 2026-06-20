@@ -15,6 +15,7 @@ import json
 import random
 from datetime import datetime, timedelta
 from supabase import create_client, Client
+from base_layout import get_default_base_layout
 from config import DB_TABLE, SUPABASE_URL as CONFIG_SUPABASE_URL, SUPABASE_KEY as CONFIG_SUPABASE_KEY, ENV_NAME
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL', CONFIG_SUPABASE_URL).rstrip('/')
@@ -162,6 +163,15 @@ def _row_to_user(row: dict) -> dict:
         base_res['current_streak'] = 0
     
     u['base_resources'] = base_res
+     # Handle base_layout
+    if isinstance(u.get("base_layout"), str):
+        try:
+            u["base_layout"] = json.loads(u["base_layout"])
+        except:
+            u["base_layout"] = get_default_base_layout()
+    elif not u.get("base_layout"):
+        u["base_layout"] = get_default_base_layout()
+    
     
     return u
 

@@ -129,7 +129,7 @@ async def on_group_message(message: types.Message):
         elif word_len == 6:
             resources_awarded = {'iron': 1}
         elif word_len == 7:
-            resources_awarded = {'stone': 1}
+            resources_awarded = {'diamond': 1}
         elif word_len >= 8:
             resources_awarded = {'relics': 1}
         
@@ -151,7 +151,7 @@ async def on_group_message(message: types.Message):
         
         # Add resources
         for resource, amount in resources_awarded.items():
-            emoji_map = {"wood": "🪵", "bronze": "🧱", "iron": "⛓️", "stone": "💎", "relics": "🏺"}
+            emoji_map = {"wood": "🪵", "bronze": "🧱", "iron": "⛓️", "diamond": "💎", "relics": "🏺"}
             emoji = emoji_map.get(resource, "📦")
             fb += f" +{amount} {emoji}"
         

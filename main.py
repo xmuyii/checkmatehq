@@ -32,6 +32,13 @@ import html as _html
 from datetime import datetime, timezone, timedelta
 import httpx
 import os
+from base_layout import (
+    render_base_matrix, render_buildings_directory, get_slot_by_id,
+    place_building_in_slot, complete_upgrade_in_slot,
+    parse_callback_data, get_empty_slots, generate_slot_buttons, EMOJI_MAPPING
+)
+from base_layout import initialize_user_base_layout, upgrade_building_in_slot
+from base_menu_handlers_example import router as base_layout_router
 from power_system import calculate_battle_outcome
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
@@ -124,7 +131,7 @@ def check_and_complete_buildings(user: dict) -> dict:
                     # Complete this building
                     user = complete_building(user, building_id)
                     completed.append(building_id)
-        
+        complete_upgrade_in_slot()
         return user
     except Exception as e:
         print(f"[WARNING] Building completion check failed: {e}")
@@ -376,6 +383,7 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', CONFIG_SUPABASE_KEY)
 bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher()
 dp.include_router(initiation_router)
+dp.include_router(base_layout_router)
 
 # ── Global Error Handler for Callback Timeout Errors ────────────────────
 @dp.errors
@@ -2776,6 +2784,54 @@ async def callback_build_menu(callback: types.CallbackQuery):
         parse_mode="Markdown"
     )
     await safe_answer(callback)
+
+@dp.callback_query(lambda q: q.data == "base:main")
+async def show_base_menu(callback: types.CallbackQuery):
+    """
+    Display the physical base matrix grid.
+    Shows visual map + clickable slot buttons.
+    """
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    
+    if not user:
+        await callback.answer("User not found", show_alert=True)
+        return
+    
+    # Ensure user has a base layout
+    user = initialize_user_base_layout(user)
+    save_user(u_id, user)
+    
+    base_layout = user.get("base_layout", {})
+    
+    # Render the visual matrix
+    matrix_display = render_base_matrix(base_layout)
+    buildings_dir = render_buildings_directory(base_layout)
+    
+    text_hud = (
+        f"*🏰 YOUR BASE MAP 🏰*\n\n"
+        f"{matrix_display}\n"
+        f"{buildings_dir}\n"
+        f"Click a slot to view or build."
+    )
+    
+    # Generate slot buttons (3 per row, organized by slot number)
+    slot_buttons = generate_slot_buttons(base_layout, per_row=3)
+    
+    # Add back button
+    slot_buttons.append([
+        InlineKeyboardButton(text="◀️ Back", callback_data="menu_back")
+    ])
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=slot_buttons)
+    
+    await callback.message.edit_text(
+        text=text_hud,
+        parse_mode="Markdown",
+        reply_markup=kb
+    )
+    await callback.answer()
+
     
 @dp.callback_query(lambda q: q.data == "building_menu")
 async def callback_build_menu(callback: types.CallbackQuery):
@@ -2969,9 +3025,12 @@ async def callback_build_confirm(callback: types.CallbackQuery):
     for res_type, needed in cost.items():
         resources[res_type] -= needed
     
+    user = check_and_complete_buildings(user)  # Existing function
     # Start building (don't complete instantly)
     user = start_building(building_id, current_level, user)
-    
+    slot_id = "slot_3"  # From callback parsing
+    base_layout = user["base_layout"]
+    upgrade_building_in_slot(base_layout, slot_id)  # Marks as "building"
     save_user(u_id, user)
     
     # Get progress info
@@ -5926,6 +5985,8 @@ async def cb_menu_base(callback: types.CallbackQuery):
     completed_buildings_display = format_completed_buildings(user)
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
+        
+        [InlineKeyboardButton(text="🏰 Base Map", callback_data="base:main")],
        [InlineKeyboardButton(text="🏗️ Buildings", callback_data="building_menu"),
         InlineKeyboardButton(text="🏗️ Build", callback_data="build_menu")],
         [InlineKeyboardButton(text="🗺️ Map/Sectors",  callback_data="menu_map")],
