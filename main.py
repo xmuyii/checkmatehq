@@ -33,12 +33,12 @@ from datetime import datetime, timezone, timedelta
 import httpx
 import os
 from base_layout import (
-    render_base_matrix, render_buildings_directory, get_slot_by_id,
-    place_building_in_slot, complete_upgrade_in_slot,
-    parse_callback_data, get_empty_slots, generate_slot_buttons, EMOJI_MAPPING
+    render_tactical_map, render_scouting_intel, get_sector_by_id,
+    place_building_in_sector, complete_upgrade_in_sector,
+    parse_callback_data, initialize_user_base_layout, COMPASS_SECTORS,
+    EMOJI_MAPPING, damage_sector, simulate_raid_attack
 )
-from base_layout import initialize_user_base_layout, upgrade_building_in_slot
-from base_menu_handlers_example import router as base_layout_router
+from tactical_base_handlers import router as base_router
 from power_system import calculate_battle_outcome
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
@@ -383,7 +383,7 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', CONFIG_SUPABASE_KEY)
 bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher()
 dp.include_router(initiation_router)
-dp.include_router(base_layout_router)
+dp.include_router(base_router)
 
 # ── Global Error Handler for Callback Timeout Errors ────────────────────
 @dp.errors
@@ -5985,10 +5985,9 @@ async def cb_menu_base(callback: types.CallbackQuery):
     completed_buildings_display = format_completed_buildings(user)
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        
-        [InlineKeyboardButton(text="🏰 Base Map", callback_data="base:main")],
-       [InlineKeyboardButton(text="🏗️ Buildings", callback_data="building_menu"),
-        InlineKeyboardButton(text="🏗️ Build", callback_data="build_menu")],
+        [InlineKeyboardButton(text="🏰 Defend Base (Tactical)", callback_data="base:main")],
+        [InlineKeyboardButton(text="🏗️ Buildings", callback_data="building_menu"),
+         InlineKeyboardButton(text="🏗️ Build", callback_data="build_menu")],
         [InlineKeyboardButton(text="🗺️ Map/Sectors",  callback_data="menu_map")],
         [InlineKeyboardButton(text="🛡️ Defense", callback_data="base_defense")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],

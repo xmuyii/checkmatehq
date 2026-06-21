@@ -1,20 +1,54 @@
 """
-base_layout.py — Spatial Base Grid System
-==========================================
-Anchors buildings to specific coordinates/slots on a player's base map.
-Provides visual matrix rendering and sequential menu navigation.
+base_layout.py — Tactical Compass-Based Defense Grid System
+===========================================================
+Transforms base layout into a strategic 3×3 compass-mapped grid with visual roads.
+Attacker must breach perimeter sectors to reach deep valuables.
+Roads (═, ║, ╬) show physical connectivity for pathfinding during raids.
 """
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  GRID CONFIGURATION
+#  COMPASS GRID CONFIGURATION & INFRASTRUCTURE
 # ═══════════════════════════════════════════════════════════════════════════
 
-GRID_ROWS = 4
-GRID_COLS = 5
+# 3×3 Tactical grid with fixed road infrastructure connecting 9 directional sectors
+COMPASS_GEOMETRY = [
+    [" NW ", "═══", "  N ", "═══", " NE "],
+    [" ║  ", "   ", " ║  ", "   ", " ║  "],
+    ["  W ", "═══", "  C  ", "═══", "  E  "],
+    [" ║  ", "   ", " ║  ", "   ", " ║  "],
+    [" SW ", "═══", "  S  ", "═══", " SE "]
+]
 
-TOTAL_SLOTS = GRID_ROWS * GRID_COLS  # 12 slots
+# All valid compass sector coordinates
+COMPASS_SECTORS = ["NW", "N", "NE", "W", "C", "E", "SW", "S", "SE"]
+
+# Adjacency graph: Which sectors protect/block access to each other
+COMPASS_NETWORK = {
+    "NW": ["N", "W", "C"],        # NW is only entry point accessible from N, W, or through C
+    "N":  ["NW", "NE", "C"],      # North road connects NW, NE, and Center
+    "NE": ["N", "E", "C"],        # NE vault protected by North and East roads
+    "W":  ["NW", "C", "SW"],      # West road connects NW, SW, and Center
+    "C":  ["N", "S", "E", "W"],   # Center core connects all cardinal directions
+    "E":  ["NE", "C", "SE"],      # East road connects NE, SE, and Center
+    "SW": ["W", "S", "C"],        # SW is only entry point from W, S, or through C
+    "S":  ["SW", "SE", "C"],      # South road (MAIN ENTRY) connects SW, SE, and Center
+    "SE": ["S", "E", "C"]         # SE connects South and East roads
+}
+
+# Sector threat importance (for defense prioritization)
+SECTOR_THREAT_LEVEL = {
+    "S":  5,   # Main entrance - highest threat
+    "N":  4,   # Secondary entrance
+    "W":  3,   # Flanking route
+    "E":  3,   # Flanking route
+    "C":  5,   # Core - highest value target
+    "NW": 2,   # Corner sector
+    "NE": 2,   # Corner sector
+    "SW": 2,   # Corner sector
+    "SE": 2    # Corner sector
+}
 
 # Emoji map for building types (matches BUILDING_TYPES keys from build_system.py)
 EMOJI_MAPPING = {
@@ -30,6 +64,8 @@ EMOJI_MAPPING = {
     "farm": "🌾",
     "trap_factory": "🔩",
     "walls": "🧱",
+    "gatehouse": "🚪",
+    "shield_gen": "🛡️",
     "empty": "⬜",
     "building": "🚧",  # Under construction
 }
@@ -38,38 +74,41 @@ EMOJI_MAPPING = {
 #  DEFAULT BASE LAYOUT
 # ═══════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  DEFAULT BASE LAYOUT
+# ═══════════════════════════════════════════════════════════════════════════
+
 def get_default_base_layout() -> Dict[str, dict]:
     """
-    Return the default base layout grid.
-    Each slot is keyed by "slot_N" and contains coordinate, type, level, and status.
-    Coordinates are (row, col) from top-left (0,0) to bottom-right.
+    Return the default compass-based base layout.
+    Each sector is keyed by compass direction (NW, N, NE, etc.)
+    Contains building type, level, HP (structural integrity), and construction status.
+    
+    Sector arrangement creates natural defensibility:
+    - S (South) is the main entrance/weakest point
+    - C (Center) is the HQ and core value
+    - Corners are remote but valuable for strategic placement
     """
     return {
-        "slot_1": {"coord": (0, 0), "type": "base_hq", "level": 1, "status": "idle"},
-        "slot_2": {"coord": (0, 1), "type": "empty", "level": 0, "status": "empty"},
-        "slot_3": {"coord": (0, 2), "type": "empty", "level": 0, "status": "empty"},
-        "slot_4": {"coord": (0, 3), "type": "empty", "level": 0, "status": "empty"},
-        "slot_5": {"coord": (0, 4), "type": "empty", "level": 0, "status": "empty"},
-        "slot_6": {"coord": (1, 0), "type": "empty", "level": 0, "status": "empty"},
-        "slot_7": {"coord": (1, 1), "type": "empty", "level": 0, "status": "empty"},
-        "slot_8": {"coord": (1, 2), "type": "empty", "level": 0, "status": "empty"},
-        "slot_9": {"coord": (1, 3), "type": "empty", "level": 0, "status": "empty"},
-        "slot_10": {"coord": (1, 4), "type": "empty", "level": 0, "status": "empty"},
-        "slot_11": {"coord": (2, 0), "type": "empty", "level": 0, "status": "empty"},
-        "slot_12": {"coord": (2, 1), "type": "empty", "level": 0, "status": "empty"},
-        "slot_13": {"coord": (2, 2), "type": "empty", "level": 0, "status": "empty"},
-        "slot_14": {"coord": (2, 3), "type": "empty", "level": 0, "status": "empty"},
-        "slot_15": {"coord": (2, 4), "type": "empty", "level": 0, "status": "empty"},
-        "slot_16": {"coord": (3, 0), "type": "empty", "level": 0, "status": "empty"},
-        "slot_17": {"coord": (3, 1), "type": "empty", "level": 0, "status": "empty"},
-        "slot_18": {"coord": (3, 2), "type": "empty", "level": 0, "status": "empty"},
-        "slot_19": {"coord": (3, 3), "type": "empty", "level": 0, "status": "empty"},
-        "slot_20": {"coord": (3, 4), "type": "empty", "level": 0, "status": "empty"}
+        # Perimeter Sectors (Front Line Defense)
+        "S":  {"type": "gatehouse", "level": 1, "hp": 3000, "max_hp": 3000, "status": "idle"},
+        "N":  {"type": "empty",     "level": 0, "hp": 0,    "max_hp": 0,    "status": "empty"},
+        "E":  {"type": "empty",     "level": 0, "hp": 0,    "max_hp": 0,    "status": "empty"},
+        "W":  {"type": "empty",     "level": 0, "hp": 0,    "max_hp": 0,    "status": "empty"},
+        
+        # Corner Sectors (Strategic Placement)
+        "NW": {"type": "empty",     "level": 0, "hp": 0,    "max_hp": 0,    "status": "empty"},
+        "NE": {"type": "empty",     "level": 0, "hp": 0,    "max_hp": 0,    "status": "empty"},
+        "SW": {"type": "empty",     "level": 0, "hp": 0,    "max_hp": 0,    "status": "empty"},
+        "SE": {"type": "empty",     "level": 0, "hp": 0,    "max_hp": 0,    "status": "empty"},
+        
+        # Center (Core Value - The HQ)
+        "C":  {"type": "base_hq",   "level": 1, "hp": 10000, "max_hp": 10000, "status": "idle"},
     }
 
 
 def initialize_user_base_layout(user: dict) -> dict:
-    """Initialize base layout if user doesn't have one."""
+    """Initialize compass-based layout if user doesn't have one."""
     if "base_layout" not in user:
         user["base_layout"] = get_default_base_layout()
     return user
@@ -79,164 +118,234 @@ def initialize_user_base_layout(user: dict) -> dict:
 #  MATRIX RENDERING
 # ═══════════════════════════════════════════════════════════════════════════
 
-def render_base_matrix(base_layout: dict) -> str:
+# ═══════════════════════════════════════════════════════════════════════════
+#  TACTICAL MAP RENDERING
+# ═══════════════════════════════════════════════════════════════════════════
+
+def render_tactical_map(base_layout: dict) -> str:
     """
-    Render the base layout as a visual text grid for Telegram display.
-    Returns a formatted string showing the matrix.
+    Render the compass-based tactical map with visual road connections.
+    Shows emoji buildings and structural road infrastructure (═, ║, ╬).
+    Layout explicitly reveals which sectors are blocking access to deeper positions.
     """
-    # Initialize grid filled with empty emojis
-    grid = [[EMOJI_MAPPING["empty"] for _ in range(GRID_COLS)] for _ in range(GRID_ROWS)]
+    # Substitute building emojis into the geometry template
+    rendered_grid = []
     
-    # Place building emojis at their coordinates
-    for slot_id, slot_info in base_layout.items():
-        row, col = slot_info["coord"]
-        building_type = slot_info["type"]
+    for row in COMPASS_GEOMETRY:
+        rendered_row = "║ "
+        for item in row:
+            key = item.strip()
+            
+            if key in COMPASS_SECTORS:
+                # This is a compass sector - show the building
+                sector_data = base_layout.get(key, {})
+                building_type = sector_data.get("type", "empty")
+                
+                # Show construction icon if building
+                if sector_data.get("status") == "building":
+                    icon = EMOJI_MAPPING["building"]
+                else:
+                    icon = EMOJI_MAPPING.get(building_type, EMOJI_MAPPING["empty"])
+                
+                # Pad sector label with icon
+                rendered_row += f" {icon}({key}) "
+            else:
+                # Road infrastructure - pass through as-is
+                rendered_row += f"  {item}  "
         
-        # Show construction icon if building
-        if slot_info["status"] == "building":
-            icon = EMOJI_MAPPING["building"]
-        else:
-            icon = EMOJI_MAPPING.get(building_type, EMOJI_MAPPING["empty"])
-        
-        grid[row][col] = icon
+        # Right border padding
+        rendered_row = rendered_row.ljust(40) + "║\n"
+        rendered_grid.append(rendered_row)
     
-    # Format into a visual box
-    hud = "╔════════════════════════════════════╗\n"
-    hud += "║       🏰 *MY BASE MAP* 🏰          ║\n"
-    hud += "║                                    ║\n"
-    
-    for row_idx, row_cells in enumerate(grid, start=1):
-        hud += f"║  Row {row_idx}:  "
-        for cell in row_cells:
-            hud += f"[ {cell} ]  "
-        hud += "║\n"
-    
-    hud += "║                                    ║\n"
-    hud += "╚════════════════════════════════════╝\n"
+    # Build the complete tactical display
+    hud = "🛰️ *TACTICAL SATELLITE IMAGING FEED*\n"
+    hud += "╔════════════════════════════════════════╗\n"
+    for line in rendered_grid:
+        hud += line
+    hud += "╚════════════════════════════════════════╝\n"
     
     return hud
 
 
-def render_buildings_directory(base_layout: dict) -> str:
-    """Render a text directory listing all slots with their contents."""
+def render_scouting_intel(base_layout: dict) -> str:
+    """Render detailed intel report for scouts - shows HP and threat levels."""
     from build_system import BUILDING_TYPES
     
-    msg = "📋 *BUILDINGS DIRECTORY:*\n"
-    msg += "────────────────────────\n"
+    msg = "📋 *SECTOR INTELLIGENCE REPORT:*\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
     
-    for slot_id, info in sorted(base_layout.items()):
-        slot_num = slot_id.split("_")[1]
+    for sector in ["S", "N", "E", "W", "C", "NW", "NE", "SW", "SE"]:
+        info = base_layout.get(sector, {})
+        building_type = info.get("type", "empty")
         
-        if info["type"] == "empty":
-            msg += f"Slot {slot_num.rjust(2)}: ⬜ *Empty Plot*\n"
+        if building_type == "empty":
+            threat = "⚠️" if sector in ["S", "C"] else "⚡"
+            msg += f"**{sector}**: ⬜ *Empty* {threat}\n"
         else:
-            building_data = BUILDING_TYPES.get(info["type"], {})
-            building_name = building_data.get("name", info["type"].replace("_", " ").title())
-            icon = EMOJI_MAPPING.get(info["type"], "❓")
+            building_data = BUILDING_TYPES.get(building_type, {})
+            building_name = building_data.get("name", building_type.replace("_", " ").title())
+            icon = EMOJI_MAPPING.get(building_type, "❓")
+            hp = info.get("hp", 0)
+            level = info.get("level", 0)
             
-            if info["status"] == "building":
-                msg += f"Slot {slot_num.rjust(2)}: {icon} {building_name} 🚧 *UPGRADING*\n"
+            if info.get("status") == "building":
+                msg += f"**{sector}**: {icon} {building_name} Lv.{level} 🚧 HP: {hp:,}\n"
             else:
-                msg += f"Slot {slot_num.rjust(2)}: {icon} {building_name} Lv.{info['level']}\n"
+                threat_emoji = "🔴" if SECTOR_THREAT_LEVEL.get(sector, 0) >= 4 else "🟡" if SECTOR_THREAT_LEVEL.get(sector, 0) >= 3 else "🟢"
+                msg += f"**{sector}**: {icon} {building_name} Lv.{level} {threat_emoji} HP: {hp:,}\n"
     
     return msg
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  SLOT OPERATIONS
+#  SECTOR OPERATIONS
 # ═══════════════════════════════════════════════════════════════════════════
 
-def get_slot_by_id(base_layout: dict, slot_id: str) -> Optional[dict]:
-    """Get a single slot's data."""
-    return base_layout.get(slot_id)
+def get_sector_by_id(base_layout: dict, sector: str) -> Optional[dict]:
+    """Get a single sector's data."""
+    return base_layout.get(sector)
 
 
-def get_empty_slots(base_layout: dict) -> list:
-    """Return list of all empty slot IDs."""
+def get_empty_sectors(base_layout: dict) -> List[str]:
+    """Return list of all empty sector IDs."""
     return [
-        slot_id for slot_id, info in base_layout.items()
-        if info["type"] == "empty"
+        sector for sector, info in base_layout.items()
+        if info.get("type") == "empty"
     ]
 
 
-def get_building_slot(base_layout: dict, building_type: str) -> Optional[str]:
-    """Find if a building type exists on the map, return its slot_id or None."""
-    for slot_id, info in base_layout.items():
-        if info["type"] == building_type and info["type"] != "empty":
-            return slot_id
+def get_building_sector(base_layout: dict, building_type: str) -> Optional[str]:
+    """Find if a building type exists on the map, return its sector or None."""
+    for sector, info in base_layout.items():
+        if info.get("type") == building_type and building_type != "empty":
+            return sector
     return None
 
 
-def place_building_in_slot(
-    base_layout: dict, slot_id: str, building_type: str, level: int = 1
+def place_building_in_sector(
+    base_layout: dict, sector: str, building_type: str, level: int = 1
 ) -> Tuple[bool, str]:
     """
-    Place a building in an empty slot.
+    Place a building in an empty sector.
     Returns (success, message).
     """
-    if slot_id not in base_layout:
-        return False, f"Slot {slot_id} does not exist."
+    if sector not in COMPASS_SECTORS:
+        return False, f"Sector {sector} does not exist."
     
-    slot_info = base_layout[slot_id]
+    sector_info = base_layout.get(sector, {})
     
-    if slot_info["type"] != "empty":
-        return False, f"Slot {slot_id} is already occupied."
+    if sector_info.get("type") != "empty":
+        return False, f"Sector {sector} is already occupied by {sector_info.get('type')}."
     
-    base_layout[slot_id] = {
-        "coord": slot_info["coord"],
+    # Calculate max HP based on building type and level
+    from build_system import BUILDING_TYPES
+    building_data = BUILDING_TYPES.get(building_type, {})
+    
+    # Base HP calculation: level * 500 + building modifier
+    base_hp = 1000 + (level * 500)
+    if building_type in ["walls", "gatehouse"]:
+        base_hp = 2000 + (level * 800)  # Defensive structures have more HP
+    elif building_type == "base_hq":
+        base_hp = 10000
+    
+    base_layout[sector] = {
         "type": building_type,
         "level": level,
+        "hp": base_hp,
+        "max_hp": base_hp,
         "status": "idle",
     }
     
-    return True, f"Building {building_type} placed in {slot_id}."
+    return True, f"Building {building_type} placed in {sector} sector."
 
 
-def upgrade_building_in_slot(base_layout: dict, slot_id: str) -> Tuple[bool, str]:
-    """Increment a building's level (marks as building status)."""
-    if slot_id not in base_layout:
-        return False, f"Slot {slot_id} does not exist."
+def upgrade_building_in_sector(base_layout: dict, sector: str) -> Tuple[bool, str]:
+    """Mark a building as upgrading (under construction)."""
+    if sector not in COMPASS_SECTORS:
+        return False, f"Sector {sector} does not exist."
     
-    slot_info = base_layout[slot_id]
+    sector_info = base_layout.get(sector, {})
     
-    if slot_info["type"] == "empty":
-        return False, f"Slot {slot_id} is empty."
+    if sector_info.get("type") == "empty":
+        return False, f"Sector {sector} is empty."
     
-    slot_info["status"] = "building"
-    return True, f"Slot {slot_id} now upgrading."
+    sector_info["status"] = "building"
+    return True, f"Sector {sector} now upgrading."
 
 
-def complete_upgrade_in_slot(base_layout: dict, slot_id: str) -> Tuple[bool, str]:
+def complete_upgrade_in_sector(base_layout: dict, sector: str) -> Tuple[bool, str]:
     """Complete an upgrade by incrementing level and marking idle."""
-    if slot_id not in base_layout:
-        return False, f"Slot {slot_id} does not exist."
+    if sector not in COMPASS_SECTORS:
+        return False, f"Sector {sector} does not exist."
     
-    slot_info = base_layout[slot_id]
+    sector_info = base_layout.get(sector, {})
     
-    if slot_info["type"] == "empty":
-        return False, f"Slot {slot_id} is empty."
+    if sector_info.get("type") == "empty":
+        return False, f"Sector {sector} is empty."
     
-    slot_info["level"] += 1
-    slot_info["status"] = "idle"
-    return True, f"Upgrade complete! {slot_id} is now level {slot_info['level']}."
+    sector_info["level"] += 1
+    sector_info["status"] = "idle"
+    
+    # Increase HP with each upgrade
+    old_hp = sector_info.get("max_hp", 1000)
+    new_hp = old_hp + (old_hp * 0.25)  # +25% per level
+    sector_info["max_hp"] = int(new_hp)
+    sector_info["hp"] = int(new_hp)
+    
+    return True, f"Upgrade complete! {sector} is now level {sector_info['level']}."
 
 
-def destroy_building_in_slot(base_layout: dict, slot_id: str) -> Tuple[bool, str]:
-    """Remove a building and mark slot as empty."""
-    if slot_id not in base_layout:
-        return False, f"Slot {slot_id} does not exist."
+def damage_sector(base_layout: dict, sector: str, damage: int) -> Tuple[bool, str, bool]:
+    """
+    Damage a sector building. Returns (success, message, destroyed).
+    destroyed=True if building is fully destroyed.
+    """
+    if sector not in COMPASS_SECTORS:
+        return False, f"Sector {sector} does not exist.", False
     
-    slot_info = base_layout[slot_id]
-    building_name = slot_info["type"]
+    sector_info = base_layout.get(sector, {})
     
-    base_layout[slot_id] = {
-        "coord": slot_info["coord"],
+    if sector_info.get("type") == "empty":
+        return False, f"Sector {sector} is empty.", False
+    
+    old_hp = sector_info.get("hp", 0)
+    new_hp = max(0, old_hp - damage)
+    sector_info["hp"] = new_hp
+    
+    destroyed = new_hp <= 0
+    
+    if destroyed:
+        building_name = sector_info.get("type")
+        sector_info["type"] = "empty"
+        sector_info["level"] = 0
+        sector_info["hp"] = 0
+        sector_info["max_hp"] = 0
+        sector_info["status"] = "empty"
+        return True, f"⚔️ {building_name} in {sector} sector DESTROYED!", True
+    else:
+        return True, f"💥 {sector} sector damaged. HP: {new_hp:,}/{sector_info.get('max_hp'):,}", False
+
+
+def destroy_building_in_sector(base_layout: dict, sector: str) -> Tuple[bool, str]:
+    """Remove a building and mark sector as empty."""
+    if sector not in COMPASS_SECTORS:
+        return False, f"Sector {sector} does not exist."
+    
+    sector_info = base_layout.get(sector, {})
+    building_name = sector_info.get("type", "empty")
+    
+    if building_name == "empty":
+        return False, f"Sector {sector} is already empty."
+    
+    base_layout[sector] = {
         "type": "empty",
         "level": 0,
+        "hp": 0,
+        "max_hp": 0,
         "status": "empty",
     }
     
-    return True, f"{building_name} demolished. Slot {slot_id} is now empty."
+    return True, f"{building_name} demolished. Sector {sector} is now empty."
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -245,48 +354,72 @@ def destroy_building_in_slot(base_layout: dict, slot_id: str) -> Tuple[bool, str
 
 def parse_callback_data(callback_data: str) -> dict:
     """
-    Parse structured callback_data strings like 'base:view_slot_3' or 'base:build_slot_3'.
-    Returns dict with keys: action, context, slot_id (if applicable).
+    Parse structured callback_data strings like 'base:view_NE' or 'base:attack_NE'.
+    Returns dict with keys: action, context, sector (if applicable).
     """
     parts = callback_data.split(":")
     
     if len(parts) < 2:
-        return {"action": callback_data, "context": None, "slot_id": None}
+        return {"action": callback_data, "context": None, "sector": None}
     
     context = parts[0]  # e.g., "base"
-    action_and_slot = parts[1]  # e.g., "view_slot_3"
+    action_and_sector = parts[1]  # e.g., "view_NE"
     
-    if "_" in action_and_slot:
-        action, slot_id = action_and_slot.rsplit("_", 1)  # rsplit to handle "slot_3"
-        return {"action": action, "context": context, "slot_id": f"slot_{slot_id}"}
+    if "_" in action_and_sector:
+        action, sector = action_and_sector.rsplit("_", 1)
+        return {"action": action, "context": context, "sector": sector}
     else:
-        return {"action": action_and_slot, "context": context, "slot_id": None}
+        return {"action": action_and_sector, "context": context, "sector": None}
 
 
-def generate_slot_buttons(base_layout: dict, per_row: int = 3) -> list:
+def generate_sector_buttons(base_layout: dict) -> list:
     """
-    Generate inline keyboard buttons for all slots.
-    Returns list of button rows.
+    Generate inline keyboard buttons for all compass sectors in a 3×3 grid layout.
+    Returns list of button rows arranged as:
+    [NW] [N] [NE]
+    [W]  [C] [E]
+    [SW] [S] [SE]
     """
     from aiogram.types import InlineKeyboardButton
     
+    # Sector arrangement matches the compass grid
+    rows = [
+        ["NW", "N", "NE"],
+        ["W", "C", "E"],
+        ["SW", "S", "SE"]
+    ]
+    
     buttons = []
-    row = []
-    
-    for slot_id in sorted(base_layout.keys(), key=lambda x: int(x.split("_")[1])):
-        slot_num = slot_id.split("_")[1]
-        button = InlineKeyboardButton(
-            text=f"Slot {slot_num}",
-            callback_data=f"base:view_{slot_id}"
-        )
-        row.append(button)
+    for row_sectors in rows:
+        button_row = []
+        for sector in row_sectors:
+            sector_data = base_layout.get(sector, {})
+            building_type = sector_data.get("type", "empty")
+            
+            # Show a threat indicator for occupied sectors
+            threat_icon = "🔴" if building_type != "empty" else "⚪"
+            
+            button = InlineKeyboardButton(
+                text=f"{sector} {threat_icon}",
+                callback_data=f"base:view_{sector}"
+            )
+            button_row.append(button)
         
-        if len(row) == per_row:
-            buttons.append(row)
-            row = []
-    
-    # Add remaining buttons to a partial row
-    if row:
-        buttons.append(row)
+        buttons.append(button_row)
     
     return buttons
+
+
+def get_sector_status_brief(base_layout: dict, sector: str) -> str:
+    """Get a single-line status for a sector."""
+    info = base_layout.get(sector, {})
+    building_type = info.get("type", "empty")
+    
+    if building_type == "empty":
+        return f"{sector}: ⬜ Empty"
+    else:
+        level = info.get("level", 0)
+        hp = info.get("hp", 0)
+        max_hp = info.get("max_hp", 1)
+        status = "🚧" if info.get("status") == "building" else "✅"
+        return f"{sector}: {EMOJI_MAPPING.get(building_type, '❓')} {building_type.title()} Lv.{level} {status} ({hp}/{max_hp} HP)"
