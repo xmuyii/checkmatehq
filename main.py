@@ -36,8 +36,7 @@ from base_layout import (
     render_tactical_map, render_scouting_intel, get_sector_by_id,
     place_building_in_sector, complete_upgrade_in_sector,
     parse_callback_data, initialize_user_base_layout, COMPASS_SECTORS,
-    EMOJI_MAPPING, damage_sector, render_buildings_directory, 
-    generate_sector_buttons, get_default_base_layout, upgrade_building_in_sector
+    EMOJI_MAPPING, damage_sector, generate_sector_buttons, get_default_base_layout, upgrade_building_in_sector
 )
 from tactical_base_handlers import router as base_router
 from power_system import calculate_battle_outcome
@@ -2807,7 +2806,7 @@ async def show_base_menu(callback: types.CallbackQuery):
     
     # Render the visual matrix
     matrix_display = render_tactical_map(base_layout)
-    buildings_dir = render_buildings_directory(base_layout)
+    buildings_dir = render_scouting_intel (base_layout)
     
     text_hud = (
         f"*🏰 YOUR BASE MAP 🏰*\n\n"

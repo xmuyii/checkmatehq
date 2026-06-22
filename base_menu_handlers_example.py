@@ -27,10 +27,10 @@ IMPLEMENTATION WORKFLOW:
 from aiogram import Router, F, types
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from base_layout import (
-    render_base_matrix, render_buildings_directory, get_slot_by_id,
-    place_building_in_slot, upgrade_building_in_slot, complete_upgrade_in_slot,
-    parse_callback_data, get_empty_slots, initialize_user_base_layout,
-    generate_slot_buttons, EMOJI_MAPPING
+    render_tactical_map, render_scouting_intel, get_sector_by_id,
+    place_building_in_sector, complete_upgrade_in_sector,
+    parse_callback_data, initialize_user_base_layout, COMPASS_SECTORS,
+    EMOJI_MAPPING, damage_sector, generate_sector_buttons, get_default_base_layout, upgrade_building_in_sector
 )
 from build_system import BUILDING_TYPES, get_available_buildings
 from supabase_db import get_user, save_user
@@ -63,8 +63,8 @@ async def show_base_menu(callback: CallbackQuery):
     base_layout = user.get("base_layout", {})
     
     # Render the visual matrix
-    matrix_display = render_base_matrix(base_layout)
-    buildings_dir = render_buildings_directory(base_layout)
+    matrix_display = render_tactical_map(base_layout)
+    buildings_dir = render_scouting_intel (base_layout)
     
     text_hud = (
         f"*🏰 YOUR BASE MAP 🏰*\n\n"
@@ -74,7 +74,7 @@ async def show_base_menu(callback: CallbackQuery):
     )
     
     # Generate slot buttons (3 per row, organized by slot number)
-    slot_buttons = generate_slot_buttons(base_layout, per_row=3)
+    slot_buttons = generate_sector_buttons(base_layout, per_row=3)
     
     # Add back button
     slot_buttons.append([
@@ -114,7 +114,7 @@ async def show_slot_details(callback: CallbackQuery):
     slot_id = parsed.get("slot_id")  # e.g., "slot_3"
     
     base_layout = user.get("base_layout", {})
-    slot_info = get_slot_by_id(base_layout, slot_id)
+    slot_info = get_sector_by_id(base_layout, slot_id)
     
     if not slot_info:
         await callback.answer("Slot not found", show_alert=True)
@@ -218,7 +218,7 @@ async def confirm_build(callback: CallbackQuery):
     building_id = "_".join(parts[3:])  # training_grounds (handles multi-word)
     
     base_layout = user.get("base_layout", {})
-    slot_info = get_slot_by_id(base_layout, slot_id)
+    slot_info = get_sector_by_id(base_layout, slot_id)
     
     if not slot_info or slot_info["type"] != "empty":
         await callback.answer("Slot is not empty", show_alert=True)
@@ -292,7 +292,7 @@ async def execute_build(callback: CallbackQuery):
     base_layout = user.get("base_layout", {})
     
     # Place building in slot
-    success, message = place_building_in_slot(base_layout, slot_id, building_id, level=1)
+    success, message = place_building_in_sector(base_layout, slot_id, building_id, level=1)
     
     if not success:
         await callback.answer(f"Error: {message}", show_alert=True)
