@@ -36,7 +36,8 @@ from base_layout import (
     render_tactical_map, render_scouting_intel, get_sector_by_id,
     place_building_in_sector, complete_upgrade_in_sector,
     parse_callback_data, initialize_user_base_layout, COMPASS_SECTORS,
-    EMOJI_MAPPING, damage_sector, 
+    EMOJI_MAPPING, damage_sector, render_buildings_directory, 
+    generate_sector_buttons, get_default_base_layout, upgrade_building_in_sector
 )
 from tactical_base_handlers import router as base_router
 from power_system import calculate_battle_outcome
@@ -131,7 +132,7 @@ def check_and_complete_buildings(user: dict) -> dict:
                     # Complete this building
                     user = complete_building(user, building_id)
                     completed.append(building_id)
-        complete_upgrade_in_slot()
+        complete_upgrade_in_sector()
         return user
     except Exception as e:
         print(f"[WARNING] Building completion check failed: {e}")
@@ -2805,7 +2806,7 @@ async def show_base_menu(callback: types.CallbackQuery):
     base_layout = user.get("base_layout", {})
     
     # Render the visual matrix
-    matrix_display = render_base_matrix(base_layout)
+    matrix_display = render_tactical_map(base_layout)
     buildings_dir = render_buildings_directory(base_layout)
     
     text_hud = (
@@ -2816,7 +2817,7 @@ async def show_base_menu(callback: types.CallbackQuery):
     )
     
     # Generate slot buttons (3 per row, organized by slot number)
-    slot_buttons = generate_slot_buttons(base_layout, per_row=3)
+    slot_buttons = generate_sector_buttons(base_layout, per_row=3)
     
     # Add back button
     slot_buttons.append([
@@ -3030,7 +3031,7 @@ async def callback_build_confirm(callback: types.CallbackQuery):
     user = start_building(building_id, current_level, user)
     slot_id = "slot_3"  # From callback parsing
     base_layout = user["base_layout"]
-    upgrade_building_in_slot(base_layout, slot_id)  # Marks as "building"
+    upgrade_building_in_sector(base_layout, slot_id)  # Marks as "building"
     save_user(u_id, user)
     
     # Get progress info
@@ -9677,7 +9678,7 @@ async def sheets_sync_background_task(bot: Bot, chat_id: int):
                 from sync_to_sheets import (
                     update_google_sheet,
                     get_fusion_weekly_leaderboard,
-                    get_fusion_alltime_leaderboard
+                    get_fusion_alltime_leaderboard, logger
                 )
                 
                 # Fetch both leaderboards
