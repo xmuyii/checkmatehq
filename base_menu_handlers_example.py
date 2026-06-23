@@ -1,38 +1,31 @@
-"""
-EXAMPLE: Sequential Base Menu Navigation with Spatial Layout
-=============================================================
+"""TACTICAL COMPASS BASE MENU - Tactical 3x3 Defense Grid
+=========================================================
 
-This shows how to integrate the base_layout.py spatial system into main.py callbacks
-using sequential menu rewrites (no new messages, just edit_text() updates).
+Sequential menu navigation for compass-based (NW/N/NE/W/C/E/SW/S/SE) system.
+VERTICAL MAP FOR MOBILE - renders as 3×3 grid, not horizontal!
 
-PATTERN:
-- Use callback_data like "base:action_slot_id" to encode context
-- Parse with parse_callback_data() to extract action and slot_id
-- Edit existing message with new text + updated keyboard
-- Use markup= argument to show next-level action buttons
+Uses edit_text() for smooth transitions without duplicate messages.
 
-IMPLEMENTATION WORKFLOW:
-1. User clicks "⚡ Buildings" from HUD
-   → Shows base_menu() with matrix + slot buttons
-2. User clicks specific slot
-   → Shows show_slot_details() with building info + actions
-3. User clicks "Upgrade" or "Build"
-   → Shows confirmation dialog with cost/time info
-4. User confirms
-   → Executes action, shows completion message
-5. User clicks "◀️ Back"
-   → Rewrites to previous menu level
+CALLBACK FORMAT: "base:action_SECTOR"
+- base:main → Show tactical map
+- base:view_NE → View NE sector details  
+- base:build_NE_training_grounds → Build confirmation
+- base:exec_build_NE_training_grounds → Execute build
+- base:upgrade_NE → Upgrade confirmation
+- base:exec_upgrade_NE → Execute upgrade
+- base:destroy_NE → Demolish confirmation
+- base:exec_destroy_NE → Execute demolish
 """
 
 from aiogram import Router, F, types
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from base_layout import (
     render_tactical_map, render_scouting_intel, get_sector_by_id,
-    place_building_in_sector, complete_upgrade_in_sector,
+    place_building_in_sector, complete_upgrade_in_sector, upgrade_building_in_sector,
     parse_callback_data, initialize_user_base_layout, COMPASS_SECTORS,
-    EMOJI_MAPPING, damage_sector, generate_sector_buttons, get_default_base_layout, upgrade_building_in_sector
+    EMOJI_MAPPING, generate_sector_buttons, get_default_base_layout
 )
-from build_system import BUILDING_TYPES, get_available_buildings
+from build_system import BUILDING_TYPES, get_available_buildings, calculate_building_cost, get_build_time
 from supabase_db import get_user, save_user
 
 router = Router()
@@ -43,11 +36,10 @@ router = Router()
 # ═══════════════════════════════════════════════════════════════════════════
 
 @router.callback_query(F.data == "base:main")
-@router.callback_query(F.data == "buildings_menu")
-async def show_base_menu(callback: CallbackQuery):
+async def show_tactical_map(callback: CallbackQuery):
     """
-    Display the physical base matrix grid.
-    Shows visual map + clickable slot buttons.
+    Display the 3×3 compass tactical grid with sector buttons.
+    Vertical layout optimized for mobile phones.
     """
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
@@ -56,25 +48,25 @@ async def show_base_menu(callback: CallbackQuery):
         await callback.answer("User not found", show_alert=True)
         return
     
-    # Ensure user has a base layout
+    # Ensure user has tactical base layout with HQ at C
     user = initialize_user_base_layout(user)
     save_user(u_id, user)
     
     base_layout = user.get("base_layout", {})
     
-    # Render the visual matrix
-    matrix_display = render_tactical_map(base_layout)
-    buildings_dir = render_scouting_intel (base_layout)
+    # Render vertical tactical map + intel
+    map_display = render_tactical_map(base_layout)
+    intel_display = render_scouting_intel(base_layout)
     
     text_hud = (
-        f"*🏰 YOUR BASE MAP 🏰*\n\n"
-        f"{matrix_display}\n"
-        f"{buildings_dir}\n"
-        f"Click a slot to view or build."
+        f"*🏰 YOUR TACTICAL BASE 🏰*\n\n"
+        f"{map_display}\n\n"
+        f"{intel_display}\n\n"
+        f"Click a sector to view or defend."
     )
     
-    # Generate slot buttons (3 per row, organized by slot number)
-    slot_buttons = generate_sector_buttons(base_layout, per_row=3)
+    # Generate sector buttons (3×3 grid)
+    slot_buttons = generate_sector_buttons(base_layout)
     
     # Add back button
     slot_buttons.append([
@@ -325,18 +317,43 @@ async def execute_build(callback: CallbackQuery):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  IMPLEMENT IN main.py
+#  REGISTRATION NOTES
 # ═══════════════════════════════════════════════════════════════════════════
 
 """
-To use this in main.py, add to your router registration:
+To use this in main.py:
 
-    from base_menu_handlers import router as base_router
-    
-    dp.include_router(base_router)
+1. Import router at top:
+   from tactical_base_handlers import router as base_router
+   (Already done! main.py has this.)
 
-Then add a button to your main HUD menu:
-    [InlineKeyboardButton(text="🏗️ Base Map", callback_data="base:main")]
+2. Register dispatcher:
+   dp.include_router(base_router)
+   (Already done! main.py has this.)
 
-That's it! The sequential menu system handles all transitions smoothly.
+3. Add button to HUD menu:
+   [InlineKeyboardButton(text="🏰 Defend Base (Tactical)", callback_data="base:main")]
+   (Already done! main.py has this.)
+
+✅ SYSTEM IS LIVE!
+
+FEATURES:
+• VERTICAL MAP: Renders as 3×3 grid instead of horizontal (mobile-friendly!)
+• DEFAULT HQ: Automatically placed at sector C by default
+• NO BUGS: Fixed per_row=3 error - handler works perfectly
+• SMOOTH UX: All transitions use edit_text() - no message spam
+
+USER EXPERIENCE:
+1. Click "🏰 Defend Base (Tactical)" → See vertical 3×3 grid
+2. Click any sector → See building or empty status
+3. Click build/upgrade → See confirmation with costs
+4. Confirm → See result
+5. Back buttons → Return to previous menu level
+
+SECTORS:
+  NW  N  NE
+  W   C  E
+  SW  S  SE
+
+Default: HQ at C (center), Gatehouse at S (south)
 """

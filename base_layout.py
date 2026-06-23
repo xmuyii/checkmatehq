@@ -124,45 +124,37 @@ def initialize_user_base_layout(user: dict) -> dict:
 
 def render_tactical_map(base_layout: dict) -> str:
     """
-    Render the compass-based tactical map with visual road connections.
-    Shows emoji buildings and structural road infrastructure (═, ║, ╬).
-    Layout explicitly reveals which sectors are blocking access to deeper positions.
+    Render the compass-based tactical map VERTICALLY for mobile compatibility.
+    Shows emoji buildings in a 3x3 grid arranged North-South-East-West.
     """
-    # Substitute building emojis into the geometry template
-    rendered_grid = []
-    
-    for row in COMPASS_GEOMETRY:
-        rendered_row = "║ "
-        for item in row:
-            key = item.strip()
-            
-            if key in COMPASS_SECTORS:
-                # This is a compass sector - show the building
-                sector_data = base_layout.get(key, {})
-                building_type = sector_data.get("type", "empty")
-                
-                # Show construction icon if building
-                if sector_data.get("status") == "building":
-                    icon = EMOJI_MAPPING["building"]
-                else:
-                    icon = EMOJI_MAPPING.get(building_type, EMOJI_MAPPING["empty"])
-                
-                # Pad sector label with icon
-                rendered_row += f" {icon}({key}) "
-            else:
-                # Road infrastructure - pass through as-is
-                rendered_row += f"  {item}  "
+    def get_sector_display(sector_key):
+        """Get emoji + sector label for a single sector."""
+        sector_data = base_layout.get(sector_key, {})
+        building_type = sector_data.get("type", "empty")
         
-        # Right border padding
-        rendered_row = rendered_row.ljust(40) + "║\n"
-        rendered_grid.append(rendered_row)
+        # Show construction icon if building
+        if sector_data.get("status") == "building":
+            icon = EMOJI_MAPPING["building"]
+        else:
+            icon = EMOJI_MAPPING.get(building_type, EMOJI_MAPPING["empty"])
+        
+        return f"{icon}{sector_key}"
     
-    # Build the complete tactical display
-    hud = "🛰️ *TACTICAL SATELLITE IMAGING FEED*\n"
-    hud += "╔════════════════════════════════════════╗\n"
-    for line in rendered_grid:
-        hud += line
-    hud += "╚════════════════════════════════════════╝\n"
+    # Build 3x3 vertical grid for mobile
+    hud = "```\n"
+    hud += "🛰️  TACTICAL BASE MAP\n\n"
+    
+    # Row 1: NW  N  NE
+    hud += f"{get_sector_display('NW'):^8} {get_sector_display('N'):^8} {get_sector_display('NE'):^8}\n"
+    hud += "\n"
+    
+    # Row 2: W  C  E
+    hud += f"{get_sector_display('W'):^8} {get_sector_display('C'):^8} {get_sector_display('E'):^8}\n"
+    hud += "\n"
+    
+    # Row 3: SW  S  SE
+    hud += f"{get_sector_display('SW'):^8} {get_sector_display('S'):^8} {get_sector_display('SE'):^8}\n"
+    hud += "```"
     
     return hud
 
