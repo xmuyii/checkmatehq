@@ -2816,7 +2816,7 @@ async def show_base_menu(callback: types.CallbackQuery):
     )
     
     # Generate slot buttons (3 per row, organized by slot number)
-    slot_buttons = generate_sector_buttons(base_layout, per_row=3)
+    slot_buttons = generate_sector_buttons(base_layout)
     
     # Add back button
     slot_buttons.append([
