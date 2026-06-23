@@ -125,7 +125,7 @@ def initialize_user_base_layout(user: dict) -> dict:
 def render_tactical_map(base_layout: dict) -> str:
     """
     Render the compass-based tactical map VERTICALLY for mobile compatibility.
-    Shows emoji buildings in a 3x3 grid arranged North-South-East-West.
+    Shows emoji buildings in a 3x3 grid with connections to adjacent sectors.
     """
     def get_sector_display(sector_key):
         """Get emoji + sector label for a single sector."""
@@ -140,19 +140,19 @@ def render_tactical_map(base_layout: dict) -> str:
         
         return f"{icon}{sector_key}"
     
-    # Build 3x3 vertical grid for mobile
+    # Build 3x3 vertical grid for mobile with connection arrows
     hud = "```\n"
     hud += "🛰️  TACTICAL BASE MAP\n\n"
     
-    # Row 1: NW  N  NE
+    # Row 1: NW  ↔  N  ↔  NE
     hud += f"{get_sector_display('NW'):^8} {get_sector_display('N'):^8} {get_sector_display('NE'):^8}\n"
-    hud += "\n"
+    hud += f"{'↔':^8} {'↕':^8} {'↔':^8}\n"
     
-    # Row 2: W  C  E
+    # Row 2: W  ↔  C  ↔  E
     hud += f"{get_sector_display('W'):^8} {get_sector_display('C'):^8} {get_sector_display('E'):^8}\n"
-    hud += "\n"
+    hud += f"{'↔':^8} {'↕':^8} {'↔':^8}\n"
     
-    # Row 3: SW  S  SE
+    # Row 3: SW  ↔  S  ↔  SE
     hud += f"{get_sector_display('SW'):^8} {get_sector_display('S'):^8} {get_sector_display('SE'):^8}\n"
     hud += "```"
     
