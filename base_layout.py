@@ -152,11 +152,11 @@ def render_tactical_map(base_layout: dict) -> str:
     
     # Row 1: NW  ↔  N  ↔  NE
     hud += f"{get_sector_display('NW'):^8} {'↔':^8} {get_sector_display('N'):^8} {'↔':^8} {get_sector_display('NE'):^8}\n"
-    hud += f"{'↕':^8} {'↕':^8} {'↕':^8}\n"
+    hud += f"{'↕':^8} {' ':^8} {'↕':^8} {' ':^8} {'↕':^8}\n"
     
     # Row 2: W  ↔  C  ↔  E
     hud += f"{get_sector_display('W'):^8} {'↔':^8} {get_sector_display('C'):^8} {'↔':^8} {get_sector_display('E'):^8}\n"
-    hud += f"{'↕':^8} {'↕':^8} {'↕':^8}\n"
+    hud += f"{'↕':^8} {' ':^8} {'↕':^8} {' ':^8} {'↕':^8}\n"
     
     # Row 3: SW  ↔  S  ↔  SE
     hud += f"{get_sector_display('SW'):^8} {'↔':^8} {get_sector_display('S'):^8} {'↔':^8} {get_sector_display('SE'):^8}\n"
@@ -190,7 +190,7 @@ def render_scouting_intel(base_layout: dict) -> str:
                 msg += f"**{sector}**: {icon} {building_name} Lv.{level} 🚧 HP: {hp:,}\n"
             else:
                 threat_emoji = "🔴" if SECTOR_THREAT_LEVEL.get(sector, 0) >= 4 else "🟡" if SECTOR_THREAT_LEVEL.get(sector, 0) >= 3 else "🟢"
-                msg += f"**{sector}**: {icon} {building_name} Lv.{level} {threat_emoji} HP: {hp:,}\n"
+                msg += f"**{sector}**: {building_name} Lv.{level} {threat_emoji} HP: {hp:,}\n"
     
     return msg
 
