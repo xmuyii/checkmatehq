@@ -108,9 +108,15 @@ def get_default_base_layout() -> Dict[str, dict]:
 
 
 def initialize_user_base_layout(user: dict) -> dict:
-    """Initialize compass-based layout if user doesn't have one."""
-    if "base_layout" not in user:
+    """Initialize compass-based layout if user doesn't have one. Ensures all 9 sectors exist."""
+    if "base_layout" not in user or not user["base_layout"]:
         user["base_layout"] = get_default_base_layout()
+    else:
+        # Ensure all 9 sectors exist (fill in missing sectors from default)
+        default = get_default_base_layout()
+        for sector in COMPASS_SECTORS:
+            if sector not in user["base_layout"]:
+                user["base_layout"][sector] = default[sector]
     return user
 
 
@@ -145,15 +151,15 @@ def render_tactical_map(base_layout: dict) -> str:
     hud += "🛰️  TACTICAL BASE MAP\n\n"
     
     # Row 1: NW  ↔  N  ↔  NE
-    hud += f"{get_sector_display('NW'):^8} {get_sector_display('N'):^8} {get_sector_display('NE'):^8}\n"
-    hud += f"{'↔':^8} {'↕':^8} {'↔':^8}\n"
+    hud += f"{get_sector_display('NW'):^8} {'↔':^8} {get_sector_display('N'):^8} {'↔':^8} {get_sector_display('NE'):^8}\n"
+    hud += f"{'↕':^8} {'↕':^8} {'↕':^8}\n"
     
     # Row 2: W  ↔  C  ↔  E
-    hud += f"{get_sector_display('W'):^8} {get_sector_display('C'):^8} {get_sector_display('E'):^8}\n"
-    hud += f"{'↔':^8} {'↕':^8} {'↔':^8}\n"
+    hud += f"{get_sector_display('W'):^8} {'↔':^8} {get_sector_display('C'):^8} {'↔':^8} {get_sector_display('E'):^8}\n"
+    hud += f"{'↕':^8} {'↕':^8} {'↕':^8}\n"
     
     # Row 3: SW  ↔  S  ↔  SE
-    hud += f"{get_sector_display('SW'):^8} {get_sector_display('S'):^8} {get_sector_display('SE'):^8}\n"
+    hud += f"{get_sector_display('SW'):^8} {'↔':^8} {get_sector_display('S'):^8} {'↔':^8} {get_sector_display('SE'):^8}\n"
     hud += "```"
     
     return hud

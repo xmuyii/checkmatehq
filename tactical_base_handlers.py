@@ -115,6 +115,10 @@ async def show_sector_details(callback: CallbackQuery):
         await callback.answer("Invalid sector", show_alert=True)
         return
     
+    # Ensure user has all 9 sectors initialized
+    user = initialize_user_base_layout(user)
+    save_user(u_id, user)
+    
     base_layout = user.get("base_layout", {})
     sector_info = get_sector_by_id(base_layout, sector)
     
@@ -225,6 +229,10 @@ async def confirm_build(callback: CallbackQuery):
         await callback.answer("User not found", show_alert=True)
         return
     
+    # Ensure user has all 9 sectors initialized
+    user = initialize_user_base_layout(user)
+    save_user(u_id, user)
+    
     # Parse: base:build_NE_training_grounds
     parts = callback.data.split("_")
     sector = parts[2]  # NE
@@ -296,6 +304,9 @@ async def execute_build(callback: CallbackQuery):
         await callback.answer("User not found", show_alert=True)
         return
     
+    # Ensure user has all 9 sectors initialized
+    user = initialize_user_base_layout(user)
+    
     # Parse: base:exec_build_NE_training_grounds
     parts = callback.data.split("_")
     sector = parts[3]
@@ -350,6 +361,10 @@ async def confirm_upgrade(callback: CallbackQuery):
     if not user or not sector:
         await callback.answer("Error loading data", show_alert=True)
         return
+    
+    # Ensure user has all 9 sectors initialized
+    user = initialize_user_base_layout(user)
+    save_user(u_id, user)
     
     base_layout = user.get("base_layout", {})
     sector_info = get_sector_by_id(base_layout, sector)
@@ -406,6 +421,9 @@ async def execute_upgrade(callback: CallbackQuery):
     user = get_user(u_id)
     sector = parse_callback_data(callback.data).get("sector")
     
+    # Ensure user has all 9 sectors initialized
+    user = initialize_user_base_layout(user)
+    
     base_layout = user.get("base_layout", {})
     success, message = upgrade_building_in_sector(base_layout, sector)
     
@@ -435,6 +453,11 @@ async def confirm_destroy(callback: CallbackQuery):
     sector = parse_callback_data(callback.data).get("sector")
     
     user = get_user(u_id)
+    
+    # Ensure user has all 9 sectors initialized
+    user = initialize_user_base_layout(user)
+    save_user(u_id, user)
+    
     base_layout = user.get("base_layout", {})
     sector_info = get_sector_by_id(base_layout, sector)
     
