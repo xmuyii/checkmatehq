@@ -36,7 +36,8 @@ from base_layout import (
     render_tactical_map, render_scouting_intel, get_sector_by_id,
     place_building_in_sector, complete_upgrade_in_sector,
     parse_callback_data, initialize_user_base_layout, COMPASS_SECTORS,
-    EMOJI_MAPPING, damage_sector, generate_sector_buttons, get_default_base_layout, upgrade_building_in_sector
+    EMOJI_MAPPING, SECTOR_THREAT_LEVEL, damage_sector, generate_sector_buttons,
+    get_default_base_layout, upgrade_building_in_sector
 )
 from tactical_base_handlers import router as base_router
 from power_system import calculate_battle_outcome
@@ -154,6 +155,29 @@ async def safe_answer(callback, text: str = None, show_alert: bool = False) -> b
             # Log other exceptions
             print(f"[WARNING] Callback answer failed: {e}")
             return False
+
+
+def get_base_mission(user: dict) -> str:
+    """Return a mission objective for the HUD or base menu."""
+    if not user:
+        return "🧠 Explore your base and claim rewards."
+
+    unclaimed = len(user.get("unclaimed_items", []) or [])
+    if unclaimed > 0:
+        return f"🎁 Claim {unclaimed} reward{'s' if unclaimed != 1 else ''} now."
+
+    base_layout = user.get("base_layout", {})
+    empty_sectors = [s for s, info in (base_layout or {}).items() if info.get("type") == "empty"]
+    if empty_sectors:
+        sorted_empty = sorted(empty_sectors, key=lambda s: -SECTOR_THREAT_LEVEL.get(s, 0))
+        return f"🎯 Build in {sorted_empty[0]} to strengthen your defense."
+
+    for sector in COMPASS_SECTORS:
+        info = (base_layout or {}).get(sector, {})
+        if info.get("type") != "empty" and info.get("status") != "building":
+            return f"⚡ Upgrade the {info.get('type')} in {sector}."
+
+    return "🧠 Research new tech or claim rewards to keep the momentum."
 
 # ── Addictive Mechanics ────────────────────────────────────────────────────
 from addictive_mechanics import (
@@ -5472,6 +5496,36 @@ async def cb_battle_revenge_info(callback: types.CallbackQuery):
     )
 
 
+def get_hud_objective(user: dict) -> str:
+    from supabase_db import calculate_level
+    from base_layout import get_empty_sectors
+
+    level = calculate_level(user.get('xp', 0) or 0)
+    unclaimed = len(user.get('unclaimed_items', []) or [])
+    if unclaimed > 0:
+        return f"🎁 Claim {unclaimed} reward{'s' if unclaimed != 1 else ''}."
+
+    training_queue = user.get('training_queue', []) or []
+    military = user.get('military', {}) or {}
+    if not military or len(training_queue) == 0:
+        return f"🎖️ Train troops to make your level {level} base battle-ready."
+
+    researches = user.get('researches', {}) or {}
+    pending = [
+        "armor_plating", "speed_training", "resource_extraction",
+        "population_growth", "trap_efficiency"
+    ]
+    available = [name for name in pending if not researches.get(name)]
+    if available:
+        return f"🔬 Research {available[0].replace('_', ' ').title()} next."
+
+    empty_sectors = get_empty_sectors(user.get('base_layout', {}))
+    if empty_sectors:
+        return f"🏗️ Build in {empty_sectors[0]} to strengthen your defense."
+
+    return f"⚡ Level {level} | Upgrade, train, or research to stay ahead."
+
+
 @dp.callback_query(lambda q: q.data == "menu_back")
 async def cb_menu_back_to_hud(callback: types.CallbackQuery):
     """Return to main HUD from any sub-menu."""
@@ -5535,7 +5589,7 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
         card += "╠═══════════════════════════╣\n"
         card += format_line("📍", "Sector: ", str(sector), is_bold_value=True)
         card += format_building_queue_display(user)
-        card += format_line("📍", "Next mission ", str(sector), is_bold_value=True)
+        card += format_line("📍", "Next mission ", get_hud_objective(user), is_bold_value=False)
         card += format_line("📍", "Ongoing Events- Real time counting", str(sector), is_bold_value=True)
         card += format_line("📍", "Free gift ", str(sector), is_bold_value=True)
         card += format_line("🏰", "", base_name[:16], is_bold_value=True)
@@ -7819,12 +7873,19 @@ async def cb_research(callback: types.CallbackQuery):
         base_res['resources'] = resources
         user['base_resources'] = base_res
         save_user(u_id, user)
+        add_unclaimed_item(u_id, "iron_crate", 1)
         
         await callback.message.edit_text(
             f"🔬 *RESEARCH COMPLETE!*\n\n"
-            f"{research['name']} unlocked!\n\n"
+            f"{research['name']} unlocked!\n"
+            f"You earned an *Iron Crate* reward. Claim it from Rewards!\n\n"
             f"🃏 *GameMaster:* \"Progress. Adequate.\"",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🎁 Claim Rewards", callback_data="menu_claims")],
+                [InlineKeyboardButton(text="🏗️ Build More", callback_data="build_menu"),
+                 InlineKeyboardButton(text="🎖️ Train Army", callback_data="train_menu")]
+            ])
         )
         await callback.answer("✅ Research unlocked!", show_alert=False)
     except Exception as e:
@@ -8094,7 +8155,12 @@ async def cb_train_confirm(callback: types.CallbackQuery):
             f"✅ *TRAINING COMPLETE!*\n\n"
             f"🎖️ +{quantity} {unit['name'].lower()}\n\n"
             f"Your army grows stronger. The weak tremble.",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🏗️ Build", callback_data="build_menu"),
+                 InlineKeyboardButton(text="🔬 Research Lab", callback_data="menu_research")],
+                [InlineKeyboardButton(text="🎁 Claim Rewards", callback_data="menu_claims")]
+            ])
         )
         await callback.answer()
     except Exception as e:

@@ -24,7 +24,7 @@ BUILDING_TYPES: Dict[str, dict] = {
 
     # ── Military ──────────────────────────────────────────────────────────
     "training_grounds": {
-        "name":        "⚔️ Training Grounds",
+        "name":        "Training Grounds",
         "description": "Increases your troop capacity. Each level adds 500 soldier slots.",
         "category":    "military",
         "unlock_base_level": 1,
@@ -39,7 +39,7 @@ BUILDING_TYPES: Dict[str, dict] = {
     },
 
     "cemetery": {
-        "name":        "⚰️ Cemetery",
+        "name":        "Cemetery",
         "description": "Honours fallen kings. Reduces morale penalty after defeats. "
                        "Each level stores 100 fallen king records and grants +5% defence bonus.",
         "category":    "military",
@@ -58,7 +58,7 @@ BUILDING_TYPES: Dict[str, dict] = {
     },
 
     "barracks": {
-        "name":        "🏕️ Barracks",
+        "name":        "Barracks",
         "description": "Speeds up troop training. Each level reduces training time by 10%.",
         "category":    "military",
         "unlock_base_level": 1,
@@ -73,7 +73,7 @@ BUILDING_TYPES: Dict[str, dict] = {
     },
 
     "armory": {
-        "name":        "🛡️ Armory",
+        "name":        "Armory",
         "description": "Reduces deploy time for defensive items and troops. "
                        "Each level cuts deploy time by 5 seconds (min 5 s).",
         "category":    "military",
@@ -89,7 +89,7 @@ BUILDING_TYPES: Dict[str, dict] = {
     },
 
     "war_room": {
-        "name":        "🗺️ War Room",
+        "name":        "War Room",
         "description": "Reduces attack cooldown. Each level cuts attack cooldown by 10 minutes.",
         "category":    "military",
         "unlock_base_level": 3,
@@ -104,7 +104,7 @@ BUILDING_TYPES: Dict[str, dict] = {
     },
 
     "infirmary": {
-        "name":        "🏥 Infirmary",
+        "name":        "Infirmary",
         "description": "Recovers wounded troops after battle. Each level recovers 5% more troops.",
         "category":    "military",
         "unlock_base_level": 2,
@@ -119,7 +119,7 @@ BUILDING_TYPES: Dict[str, dict] = {
 
     # ── Resources ─────────────────────────────────────────────────────────
     "storage": {
-        "name":        "🏦 Storage",
+        "name":        "Storage",
         "description": "Increases resource cap per type. Each level adds 1000 to each resource cap.",
         "category":    "resources",
         "unlock_base_level": 1,
@@ -133,7 +133,7 @@ BUILDING_TYPES: Dict[str, dict] = {
     },
 
     "mine": {
-        "name":        "⛏️ Mine",
+        "name":        "Mine",
         "description": "Passively generates resources over time. Each level adds 10 of each resource/hour.",
         "category":    "resources",
         "unlock_base_level": 1,
@@ -147,7 +147,7 @@ BUILDING_TYPES: Dict[str, dict] = {
     },
 
     "farm": {
-        "name":        "🌾 Farm",
+        "name":        "Farm",
         "description": "Produces food to sustain troops. Each level adds 50 food/hour.",
         "category":    "resources",
         "unlock_base_level": 1,
@@ -162,7 +162,7 @@ BUILDING_TYPES: Dict[str, dict] = {
 
     # ── Defence ───────────────────────────────────────────────────────────
     "trap_factory": {
-        "name":        "🔩 Trap Factory",
+        "name":        "Trap Factory",
         "description": "Increases trap capacity. Each level adds 250 trap slots.",
         "category":    "defence",
         "unlock_base_level": 2,
@@ -176,7 +176,7 @@ BUILDING_TYPES: Dict[str, dict] = {
     },
 
     "walls": {
-        "name":        "🧱 Walls",
+        "name":        "Walls",
         "description": "Reduces resource stolen per raid. Each level saves 5% more resources.",
         "category":    "defence",
         "unlock_base_level": 1,
@@ -190,7 +190,7 @@ BUILDING_TYPES: Dict[str, dict] = {
         "build_time_secs": lambda lvl: 120 * lvl,
     },
         "base_hq": {
-        "name":        "🏰 Headquaters",
+        "name":        "Headquarters",
         "description": "Increases your base level, unlocking more buildings and higher capacities.  "
                        "Each level increases your base level by 1 (max 10).",
         "category":    "military",

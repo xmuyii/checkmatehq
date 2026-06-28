@@ -30,12 +30,86 @@ from base_layout import (
     render_tactical_map, render_scouting_intel, get_sector_by_id,
     place_building_in_sector, upgrade_building_in_sector, complete_upgrade_in_sector,
     parse_callback_data, initialize_user_base_layout,
-    generate_sector_buttons, COMPASS_SECTORS, EMOJI_MAPPING, SECTOR_THREAT_LEVEL
+    generate_sector_buttons, get_empty_sectors, COMPASS_SECTORS,
+    EMOJI_MAPPING, SECTOR_THREAT_LEVEL
 )
 from build_system import BUILDING_TYPES, get_available_buildings, calculate_building_cost, get_build_time
-from supabase_db import get_user, save_user
+from supabase_db import get_user, save_user, add_unclaimed_item, calculate_level
 
 router = Router()
+
+
+def get_player_level(user: dict) -> int:
+    xp = user.get("xp", 0) or 0
+    return user.get("level") or calculate_level(xp)
+
+
+def get_available_research(user: dict) -> list[str]:
+    researched = user.get("researches", {}) or {}
+    targets = [
+        "armor_plating", "speed_training",
+        "resource_extraction", "population_growth",
+        "trap_efficiency"
+    ]
+    return [name for name in targets if not researched.get(name)]
+
+
+def get_recommended_action_button(user: dict):
+    if not user:
+        return None
+
+    unclaimed = len(user.get("unclaimed_items", []) or [])
+    if unclaimed > 0:
+        return InlineKeyboardButton(text="🎁 Claim Rewards", callback_data="menu_claims")
+
+    empty_sectors = get_empty_sectors(user.get("base_layout", {}))
+    if empty_sectors:
+        return InlineKeyboardButton(text="🏗️ Build Defenses", callback_data="build_menu")
+
+    pending_research = get_available_research(user)
+    if pending_research:
+        return InlineKeyboardButton(text="🔬 Research Lab", callback_data="menu_research")
+
+    training_queue = user.get("training_queue", []) or []
+    military = user.get("military", {}) or {}
+    if not military or len(training_queue) == 0:
+        return InlineKeyboardButton(text="🎖️ Train Army", callback_data="train_menu")
+
+    return InlineKeyboardButton(text="🏰 Back to Base", callback_data="base:main")
+
+
+def get_base_objective(user: dict) -> str:
+    """Return a short mission objective based on base state and rewards."""
+    if not user:
+        return "🧠 Start by building, researching, or training."
+
+    level = get_player_level(user)
+    unclaimed = len(user.get("unclaimed_items", []) or [])
+    if unclaimed > 0:
+        return f"🎁 Level {level} | Claim {unclaimed} reward{'s' if unclaimed != 1 else ''} before your next move."
+
+    base_layout = user.get("base_layout", {})
+    empty_sectors = get_empty_sectors(base_layout)
+    if empty_sectors:
+        sorted_empty = sorted(empty_sectors, key=lambda s: -SECTOR_THREAT_LEVEL.get(s, 0))
+        target = sorted_empty[0]
+        return f"🎯 Level {level} | Build in {target} to lock down your defense."
+
+    pending_research = get_available_research(user)
+    if pending_research:
+        return f"🔬 Level {level} | Research {pending_research[0].replace('_', ' ').title()} next."
+
+    training_queue = user.get("training_queue", []) or []
+    military = user.get("military", {}) or {}
+    if not military or len(training_queue) == 0:
+        return f"🎖️ Level {level} | Train troops to turn your base into a fighting force."
+
+    for sector in COMPASS_SECTORS:
+        info = base_layout.get(sector, {})
+        if info.get("type") != "empty" and info.get("status") != "building":
+            return f"⚡ Level {level} | Upgrade {sector} or reinforce your {info.get('type')}.",
+
+    return f"🧠 Level {level} | Keep building, researching, and training to stay ahead."
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -66,18 +140,28 @@ async def show_tactical_map(callback: CallbackQuery):
     map_display = render_tactical_map(base_layout)
     intel_display = render_scouting_intel(base_layout)
     
+    objective = get_base_objective(user)
     text_hud = (
         f"*🏰 YOUR TACTICAL BASE 🏰*\n\n"
         f"{map_display}\n"
         f"{intel_display}\n\n"
+        f"{objective}\n"
         f"Click a sector to view or defend."
     )
     
     # Generate 3×3 grid of sector buttons
     sector_buttons = generate_sector_buttons(base_layout)
+    if len(user.get("unclaimed_items", []) or []) > 0:
+        sector_buttons.append([
+            InlineKeyboardButton(text="🎁 Claim Rewards", callback_data="menu_claims")
+        ])
     sector_buttons.append([
         InlineKeyboardButton(text="◀️ Back", callback_data="menu_back")
     ])
+
+    recommended_button = get_recommended_action_button(user)
+    if recommended_button:
+        sector_buttons.append([recommended_button])
     
     kb = InlineKeyboardMarkup(inline_keyboard=sector_buttons)
     
@@ -130,15 +214,19 @@ async def show_sector_details(callback: CallbackQuery):
     threat_level = SECTOR_THREAT_LEVEL.get(sector, 0)
     threat_emoji = "🔴" if threat_level >= 4 else "🟠" if threat_level >= 3 else "🟡" if threat_level >= 2 else "🟢"
     
+    unclaimed_count = len(user.get("unclaimed_items", []) or [])
     if sector_info["type"] == "empty":
         # Empty sector - show build options
         text = (
             f"*📍 {sector.upper()} SECTOR*\n"
             f"Status: ⬜ *Empty Plot*\n"
             f"Threat Level: {threat_emoji} ({threat_level}/5)\n\n"
+            f"🎯 Goal: Shield this weak point with a strong structure.\n"
             f"This sector is ready for construction.\n"
             f"Select a building to place:\n"
         )
+        if unclaimed_count > 0:
+            text += f"\n🎁 You have {unclaimed_count} reward{'s' if unclaimed_count != 1 else ''} waiting. Claim them anytime!\n"
         
         available_buildings = get_available_buildings(user.get("level", 1))
         
@@ -178,6 +266,8 @@ async def show_sector_details(callback: CallbackQuery):
         
         if status == "building":
             text += "⏳ This building is currently upgrading."
+            if unclaimed_count > 0:
+                text += f"\n🎁 You still have {unclaimed_count} reward{'s' if unclaimed_count != 1 else ''} waiting to be claimed."
         else:
             max_level = building_data.get("max_level", 10)
             if level < max_level:
@@ -191,7 +281,7 @@ async def show_sector_details(callback: CallbackQuery):
             else:
                 text += f"Maximum level {max_level} reached!"
                 action_buttons = []
-            
+
             if sector != "C":  # Can't demolish HQ
                 action_buttons.append([
                     InlineKeyboardButton(
@@ -200,6 +290,12 @@ async def show_sector_details(callback: CallbackQuery):
                     )
                 ])
     
+    # Add claim rewards button when there are pending rewards
+    if unclaimed_count > 0:
+        action_buttons.append([
+            InlineKeyboardButton(text="🎁 Claim Rewards", callback_data="menu_claims")
+        ])
+
     # Always add back button
     action_buttons.append([
         InlineKeyboardButton(text="◀️ Back to Map", callback_data="base:main")
@@ -234,10 +330,17 @@ async def confirm_build(callback: CallbackQuery):
     save_user(u_id, user)
     
     # Parse: base:build_NE_training_grounds
-    parts = callback.data.split("_")
-    sector = parts[2]  # NE
-    building_id = "_".join(parts[3:])  # training_grounds
-    
+    parts = callback.data.split("_", 2)
+    if len(parts) != 3:
+        await callback.answer("Invalid build request", show_alert=True)
+        return
+
+    sector = parts[1]
+    building_id = parts[2]
+
+    if sector not in COMPASS_SECTORS:
+        await callback.answer("Sector invalid", show_alert=True)
+        return
     base_layout = user.get("base_layout", {})
     sector_info = get_sector_by_id(base_layout, sector)
     
@@ -308,10 +411,17 @@ async def execute_build(callback: CallbackQuery):
     user = initialize_user_base_layout(user)
     
     # Parse: base:exec_build_NE_training_grounds
-    parts = callback.data.split("_")
-    sector = parts[3]
-    building_id = "_".join(parts[4:])
-    
+    parts = callback.data.split("_", 3)
+    if len(parts) != 4:
+        await callback.answer("Invalid build execution request", show_alert=True)
+        return
+
+    sector = parts[2]
+    building_id = parts[3]
+
+    if sector not in COMPASS_SECTORS:
+        await callback.answer("Invalid sector", show_alert=True)
+        return
     base_layout = user.get("base_layout", {})
     
     # Place building in sector
@@ -323,28 +433,29 @@ async def execute_build(callback: CallbackQuery):
     
     # Save and show confirmation
     save_user(u_id, user)
-    
+    add_unclaimed_item(u_id, "wood_crate", 1)
+
     building_data = BUILDING_TYPES.get(building_id, {})
     icon = EMOJI_MAPPING.get(building_id, "❓")
-    
+
     text = (
-        f"✅ *CONSTRUCTION STARTED!*\n\n"
-        f"{icon} **{building_data.get('name', building_id)}**\n"
-        f"Location: {sector} sector\n\n"
-        f"The foundation is being laid...\n"
-        f"Check back to view your growing base!"
+        f"🎉 *CONSTRUCTION UNLEASHED!* 🎉\n\n"
+        f"{icon} **{building_data.get('name', building_id)}** is now rising in {sector}!\n"
+        f"Your base just got stronger and a *Wood Crate* reward is ready to claim.\n"
+        f"Tap below to grab it and keep the streak going."
     )
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏰 Back to Base", callback_data="base:main")]
+        [InlineKeyboardButton(text="🎁 Claim Rewards", callback_data="menu_claims")],
+        [InlineKeyboardButton(text="🏰 Back to Base", callback_data="base:main")],
     ])
-    
+
     await callback.message.edit_text(
         text=text,
         parse_mode="Markdown",
         reply_markup=kb
     )
-    await callback.answer("Building placed successfully!")
+    await callback.answer("🎊 BUILD SUCCESS! Reward is waiting.", show_alert=False)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -432,14 +543,21 @@ async def execute_upgrade(callback: CallbackQuery):
         return
     
     save_user(u_id, user)
-    
-    text = f"✅ *UPGRADE STARTED!*\n\n{message}\n\nBack to base map"
+    add_unclaimed_item(u_id, "bronze_crate", 1)
+
+    text = (
+        f"🔥 *UPGRADE IGNITED!* 🔥\n\n"
+        f"{message}\n\n"
+        f"A *Bronze Crate* reward is waiting for your claim.\n"
+        f"Keep the momentum with another upgrade or a fresh build!"
+    )
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏰 Back to Base", callback_data="base:main")]
+        [InlineKeyboardButton(text="🎁 Claim Rewards", callback_data="menu_claims")],
+        [InlineKeyboardButton(text="🏰 Back to Base", callback_data="base:main")],
     ])
     
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=kb)
-    await callback.answer("Upgrade queued!")
+    await callback.answer("🎉 UPGRADE QUEUED! Claim your reward.", show_alert=False)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
