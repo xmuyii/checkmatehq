@@ -97,7 +97,7 @@ def get_default_base_layout() -> Dict[str, dict]:
         "W":  {"type": "empty",     "level": 0, "hp": 0,    "max_hp": 0,    "status": "empty"},
         
         # Corner Sectors (Strategic Placement)
-        "NW": {"type": "empty",     "level": 0, "hp": 0,    "max_hp": 0,    "status": "empty"},
+        "NW": {"type": "empty",     "level": 0, "hp": 0,    "max_hp": 0,    "status": "empty", "shelter": True},
         "NE": {"type": "empty",     "level": 0, "hp": 0,    "max_hp": 0,    "status": "empty"},
         "SW": {"type": "empty",     "level": 0, "hp": 0,    "max_hp": 0,    "status": "empty"},
         "SE": {"type": "empty",     "level": 0, "hp": 0,    "max_hp": 0,    "status": "empty"},
@@ -105,6 +105,8 @@ def get_default_base_layout() -> Dict[str, dict]:
         # Center (Core Value - The HQ)
         "C":  {"type": "base_hq",   "level": 1, "hp": 10000, "max_hp": 10000, "status": "idle"},
     }
+
+
 
 
 def initialize_user_base_layout(user: dict) -> dict:
@@ -130,38 +132,59 @@ def initialize_user_base_layout(user: dict) -> dict:
 
 def render_tactical_map(base_layout: dict) -> str:
     """
-    Render the compass-based tactical map VERTICALLY for mobile compatibility.
-    Shows emoji buildings in a 3x3 grid with connections to adjacent sectors.
+    Render the base as a simple, readable 3x3 plot board.
+    Shows an explicit role label per sector (HQ, Front Gate, Outpost) and
+    indicates if a sector is marked as an alliance shelter/safe spot.
     """
-    def get_sector_display(sector_key):
-        """Get emoji + sector label for a single sector."""
+    from build_system import BUILDING_TYPES
+
+    ROLE_MAP = {
+        "C": "HQ Core",
+        "S": "Front Gate",
+        "N": "North Approach",
+        "E": "East Flank",
+        "W": "West Flank",
+        "NW": "Outpost NW",
+        "NE": "Outpost NE",
+        "SW": "Outpost SW",
+        "SE": "Outpost SE",
+    }
+
+    def get_sector_display(sector_key: str) -> str:
         sector_data = base_layout.get(sector_key, {})
         building_type = sector_data.get("type", "empty")
-        
-        # Show construction icon if building
+
+        # Resolve name for building or empty
+        if building_type == "empty":
+            building_name = "Empty Plot"
+        else:
+            building_name = BUILDING_TYPES.get(building_type, {}).get("name", building_type.replace("_", " ").title())
+
+        # Icon decision
         if sector_data.get("status") == "building":
             icon = EMOJI_MAPPING["building"]
         else:
             icon = EMOJI_MAPPING.get(building_type, EMOJI_MAPPING["empty"])
-        
-        return f"{icon}{sector_key}"
-    
-    # Build 3x3 vertical grid for mobile with connection arrows
+
+        # Role label (HQ, Gate, etc.)
+        role = ROLE_MAP.get(sector_key, sector_key)
+
+        # Shelter / alliance-safe indicator
+        shelter = " 🏠 Shelter" if sector_data.get("shelter") or sector_data.get("alliance_safe") or sector_data.get("safe_spot") else ""
+
+        # Compose small multi-piece label for the HUD
+        return f"{icon}{sector_key} {role}{shelter}\n  {building_name}"
+
     hud = "```\n"
-    hud += "🛰️  TACTICAL BASE MAP\n\n"
-    
-    # Row 1: NW  ↔  N  ↔  NE
-    hud += f"{get_sector_display('NW'):^8} {'↔':^8} {get_sector_display('N'):^8} {'↔':^8} {get_sector_display('NE'):^8}\n"
-    hud += f"{'↕':^8} {' ':^8} {'↕':^8} {' ':^8} {'↕':^8}\n"
-    
-    # Row 2: W  ↔  C  ↔  E
-    hud += f"{get_sector_display('W'):^8} {'↔':^8} {get_sector_display('C'):^8} {'↔':^8} {get_sector_display('E'):^8}\n"
-    hud += f"{'↕':^8} {' ':^8} {'↕':^8} {' ':^8} {'↕':^8}\n"
-    
-    # Row 3: SW  ↔  S  ↔  SE
-    hud += f"{get_sector_display('SW'):^8} {'↔':^8} {get_sector_display('S'):^8} {'↔':^8} {get_sector_display('SE'):^8}\n"
+    hud += "  🏰 TACTICAL BASE PLOT\n\n"
+    hud += "      NW                N                NE\n"
+    hud += f"    {get_sector_display('NW'):20} {get_sector_display('N'):20} {get_sector_display('NE'):20}\n"
+    hud += "   ──────────────────────────────────────────────\n"
+    hud += f"    {get_sector_display('W'):20} {get_sector_display('C'):20} {get_sector_display('E'):20}\n"
+    hud += "   ──────────────────────────────────────────────\n"
+    hud += f"    {get_sector_display('SW'):20} {get_sector_display('S'):20} {get_sector_display('SE'):20}\n"
     hud += "```"
-    
+
     return hud
 
 

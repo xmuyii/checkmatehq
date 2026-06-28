@@ -5126,8 +5126,9 @@ async def cmd_start(message: types.Message):
 
     shield_icon = "🛡️" if "ACTIVE" in shield_st else ("💥" if "DISRUPTED" in shield_st else "⚠️")
     claims_warn = f"⚡ <b>{unclaimed} UNCLAIMED</b>" if unclaimed > 0 else ""
+    objective = get_hud_objective(user)
 
-    def generate_profile_card(username, xp_bar, xp_bar_pct, level, bitcoin, sector, base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn):
+    def generate_profile_card(username, xp_bar, xp_bar_pct, level, bitcoin, sector, base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn, objective):
         # The clean inner width of the card box (excluding the '║  ' and '  ║')
         INNER_WIDTH = 25 
         
@@ -5159,13 +5160,10 @@ async def cmd_start(message: types.Message):
         card += "╠═══════════════════════════╣\n"
         card += format_building_queue_display(user)
         card += format_line("📍", "Sector: ", str(sector), is_bold_value=True)
-        card += format_line("📍", "Building, Research, ttraining in progress, Alliance help (1 of 9)", str(sector), is_bold_value=True)
-        card += format_line("📍", "Next mission ", str(sector), is_bold_value=True)
-        card += format_line("📍", "Ongoing Events- Real time counting", str(sector), is_bold_value=True)
-        card += format_line("📍", "Free gift ", str(sector), is_bold_value=True)
         card += format_line("🏰", "", base_name[:15], is_bold_value=True)
         card += format_line(shield_icon, "Shield: ", str(shield_st), is_bold_value=True)
         card += format_line("🎒", "Inv: ", f"{inv_count}/{inv_slots}", is_bold_value=True)
+        card += format_line("🎯", "Objective: ", objective[:20], is_bold_value=False)
         
         # --- 3. Handle Special Conditional Warn Line ---
         if claims_warn.strip():
@@ -5179,7 +5177,7 @@ async def cmd_start(message: types.Message):
     # FIX 1: Explicitly invoke the generator function using local variables
     hud_display = generate_profile_card(
         username, xp_bar, xp_bar_pct, level, bitcoin, sector, 
-        base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn
+        base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn, objective
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -5189,6 +5187,9 @@ async def cmd_start(message: types.Message):
         ],
         [
             InlineKeyboardButton(text="🎒 Items",    callback_data="menu_inventory"),
+            InlineKeyboardButton(text="🎯 Objective", callback_data="menu_objective"),
+        ],
+        [
             InlineKeyboardButton(text="👥 Alliance",     callback_data="menu_guild"),
         ],
         [
@@ -5496,6 +5497,33 @@ async def cb_battle_revenge_info(callback: types.CallbackQuery):
     )
 
 
+def get_objective_action_buttons(objective: str):
+    """Return direct action buttons based on the current objective."""
+    from aiogram.types import InlineKeyboardButton
+
+    objective_text = (objective or "").lower()
+    rows = []
+
+    if "claim" in objective_text:
+        rows.append([InlineKeyboardButton(text="🎁 Claim Rewards", callback_data="menu_claims")])
+    if "build" in objective_text or "defense" in objective_text or "strengthen" in objective_text:
+        rows.append([InlineKeyboardButton(text="🏗️ Build / Expand", callback_data="build_menu")])
+    if "research" in objective_text or "tech" in objective_text or "lab" in objective_text:
+        rows.append([InlineKeyboardButton(text="🧬 Research Lab", callback_data="menu_research")])
+    if "train" in objective_text or "troops" in objective_text or "battle-ready" in objective_text:
+        rows.append([InlineKeyboardButton(text="🎖️ Train Army", callback_data="train_menu")])
+
+    if not rows:
+        rows.extend([
+            [InlineKeyboardButton(text="🏰 Open Base", callback_data="menu_base")],
+            [InlineKeyboardButton(text="🧬 Research Lab", callback_data="menu_research")],
+            [InlineKeyboardButton(text="🎖️ Train Army", callback_data="train_menu")],
+        ])
+
+    rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")])
+    return rows
+
+
 def get_hud_objective(user: dict) -> str:
     from supabase_db import calculate_level
     from base_layout import get_empty_sectors
@@ -5504,6 +5532,13 @@ def get_hud_objective(user: dict) -> str:
     unclaimed = len(user.get('unclaimed_items', []) or [])
     if unclaimed > 0:
         return f"🎁 Claim {unclaimed} reward{'s' if unclaimed != 1 else ''}."
+
+    alliance_id = user.get('alliance_id')
+    if alliance_id:
+        from alliance_system import get_alliance_help_requests
+        pending_help = get_alliance_help_requests(alliance_id)
+        if pending_help:
+            return "🆘 Assist alliance help requests in Guild."
 
     training_queue = user.get('training_queue', []) or []
     military = user.get('military', {}) or {}
@@ -5557,25 +5592,26 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
     shield_icon = "🛡️" if "ACTIVE" in shield_st else ("💥" if "DISRUPTED" in shield_st else "⚠️")
     claims_warn = f"⚡ <b>{unclaimed} UNCLAIMED</b>" if unclaimed > 0 else ""
 
-    def generate_profile_card(username, xp_bar, xp_bar_pct, level, bitcoin, sector, base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn, total_power, gold):
+    objective = get_hud_objective(user)
+
+    def generate_profile_card(username, xp_bar, xp_bar_pct, level, bitcoin, sector, base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn, total_power, gold, objective):
         # The clean inner width of the card box (excluding the '║  ' and '  ║')
-        INNER_WIDTH = 25 
-        
+        INNER_WIDTH = 25
 
         def format_line(icon, label, value, is_bold_value=True):
             """Helper to mathematically pad lines considering Telegram HTML tags."""
             prefix = f"{icon} " if icon else ""
             visible_text = f"{prefix}{label}{value}"
-            
+
             padding_spaces = INNER_WIDTH - len(visible_text)
             if padding_spaces < 0:
                 padding_spaces = 0
-                
+
             display_value = f"<b>{value}</b>" if is_bold_value else value
             return f"║  {prefix}{label}{display_value}{' ' * padding_spaces}║\n"
-    
+
         # --- 1. Header (Centered) ---
-        card =  "╔═══════════════════════════╗\n"
+        card = "╔═══════════════════════════╗\n"
         card += "║        <b>Zero Dominus</b>        ║\n"
         card += "╠═══════════════════════════╣\n"
 
@@ -5584,32 +5620,29 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
         card += format_line("⭐", "Level: ", str(level), is_bold_value=True)
         card += format_line("⚔️", "Power: ", str(total_power), is_bold_value=True)
         card += format_line("🗃", "Gold: ", str(gold), is_bold_value=True)
-        
+
         card += "╠═══════════════════════════╣\n"
         card += "╠═══════════════════════════╣\n"
         card += format_line("📍", "Sector: ", str(sector), is_bold_value=True)
         card += format_building_queue_display(user)
-        card += format_line("📍", "Next mission ", get_hud_objective(user), is_bold_value=False)
-        card += format_line("📍", "Ongoing Events- Real time counting", str(sector), is_bold_value=True)
-        card += format_line("📍", "Free gift ", str(sector), is_bold_value=True)
         card += format_line("🏰", "", base_name[:16], is_bold_value=True)
         card += format_line(shield_icon, "Shield: ", str(shield_st), is_bold_value=True)
         card += format_line("🎒", "Inv: ", f"{inv_count}/{inv_slots}", is_bold_value=True)
-        
+        card += format_line("🎯", "Objective: ", objective[:20], is_bold_value=False)
+
         # --- 3. Handle Special Conditional Warn Line ---
         if claims_warn.strip():
             clean_warn = claims_warn.replace("<b>", "").replace("</b>", "").strip()
             pad = INNER_WIDTH - len(clean_warn)
             card += f"║  {claims_warn}{' ' * max(0, pad)}║\n"
-            
+
         card += "╚═══════════════════════════╝"
         return card
 
-    # FIX 1: Explicitly invoke the generator function using local variables
     hud_display = generate_profile_card(
-        username, xp_bar, xp_bar_pct, level, bitcoin, sector, 
+        username, xp_bar, xp_bar_pct, level, bitcoin, sector,
         base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn, total_power,
-        gold,
+        gold, objective
     )
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -5619,6 +5652,9 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
         ],
         [
             InlineKeyboardButton(text="🎒 Items",    callback_data="menu_inventory"),
+            InlineKeyboardButton(text="🎯 Objective", callback_data="menu_objective"),
+        ],
+        [
             InlineKeyboardButton(text="👥 Alliance",     callback_data="menu_guild"),
         ],
         [
@@ -5645,6 +5681,27 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
         parse_mode="HTML",
         reply_markup=kb
     )
+
+@dp.callback_query(lambda q: q.data == "menu_objective")
+async def cb_menu_objective(callback: types.CallbackQuery):
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("User not found", show_alert=True)
+        return
+
+    objective = get_hud_objective(user)
+    action_rows = get_objective_action_buttons(objective)
+
+    await callback.message.edit_text(
+        f"🎯 *CURRENT OBJECTIVE*\n\n"
+        f"{objective}\n\n"
+        f"Choose the next move below:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=action_rows)
+    )
+    await callback.answer()
+
 @dp.callback_query(lambda q: q.data == "menu_claims")
 async def cb_menu_claims_shortcut(callback: types.CallbackQuery):
     """Shortcut from HUD to claims."""
@@ -6861,25 +6918,127 @@ async def cb_menu_guild(callback: types.CallbackQuery):
     guild_name = guild.get("name", "No Guild")
     guild_rank = guild.get("rank", "N/A")
     guild_members = guild.get("members", [])
-    
+    alliance_id = user.get("alliance_id")
+    pending_requests = []
+    if alliance_id:
+        from alliance_system import get_alliance_help_requests
+        pending_requests = get_alliance_help_requests(alliance_id)
+
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📋 View Guild", callback_data="guild_view")],
         [InlineKeyboardButton(text="👥 Members", callback_data="guild_members")],
+        [InlineKeyboardButton(text="🆘 Help Requests", callback_data="guild_help_requests")],
         [InlineKeyboardButton(text="💳 Guild Treasury", callback_data="guild_treasury")],
         [InlineKeyboardButton(text="⚔️ Guild Wars", callback_data="guild_wars")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
     ])
     
+    help_count = len(pending_requests)
     await callback.message.edit_text(
         f"⚔️ *GUILD / ALLIANCE* ⚔️\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"**Guild:** {guild_name}\n"
         f"**Your Rank:** {guild_rank}\n"
-        f"**Members:** {len(guild_members)}\n\n"
+        f"**Members:** {len(guild_members)}\n"
+        f"**Help Requests:** {help_count}\n\n"
         f"_Unite with allies and dominate together._\n"
         f"━━━━━━━━━━━━━━━━━━━━",
         parse_mode="Markdown",
         reply_markup=markup
+    )
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data == "guild_help_requests")
+async def cb_guild_help_requests(callback: types.CallbackQuery):
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("User not found", show_alert=True)
+        return
+
+    alliance_id = user.get("alliance_id")
+    if not alliance_id:
+        await callback.answer("You're not in an alliance", show_alert=True)
+        return
+
+    from alliance_system import get_alliance_help_requests, request_help
+    help_requests = get_alliance_help_requests(alliance_id)
+
+    rows = []
+    if help_requests:
+        text = "🆘 *ALLIANCE HELP REQUESTS*\n\n"
+        for i, req in enumerate(help_requests[:5], 1):
+            requester = req.get("requester_name", "Unknown")
+            description = req.get("description", "No description")
+            helpers = len(req.get("helpers", []))
+            text += f"{i}. {description} by {requester} — helpers: {helpers}\n"
+            rows.append([
+                InlineKeyboardButton(
+                    text=f"Assist {i}",
+                    callback_data=f"help_assist_{req.get('id')}"
+                )
+            ])
+    else:
+        text = "🆘 *ALLIANCE HELP REQUESTS*\n\n_No pending help requests._\n"
+
+    text += "\n*Request your own help:*"
+    rows.extend([
+        [InlineKeyboardButton(text="📦 Request Build Help", callback_data="help_request_build")],
+        [InlineKeyboardButton(text="🔬 Request Research Help", callback_data="help_request_research")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_guild")],
+    ])
+
+    await callback.message.edit_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
+    )
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data == "help_request_build" or q.data == "help_request_research")
+async def cb_guild_help_request_create(callback: types.CallbackQuery):
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("User not found", show_alert=True)
+        return
+
+    request_type = "build" if callback.data == "help_request_build" else "research"
+    from alliance_system import request_help
+    success, message = request_help(u_id, request_type)
+
+    await callback.message.edit_text(
+        f"{message}\n\n",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="guild_help_requests")],
+            [InlineKeyboardButton(text="🏠 Guild Menu", callback_data="menu_guild")],
+        ])
+    )
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data.startswith("help_assist_"))
+async def cb_guild_help_assist(callback: types.CallbackQuery):
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("User not found", show_alert=True)
+        return
+
+    request_id = callback.data[len("help_assist_"):]
+    from alliance_system import assist_help_request
+    success, message = assist_help_request(u_id, request_id)
+
+    await callback.message.edit_text(
+        f"{message}\n\n",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Back", callback_data="guild_help_requests")],
+            [InlineKeyboardButton(text="🏠 Guild Menu", callback_data="menu_guild")],
+        ])
     )
     await callback.answer()
 

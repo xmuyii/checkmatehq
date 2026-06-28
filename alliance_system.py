@@ -8,12 +8,20 @@ Mechanics:
 """
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Tuple, Dict, List
 from supabase_db import get_user, save_user
 
 # Max alliance size
 MAX_ALLIANCE_SIZE = 50
+HELP_REQUEST_INITIAL = {
+    "build": 300,
+    "research": 600,
+}
+HELP_REQUEST_REDUCTION = {
+    "build": 120,
+    "research": 180,
+}
 
 
 def create_alliance(leader_id: str, alliance_name: str) -> Tuple[bool, str]:
@@ -209,3 +217,154 @@ def format_alliance_status(player_id: str) -> str:
     ]
     
     return "\n".join(lines)
+
+
+def load_alliances() -> Dict[str, dict]:
+    try:
+        with open("alliances.json", "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_alliances(alliances: Dict[str, dict]) -> None:
+    with open("alliances.json", "w") as f:
+        json.dump(alliances, f, indent=2)
+
+
+def get_alliance_help_requests(alliance_id: str) -> List[dict]:
+    alliance = get_alliance_info(alliance_id)
+    if not alliance:
+        return []
+    return alliance.get("help_requests", []) or []
+
+
+def request_help(player_id: str, request_type: str) -> Tuple[bool, str]:
+    """Create a help request for the player's build or research project."""
+    user = get_user(player_id)
+    if not user:
+        return False, "Player not found"
+
+    alliance_id = user.get("alliance_id")
+    if not alliance_id:
+        return False, "You're not in an alliance"
+
+    alliances = load_alliances()
+    alliance = alliances.get(alliance_id)
+    if not alliance:
+        return False, "Alliance not found"
+
+    if request_type not in ("build", "research"):
+        return False, "Invalid help request type"
+
+    if request_type == "build":
+        build_queue = user.get("building_queue", {}) or {}
+        active_builds = [bid for bid, data in build_queue.items() if data.get("completion_time")]
+        if not active_builds:
+            return False, "No active building project to request help for"
+
+        building_id = active_builds[0]
+        build_info = build_queue[building_id]
+        completion = build_info.get("completion_time")
+        target = building_id
+        description = f"Help finish {building_id.replace('_', ' ').title()}"
+    else:
+        researched = user.get("researches", {}) or {}
+        pending = [
+            "armor_plating", "speed_training", "resource_extraction",
+            "population_growth", "trap_efficiency"
+        ]
+        pending_list = [name for name in pending if not researched.get(name)]
+        if not pending_list:
+            return False, "No pending research to request help for"
+        target = pending_list[0]
+        completion = (datetime.utcnow() + timedelta(seconds=HELP_REQUEST_INITIAL["research"]))
+        description = f"Help research {target.replace('_', ' ').title()}"
+
+    request_id = f"help_{int(datetime.utcnow().timestamp())}_{player_id[-4:]}"
+    request = {
+        "id": request_id,
+        "requester_id": player_id,
+        "requester_name": user.get("username", "Unknown"),
+        "type": request_type,
+        "target": target,
+        "description": description,
+        "created_at": datetime.utcnow().isoformat(),
+        "completion_time": completion if isinstance(completion, str) else completion.isoformat(),
+        "helpers": [],
+    }
+
+    if "help_requests" not in alliance:
+        alliance["help_requests"] = []
+    alliance["help_requests"].append(request)
+    alliances[alliance_id] = alliance
+    save_alliances(alliances)
+
+    return True, f"Help request created for {target}. Alliance members can assist it."
+
+
+def assist_help_request(helper_id: str, request_id: str) -> Tuple[bool, str]:
+    """Assist an existing alliance help request and reduce its timer."""
+    helper = get_user(helper_id)
+    if not helper:
+        return False, "Helper not found"
+
+    alliance_id = helper.get("alliance_id")
+    if not alliance_id:
+        return False, "You're not in an alliance"
+
+    alliances = load_alliances()
+    alliance = alliances.get(alliance_id)
+    if not alliance:
+        return False, "Alliance not found"
+
+    help_requests = alliance.get("help_requests", []) or []
+    request = next((req for req in help_requests if req.get("id") == request_id), None)
+    if not request:
+        return False, "Help request not found"
+
+    if request.get("requester_id") == helper_id:
+        return False, "You cannot assist your own request"
+
+    if helper_id in request.get("helpers", []):
+        return False, "You already helped this request"
+
+    reduction = HELP_REQUEST_REDUCTION.get(request.get("type"), 120)
+    completion_time = datetime.fromisoformat(request["completion_time"])
+    completion_time -= timedelta(seconds=reduction)
+    request["helpers"].append(helper_id)
+    request["completion_time"] = completion_time.isoformat()
+    request["assists"] = request.get("assists", 0) + 1
+
+    # Handle completion
+    if completion_time <= datetime.utcnow():
+        requester = get_user(request["requester_id"])
+        if requester:
+            if request["type"] == "build":
+                try:
+                    from building_queue import complete_building
+                    complete_building(requester, request["target"])
+                    save_user(request["requester_id"], requester)
+                    result_text = f"{request['requester_name']}'s {request['target'].replace('_', ' ').title()} completed!"
+                except Exception:
+                    result_text = f"{request['requester_name']}'s building project is now ready."
+            else:
+                researches = requester.get("researches", {}) or {}
+                researches[request["target"]] = True
+                requester["researches"] = researches
+                save_user(request["requester_id"], requester)
+                result_text = f"{request['requester_name']}'s research {request['target'].replace('_', ' ').title()} completed!"
+        else:
+            result_text = "Help request completed."
+
+        # Remove completed request
+        help_requests = [req for req in help_requests if req.get("id") != request_id]
+        alliance["help_requests"] = help_requests
+        alliances[alliance_id] = alliance
+        save_alliances(alliances)
+        return True, result_text
+
+    alliances[alliance_id] = alliance
+    save_alliances(alliances)
+    minutes = int(reduction / 60)
+    return True, f"Help applied. Timer reduced by {minutes} minutes for {request['requester_name']}"
