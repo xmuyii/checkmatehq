@@ -18,6 +18,8 @@ sow.csv
 .env.example
 google-credentials.json
 *.log
+alliances.json
+game_backups/
 __pycache__/
 .verdent/
 *.csv
