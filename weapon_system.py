@@ -26,8 +26,7 @@ WEAPONS = {
         "cooldown_hours": 168,  # 1 week
         "rarity": "uncommon",
         "min_level": 5,
-        "trigger_condition": "words_spoken",  # Only fires if victim has spoken min_words
-        "trigger_threshold": 50,  # Victim must have spoken 50+ words
+        "level": 10,
     },
     
     "plasma_cannon": {
@@ -42,8 +41,7 @@ WEAPONS = {
         "cooldown_hours": 48,
         "rarity": "rare",
         "min_level": 15,
-        "trigger_condition": "words_spoken",
-        "trigger_threshold": 100,  # Victim must have spoken 100+ words
+        "level": 25,
     },
     
     "emp_blast": {
@@ -57,8 +55,7 @@ WEAPONS = {
         "cooldown_hours": 72,
         "rarity": "uncommon",
         "min_level": 8,
-        "trigger_condition": "words_spoken",
-        "trigger_threshold": 25,  # Victim must have spoken 25+ words
+        "level": 30,
     },
     
     # RESOURCE STEALERS
@@ -73,8 +70,6 @@ WEAPONS = {
         "cooldown_hours": 24,
         "rarity": "rare",
         "min_level": 12,
-        "trigger_condition": "base_level",
-        "trigger_threshold": 10,  # Victim must be level 10+
     },
     
     "silver_siphon": {
@@ -88,8 +83,6 @@ WEAPONS = {
         "cooldown_hours": 24,
         "rarity": "rare",
         "min_level": 14,
-        "trigger_condition": "base_level",
-        "trigger_threshold": 12,
     },
     
     "resource_drain": {
@@ -103,8 +96,6 @@ WEAPONS = {
         "cooldown_hours": 48,
         "rarity": "rare",
         "min_level": 20,
-        "trigger_condition": "words_spoken",
-        "trigger_threshold": 80,  # Victim must have 80+ words
     },
     
     # RESOURCE STEALERS - VARIANTS
@@ -120,8 +111,6 @@ WEAPONS = {
         "cooldown_hours": 12,
         "rarity": "uncommon",
         "min_level": 7,
-        "trigger_condition": "words_spoken",
-        "trigger_threshold": 20,  # Victim must have 20+ words
     },
     
     "bronze_extractor": {
@@ -136,8 +125,6 @@ WEAPONS = {
         "cooldown_hours": 12,
         "rarity": "uncommon",
         "min_level": 10,
-        "trigger_condition": "words_spoken",
-        "trigger_threshold": 30,  # Victim must have 30+ words
     },
     
     "iron_extractor": {
@@ -152,8 +139,6 @@ WEAPONS = {
         "cooldown_hours": 12,
         "rarity": "uncommon",
         "min_level": 12,
-        "trigger_condition": "words_spoken",
-        "trigger_threshold": 50,  # Victim must have 50+ words
     },
     
     "diamond_extractor": {
@@ -168,84 +153,6 @@ WEAPONS = {
         "cooldown_hours": 24,
         "rarity": "rare",
         "min_level": 25,
-        "trigger_condition": "words_spoken",
-        "trigger_threshold": 100,  # Victim must have 100+ words
-    },
-    
-    # ═══ DEFENSIVE SHIELDS ═══
-    "shield_barrier": {
-        "name": "🛡️ SHIELD BARRIER",
-        "description": "Block next opponent attack. Them lose 50% dmg, you take 0.",
-        "category": "defensive",
-        "effect": "block_damage",
-        "block_percentage": 1.0,  # 100% block
-        "cost": {"silver": 1500},
-        "charges": 2,
-        "cooldown_hours": 12,
-        "rarity": "rare",
-        "min_level": 10,
-        "trigger_condition": "base_level",
-        "trigger_threshold": 1,  # Always ready (attacker just needs to exist)
-    },
-    
-    "reflective_armor": {
-        "name": "🪞 REFLECTIVE ARMOR",
-        "description": "Reflect 75% of incoming attack back to attacker.",
-        "category": "defensive",
-        "effect": "reflect_damage",
-        "reflect_percentage": 0.75,
-        "cost": {"silver": 2000},
-        "charges": 1,
-        "cooldown_hours": 24,
-        "rarity": "rare",
-        "min_level": 15,
-        "trigger_condition": "base_level",
-        "trigger_threshold": 1,  # Always ready
-    },
-    
-    "counter_striker": {
-        "name": "⚡ COUNTER STRIKER",
-        "description": "When attacked, automatically deal 80% damage back to attacker.",
-        "category": "defensive",
-        "effect": "counter_attack",
-        "counter_damage_percentage": 0.8,
-        "cost": {"silver": 2500},
-        "charges": 1,
-        "cooldown_hours": 48,
-        "rarity": "rare",
-        "min_level": 18,
-        "trigger_condition": "base_level",
-        "trigger_threshold": 1,  # Always ready
-    },
-    
-    "fortified_keep": {
-        "name": "🏰 FORTIFIED KEEP",
-        "description": "Absorb up to 500 damage from next attack. Excess stored.",
-        "category": "defensive",
-        "effect": "damage_absorb",
-        "absorb_amount": 500,
-        "cost": {"silver": 1800},
-        "charges": 2,
-        "cooldown_hours": 18,
-        "rarity": "rare",
-        "min_level": 12,
-        "trigger_condition": "base_level",
-        "trigger_threshold": 1,  # Always ready
-    },
-    
-    "resource_shield": {
-        "name": "💰 RESOURCE SHIELD",
-        "description": "Protect 100% base resources from stealer weapons next 24h.",
-        "category": "defensive",
-        "effect": "protect_resources",
-        "protection_duration_hours": 24,
-        "cost": {"silver": 2200},
-        "charges": 1,
-        "cooldown_hours": 72,
-        "rarity": "rare",
-        "min_level": 20,
-        "trigger_condition": "base_level",
-        "trigger_threshold": 1,  # Always ready
     },
 }
 

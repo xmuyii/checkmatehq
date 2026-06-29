@@ -298,7 +298,7 @@ def register_user(user_id, username: str):
                 'current_streak': 0
             }),
             'military': json.dumps({"pawns": 5}),
-            'traps': json.dumps({}),
+            'traps': json.dumps({"spike_pit": 0}),
             'shield_status': '⚠️ UNPROTECTED',
             'credits': 0,
             'active_perks': {},

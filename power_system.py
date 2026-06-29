@@ -13,6 +13,9 @@ Power is used to calculate battle outcomes and matchmaking.
 """
 
 from build_system import BUILDING_TYPES, get_base_level
+from training_system import UNITS
+from weapon_system import WEAPONS
+from trap_system import TRAP_TYPES
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  POWER CALCULATION
@@ -47,19 +50,22 @@ def calculate_player_power(user: dict) -> int:
     
     # 3. Military Power (troops are power)
     military = user.get('military', {})
-    soldiers = 0
-    for x in military:
-        if isinstance(x, dict):
-            soldiers += x.get('count', 0)
-    total_soldiers = soldiers
-    
-    power += (total_soldiers * 2)  # Each soldier = 2 power
+    if isinstance(military, str):
+        try:
+            import json
+            military = json.loads(military)
+        except:
+            military = {}
+    if isinstance(military, dict):
+        for military_id, count in military.items:
+            if military_id in UNITS:
+                power += (count * 2)  # Each soldier = 2 power
     
     # 4. Weapons Power
     weapons = user.get('weapons', {})
     if isinstance(weapons, dict):
         for weapon_id, data in weapons.items():
-            if isinstance(data, dict):
+            if weapon_id in WEAPONS:
                 level = data.get('level', 0)
                 power += level * 30  # Each weapon level = 30 power
             else:
@@ -69,7 +75,8 @@ def calculate_player_power(user: dict) -> int:
     # 5. Traps Power
     traps = user.get('traps', {})
     for trap_id, count in traps.items():
-        power += count * 10  # Each trap = 10 power
+        if trap_id in TRAP_TYPES:
+            power += count * 10  # Each trap = 10 power
     
     # 6. Prestige Power (if applicable)
     prestige_level = user.get('prestige_level', 0)
