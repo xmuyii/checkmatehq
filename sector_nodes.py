@@ -32,7 +32,6 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple, List
 import json
 
-
 from resource_registry import RESOURCES, is_unlocked, get_display_name, get_emoji
 
 # ═══════════════════════════════════════════════════════════════════════════

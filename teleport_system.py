@@ -68,9 +68,7 @@ SECTOR_QUICK_INFO: Dict[int, dict] = {
     63: {"name": "Stone Cathedral",  "emoji": "💎",  "hidden": False},
     64: {"name": "Relic Vault",      "emoji": "🏺",  "hidden": False},
 }
-def on_user_load(user: dict) -> dict:
-    print(f"[LOAD] on_user_load: {user.get('username','?')}")  # ← temporary
-    ...
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  DAILY CHARGE MANAGEMENT

@@ -39,6 +39,7 @@ from base_layout import (
     EMOJI_MAPPING, SECTOR_THREAT_LEVEL, damage_sector, generate_sector_buttons,
     get_default_base_layout, upgrade_building_in_sector
 )
+from scheduler import start_scheduler
 from tactical_base_handlers import router as base_router
 from power_system import calculate_battle_outcome
 from aiogram import Bot, Dispatcher, types, F
@@ -2769,20 +2770,27 @@ async def callback_prestige_info(callback: types.CallbackQuery):
 @dp.callback_query(lambda q: q.data == "train_menu")
 async def callback_train_menu(callback: types.CallbackQuery):
     """Show training unit menu with inline buttons."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered")
+        return
+    
     await callback.message.edit_text(
         "🎖️ *MILITARY TRAINING*\n\n"
         "Select unit type to train:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👹 Police and Dogs (5 wood)", callback_data="train_pawn"),
-             InlineKeyboardButton(text="🗡️ Knights (15 wood + 5 bronze)", callback_data="train_knight")],
-            [InlineKeyboardButton(text="⚜️ Bishops (10 bronze + 3 iron)", callback_data="train_bishop"),
-             InlineKeyboardButton(text="🏰 Rooks (10 iron + 2 stone)", callback_data="train_rook")],
-            [InlineKeyboardButton(text="👑 Queens (20 iron + 5 stone)", callback_data="train_queen"),
-             InlineKeyboardButton(text="⚔️ Kings (15 stone + 1 relic)", callback_data="train_king")],
+            [InlineKeyboardButton(text="👣 Pawns (2 wood)", callback_data="train_pawns"),
+             InlineKeyboardButton(text="👹 Footmen (5 wood + 1 bronze)", callback_data="train_footmen")],
+            [InlineKeyboardButton(text="🏹 Archers (8 wood + 2 bronze)", callback_data="train_archers"),
+             InlineKeyboardButton(text="🗡️ Lancers (10 bronze + 3 iron)", callback_data="train_lancers")],
+            [InlineKeyboardButton(text="🏰 Castellans (5 bronze + 15 iron)", callback_data="train_castellans"),
+             InlineKeyboardButton(text="💀 Warlords (30 iron + 500 silver)", callback_data="train_warlords")],
         ]),
         parse_mode="Markdown"
     )
     await callback.answer()
+    txt += "Secret code `!train [unit] [amount]`\n\n"
 
 
 @dp.callback_query(lambda q: q.data == "build_menu")
@@ -2816,6 +2824,136 @@ async def callback_build_menu(callback: types.CallbackQuery):
         parse_mode="Markdown"
     )
     await safe_answer(callback)
+from sector_dominance import (
+    kb_sector_dashboard, kb_occupy_node_menu, kb_ruler_panel,
+    kb_teleport_sector_list, format_sector_dominance_board,
+    format_ruler_vision, declare_pretender
+)
+from sector_cycles import get_current_phase, format_phase_status, format_full_cycle_view
+from alliance_war_bounty import (
+    format_war_room, kb_war_room, format_bounty_board,
+    kb_bounty_board, kb_main_dashboard_with_alerts
+)
+from teleport_system import (
+    claim_daily_teleports, execute_teleport,
+    format_teleport_menu, post_sector_chat, read_sector_chat
+)
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("sector:"))
+async def handle_sector_callbacks(callback: types.CallbackQuery):
+    user_id = str(callback.from_user.id)
+    user    = get_user(user_id)
+    if not user:
+        await callback.answer("Register first with /start")
+        return
+
+    data   = callback.data.split(":")
+    action = data[1] if len(data) > 1 else ""
+    param  = data[2] if len(data) > 2 else ""
+
+    if action == "dashboard":
+        sector_id    = int(param)
+        sector_state = get_sector_state(sector_id)   # your DB read function
+        phase        = get_current_phase(sector_id)
+        text         = format_phase_status(sector_id)
+        kb           = kb_sector_dashboard(sector_id, user, sector_state)
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+    elif action == "phase":
+        sector_id = int(param)
+        text      = format_phase_status(sector_id) + "\n\n" + format_full_cycle_view(sector_id)
+        kb        = kb_phase_info(sector_id)
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+    elif action == "map" or action == "occupy_menu":
+        sector_id    = int(param)
+        sector_state = get_sector_state(sector_id)
+        kb           = kb_occupy_node_menu(sector_id, sector_state, user)
+        await callback.message.edit_text(
+            "🗺️ *Choose a node:*", reply_markup=kb, parse_mode="Markdown"
+        )
+
+    elif action == "chat":
+        sector_id    = int(param)
+        sector_state = get_sector_state(sector_id)
+        text         = read_sector_chat(sector_state, user_id, user)
+        kb           = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton("💬 Send Message", callback_data=f"sector:chat_input:{sector_id}"),
+            InlineKeyboardButton("« Back",          callback_data=f"sector:dashboard:{sector_id}"),
+        ]])
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+    await callback.answer()
+
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("teleport:"))
+async def handle_teleport_callbacks(callback: types.CallbackQuery):
+    user_id = str(callback.from_user.id)
+    user    = get_user(user_id)
+    data    = callback.data.split(":")
+    action  = data[1] if len(data) > 1 else ""
+
+    if action == "menu":
+        text = format_teleport_menu(user)
+        kb   = kb_teleport_sector_list(user)
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+    elif action == "claim":
+        ok, msg, user = claim_daily_teleports(user)
+        save_user(user_id, user)
+        kb = kb_teleport_sector_list(user)
+        await callback.message.edit_text(msg, reply_markup=kb, parse_mode="Markdown")
+
+    elif action == "go":
+        sector_id = int(data[2])
+        # execute_teleport needs sector_state — load it
+        sector_state = get_sector_state(
+            user.get("commander_location", {}).get("sector_id", 1)
+        )
+        ok, msg, user, sector_state = execute_teleport(
+            user, sector_id, {}, sector_state,
+            log_sector_event,   # your existing log function
+        )
+        save_user(user_id, user)
+        save_sector_state(sector_state.get("sector_id", 1), sector_state)
+        kb = kb_sector_dashboard(sector_id, user, get_sector_state(sector_id))
+        await callback.message.edit_text(msg, reply_markup=kb, parse_mode="Markdown")
+
+    await callback.answer()
+
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("war:"))
+async def handle_war_callbacks(callback: types.CallbackQuery):
+    user_id  = str(callback.from_user.id)
+    user     = get_user(user_id)
+    alliance = get_alliance(user.get("alliance_id"))   # your existing function
+    data     = callback.data.split(":")
+    action   = data[1] if len(data) > 1 else ""
+
+    if action == "room":
+        is_leader = user.get("alliance_role") in ("LEADER", "OFFICER")
+        text      = format_war_room(user, alliance, is_leader)
+        kb        = kb_war_room(alliance, user)
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+    await callback.answer()
+
+
+@dp.callback_query(lambda c: c.data and c.data.startswith("bounty:"))
+async def handle_bounty_callbacks(callback: types.CallbackQuery):
+    user_id = str(callback.from_user.id)
+    user    = get_user(user_id)
+    data    = callback.data.split(":")
+    action  = data[1] if len(data) > 1 else ""
+
+    if action == "board":
+        bounties = get_active_bounties()   # read from bounty_board table
+        auto_vis = get_auto_visible_players()   # query unshielded/whale players
+        text     = format_bounty_board(bounties, auto_vis, user)
+        kb       = kb_bounty_board(bounties, user)
+        await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+
+    await callback.answer()
 
 @dp.callback_query(lambda q: q.data == "base:main")
 async def show_base_menu(callback: types.CallbackQuery):
@@ -5790,6 +5928,31 @@ async def cb_menu_claims_shortcut(callback: types.CallbackQuery):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
     )
 
+@dp.callback_query(lambda q: q.data == "power")
+async def cb_menu_battle(callback: types.CallbackQuery):
+    """Display player's power level and breakdown."""
+    await callback.answer()
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+
+    if not user:
+        await callback.answer("Not registered", show_alert=True)
+        await _send_unreg_sticker(callback)
+        return
+    
+    try:
+        total_power = calculate_player_power(user)
+        power_tier = get_power_tier(total_power)
+        breakdown = get_power_breakdown(user)
+        
+        msg = format_power_display(user)
+        msg += f"\n{power_tier}"
+        
+        await callback.answer(msg, parse_mode="Markdown")
+        
+    except Exception as e:
+        print(f"[ERROR] cmd_power: {e}")
+        await callback.answer("❌ Error calculating power. Try again.", parse_mode="Markdown")
 
 @dp.callback_query(lambda q: q.data == "menu_battle")
 async def cb_menu_battle(callback: types.CallbackQuery):
@@ -5885,8 +6048,7 @@ async def cb_shield_toggle(callback: types.CallbackQuery):
 async def cb_menu_fusion_info(callback: types.CallbackQuery):
     """Fusion game info and quick-start."""
     await callback.answer()
-    chat_id_str = _chat_id_for_tg_link(CHECKMATE_HQ_GROUP_ID) if CHECKMATE_HQ_GROUP_ID else ""
-    fusion_link  = f"https://t.me/c/{chat_id_str}/{FUSION_TOPIC_ID}" if chat_id_str else "the group"
+    fusion_link  = "https://https://t.me/checkmateHQ/36621" 
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🃏 Go to Fusion Topic", url=fusion_link)],
@@ -8257,46 +8419,57 @@ async def cb_locked(callback: types.CallbackQuery):
     await callback.answer("Sectors 10-64 unlock as you level up!", show_alert=True)
 
 
-@dp.callback_query(F.data.startswith("train_"))
+@dp.callback_query(F.data.startswith("train_") & ~F.data.startswith("train_confirm_") & ~F.data.startswith("train_menu"))
 async def cb_train_unit(callback: types.CallbackQuery):
     """Handle unit training selection."""
     try:
+        from training_system import UNITS, check_training_cost
         unit_key = callback.data.replace("train_", "")
         u_id = str(callback.from_user.id)
         user = get_user(u_id)
-        
+
         if not user:
             await callback.answer("❌ User not found.", show_alert=True)
             return
-        
-        # Unit definitions with costs
-        units = {
-            "Police and Dogs": {"name": "👹 Police and Dogs", "cost": {"wood": 5}},
-            "knight": {"name": "🗡️ Knights", "cost": {"wood": 15, "bronze": 5}},
-            "bishop": {"name": "⚜️ Bishops", "cost": {"bronze": 10, "iron": 3}},
-            "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "stone": 2}},
-            "queen": {"name": "👑 Queens", "cost": {"iron": 20, "stone": 5}},
-            "king": {"name": "⚔️ Kings", "cost": {"stone": 15, "relics": 1}}
-        }
-        
-        if unit_key not in units:
+
+        if unit_key not in UNITS:
             await callback.answer("❌ Unknown unit.", show_alert=True)
             return
-        
-        unit = units[unit_key]
-        cost_str = " + ".join([f"{amt} {res.upper()}" for res, amt in unit['cost'].items()])
-        
-        # Show quantity selector
+
+        unit = UNITS[unit_key]
+        player_level = user.get("level", 1)
+        if player_level < unit["min_level"]:
+            await callback.answer(
+                f"❌ {unit['name']} requires Level {unit['min_level']}. You are Level {player_level}.",
+                show_alert=True
+            )
+            return
+
+        costs = unit["costs"]
+        cost_parts = []
+        for res in ("wood", "bronze", "iron"):
+            if costs.get(res, 0):
+                cost_parts.append(f"{costs[res]} {res}")
+        if costs.get("xp", 0):
+            cost_parts.append(f"{costs['xp']} XP")
+        if costs.get("silver", 0):
+            cost_parts.append(f"{costs['silver']} silver")
+        cost_str = " + ".join(cost_parts) if cost_parts else "Free"
+
         await callback.message.edit_text(
             f"🎯 *{unit['name']}* Training\n\n"
-            f"Cost per unit: {cost_str}\n\n"
-            f"How many {unit['name'].lower()} do you want to train?",
+            f"_{unit['description']}_\n\n"
+            f"💸 Cost per unit: {cost_str}\n"
+            f"⏱️ Time per unit: {unit['train_time']}s\n\n"
+            f"How many do you want to train?",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="5", callback_data=f"train_confirm_{unit_key}_5"),
-                 InlineKeyboardButton(text="10", callback_data=f"train_confirm_{unit_key}_10"),
-                 InlineKeyboardButton(text="20", callback_data=f"train_confirm_{unit_key}_20")],
-                [InlineKeyboardButton(text="50", callback_data=f"train_confirm_{unit_key}_50"),
-                 InlineKeyboardButton(text="100", callback_data=f"train_confirm_{unit_key}_100")]
+                [InlineKeyboardButton(text="1",  callback_data=f"train_confirm_{unit_key}_1"),
+                 InlineKeyboardButton(text="5",  callback_data=f"train_confirm_{unit_key}_5"),
+                 InlineKeyboardButton(text="10", callback_data=f"train_confirm_{unit_key}_10")],
+                [InlineKeyboardButton(text="20", callback_data=f"train_confirm_{unit_key}_20"),
+                 InlineKeyboardButton(text="50", callback_data=f"train_confirm_{unit_key}_50"),
+                 InlineKeyboardButton(text="100",callback_data=f"train_confirm_{unit_key}_100")],
+                [InlineKeyboardButton(text="🔙 Back", callback_data="train_menu")]
             ]),
             parse_mode="Markdown"
         )
@@ -8311,76 +8484,44 @@ async def cb_train_confirm(callback: types.CallbackQuery):
     """Confirm unit training and deduct resources."""
     try:
         import re
+        from training_system import UNITS, add_to_training_queue
         m = re.search(r'train_confirm_(\w+)_(\d+)', callback.data)
         if not m:
             await callback.answer("❌ Invalid format.", show_alert=True)
             return
-        
+
         unit_key = m.group(1)
         quantity = int(m.group(2))
         u_id = str(callback.from_user.id)
-        user = get_user(u_id)
-        
-        if not user:
-            await callback.answer("❌ User not found.", show_alert=True)
-            return
-        
-        # Unit costs
-        units = {
-            "Police and Dogs": {"name": "👹 Police and Dogs", "cost": {"wood": 5}},
-            "knight": {"name": "🗡️ Knights", "cost": {"wood": 15, "bronze": 5}},
-            "bishop": {"name": "⚜️ Bishops", "cost": {"bronze": 10, "iron": 3}},
-            "rook": {"name": "🏰 Rooks", "cost": {"iron": 10, "stone": 2}},
-            "queen": {"name": "👑 Queens", "cost": {"iron": 20, "stone": 5}},
-            "king": {"name": "⚔️ Kings", "cost": {"stone": 15, "relics": 1}}
-        }
-        
-        if unit_key not in units:
+
+        if unit_key not in UNITS:
             await callback.answer("❌ Unknown unit.", show_alert=True)
             return
-        
-        unit = units[unit_key]
-        base_res = user.get('base_resources', {})
-        resources = base_res.get('resources', {})
-        
-        # Check if enough resources
-        for res_type, cost_per_unit in unit['cost'].items():
-            total_cost = cost_per_unit * quantity
-            available = resources.get(res_type, 0) if res_type != 'food' else base_res.get('food', 0)
-            if available < total_cost:
-                await callback.answer(
-                    f"❌ Need {total_cost} {res_type.upper()}, only have {available}",
-                    show_alert=True
-                )
-                return
-        
-        # Deduct resources
-        for res_type, cost_per_unit in unit['cost'].items():
-            total_cost = cost_per_unit * quantity
-            resources[res_type] = resources.get(res_type, 0) - total_cost
-        
-        # Add troops
-        military = user.get('military', {})
-        military[unit_key] = military.get(unit_key, 0) + quantity
-        
-        # Save
-        user['military'] = military
-        base_res['resources'] = resources
-        user['base_resources'] = base_res
-        save_user(u_id, user)
-        
+
+        # Delegate everything (cost check, deduction, queue) to training_system
+        success, msg = add_to_training_queue(u_id, unit_key, quantity)
+
+        if not success:
+            await callback.answer(msg, show_alert=True)
+            return
+
+        unit = UNITS[unit_key]
+        total_time = unit["train_time"] * quantity
+        mins, secs = divmod(total_time, 60)
+        time_str = f"{mins}m {secs}s" if mins else f"{secs}s"
+
         await callback.message.edit_text(
-            f"✅ *TRAINING COMPLETE!*\n\n"
-            f"🎖️ +{quantity} {unit['name'].lower()}\n\n"
-            f"Your army grows stronger. The weak tremble.",
+            f"⚔️ *TRAINING QUEUED!*\n\n"
+            f"{unit['name']} × {quantity}\n"
+            f"⏱️ Ready in: {time_str}\n\n"
+            f"_\"Your army grows in the dark.\" — GameMaster_",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🏗️ Build", callback_data="build_menu"),
-                 InlineKeyboardButton(text="🔬 Research Lab", callback_data="menu_research")],
-                [InlineKeyboardButton(text="🎁 Claim Rewards", callback_data="menu_claims")]
+                [InlineKeyboardButton(text="🎖️ Train More", callback_data="train_menu"),
+                 InlineKeyboardButton(text="🏠 Home", callback_data="main_menu")]
             ])
         )
-        await callback.answer()
+        await callback.answer("✅ Training started!")
     except Exception as e:
         print(f"[CB_TRAIN_CONFIRM ERROR] {e}")
         await callback.answer(f"❌ Error: {str(e)}", show_alert=True)
@@ -10532,14 +10673,13 @@ async def main():
     grant_free_teleports_to_all()
     print("[OK] Granted 3 free teleports to all players")
     
-    # Grant 3 free shields to all players
-    grant_free_shields_to_all()
-    print("[OK] Granted 3 free shields to all players")
     
     # Start background streak reset task (every 120s)
     round_task = asyncio.create_task(round_reset_task())
     print("[OK] Round timer started (120s rounds with streak reset)")
-    
+
+    asyncio.create_task(start_scheduler(bot, dp))
+    await dp.start_polling(bot)
     # Start GameMaster announcements task (using imported CHECKMATE_HQ_GROUP_ID)
     # Note: Telegram group IDs are NEGATIVE numbers (e.g., -1003835925366)
     announce_task = None

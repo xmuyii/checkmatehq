@@ -58,7 +58,72 @@ DEFAULT_BASE_NAMES = [
     "Skyward Spire", "Earthen Vault", "Twilight Realm", "The Citadel",
 ]
 
+import json as _json
 
+def safe_json(value, default=None):
+    """
+    Safely parse a value that might be:
+      - Already a dict/list (JSONB column) → return as-is
+      - A JSON string (TEXT column) → parse it
+      - None → return default
+      - Anything else → return default
+
+    Use this everywhere you read JSON fields from Supabase.
+    """
+    if default is None:
+        default = {}
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            return _json.loads(value)
+        except Exception:
+            return default
+    return default
+
+def normalize_user(user: dict) -> dict:
+    """
+    Normalize all JSON fields on a user dict loaded from Supabase.
+    Prevents 'str object has no attribute append/get/keys' errors.
+    Call this at the top of get_user() before returning.
+    """
+    if not user:
+        return user
+
+    # Fields that should be dicts
+    dict_fields = [
+        "inventory", "military", "buildings", "building_queue",
+        "researches", "research_queue", "base_resources", "traps",
+        "weapons", "buffs", "banishments", "visas", "visa_applications",
+        "commander_location", "current_node", "active_suit",
+        "skill_points_spent", "dominance_scores", "home_sector_revealed",
+    ]
+    for field in dict_fields:
+        user[field] = safe_json(user.get(field), default={})
+
+    # Fields that should be lists
+    list_fields = [
+        "unclaimed_items", "march_queue", "eject_log",
+        "teleport_history", "visa_queue",
+    ]
+    for field in list_fields:
+        user[field] = safe_json(user.get(field), default=[])
+
+    # Fields with specific defaults
+    if not user.get("commander_location"):
+        user["commander_location"] = {"sector_id": 1}
+    if not isinstance(user.get("base_resources"), dict):
+        user["base_resources"] = {"resources": {}, "food": 0, "current_streak": 0}
+    if not isinstance(user.get("base_resources", {}).get("resources"), dict):
+        user["base_resources"]["resources"] = {}
+
+    # Ensure credits exists
+    if user.get("credits") is None:
+        user["credits"] = 0
+
+    return user
 # ── Week helper ────────────────────────────────────────────────────────────
 
 def _current_week_key() -> str:
@@ -188,27 +253,22 @@ def _row_to_user(row: dict) -> dict:
     return u
 
 
-def get_user(user_id: str, columns='*') -> dict | None:
-    """Fetch user from DB. Pass columns parameter to select only needed ones for performance.
-    
-    Usage:
-        get_user(user_id)  # Full data (backward compatible)
-        get_user(user_id, 'user_id,username,credits,shield_status,level')  # Only needed columns
-    """
+def get_user(user_id: str) -> dict | None:
     try:
-        r = supabase.table(DB_TABLE).select("*").eq("user_id", str(user_id)).execute()
+        r = supabase.table(DB_TABLE).select("*").eq(
+            "user_id", str(user_id)
+        ).execute()
         if r.data:
             user = r.data[0]
-            # Deserialize JSONB fields
-            user = _row_to_user(user)
-            # Run all passive migrations and ticks on every load
-            user = on_user_load(user)
+            user = normalize_user(user)      # Fix all JSON fields
+            from teleport_system import on_user_load
+            user = on_user_load(user)        # Run passive ticks
             return user
         return None
     except Exception as e:
         print(f"[DB ERROR] get_user: {e}")
         return None
-
+    
 def get_or_save_user(user_id: str, data: dict | None) -> dict | None:
     '''
     If data is None: acts as getter — returns user dict.
@@ -1199,49 +1259,28 @@ def reset_all_shields():
         print(f"[ERROR] reset_all_shields failed: {e}")
         return 0
 
-
-def grant_free_teleports_to_all():
+async def grant_free_teleports_to_all():
     """Grant 3 free teleport items to all players as unclaimed gifts."""
-    try:
-        users = supabase.table(DB_TABLE).select('user_id').execute().data
-        teleport_count = 0
-        for user_data in users:
-            try:
-                user_id = user_data.get('user_id')
-                # Add 3 teleport items as unclaimed
-                for _ in range(3):
-                    add_unclaimed_item(user_id, 'free_teleport', 1)
-                teleport_count += 1
-            except Exception as e:
-                print(f"[WARN] Could not grant teleports to {user_data.get('user_id')}: {e}")
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    users = supabase.table(DB_TABLE).select(
+        "user_id, teleport_charges, teleport_daily_claimed_date"
+    ).execute().data or []
+    granted = 0
+    for user in users:
+        try:
+            if user.get("teleport_daily_claimed_date") == today:
                 continue
-        print(f"[TELEPORTS] Granted 3 free teleports to {teleport_count} players")
-        return teleport_count
-    except Exception as e:
-        print(f"[ERROR] grant_free_teleports_to_all failed: {e}")
-        return 0
+            current = user.get("teleport_charges") or 0
+            supabase.table(DB_TABLE).update({
+                "teleport_charges": current + 3,
+                "teleport_daily_claimed_date": today,
+            }).eq("user_id", user["user_id"]).execute()
+            granted += 1
+        except Exception as e:
+            print(f"[WARN] teleport grant failed {user.get('user_id')}: {e}")
+    print(f"[TELEPORTS] Granted 3 charges to {granted} players")
 
 
-def grant_free_shields_to_all():
-    """Grant 3 free shield items to all players as unclaimed gifts."""
-    try:
-        users = supabase.table(DB_TABLE).select('user_id').execute().data
-        shield_count = 0
-        for user_data in users:
-            try:
-                user_id = user_data.get('user_id')
-                # Add 3 shield items as unclaimed
-                for _ in range(3):
-                    add_unclaimed_item(user_id, 'shield_potion', 1)
-                shield_count += 1
-            except Exception as e:
-                print(f"[WARN] Could not grant shields to {user_data.get('user_id')}: {e}")
-                continue
-        print(f"[SHIELDS] Granted 3 free shields to {shield_count} players")
-        return shield_count
-    except Exception as e:
-        print(f"[ERROR] grant_free_shields_to_all failed: {e}")
-        return 0
 
 
 # ── Unclaimed items ────────────────────────────────────────────────────────
@@ -1572,4 +1611,35 @@ def reset_all_streaks():
         return reset_count
     except Exception as e:
         print(f"[ERROR] reset_all_streaks failed: {e}")
-        return 0
+        return 
+
+def get_sector_state(sector_id: int) -> dict:
+    try:
+        r = supabase.table("sector_state").select("*").eq(
+            "sector_id", sector_id
+        ).execute()
+        if r.data:
+            state = r.data[0]
+            # Normalize JSON fields
+            for field in ["occupancy", "roaming", "dominance", "active_predators",
+                          "pending_notifications", "incoming_marches"]:
+                state[field] = safe_json(state.get(field), default={})
+            for field in ["sector_chat", "pending_ruler_alerts"]:
+                state[field] = safe_json(state.get(field), default=[])
+            return state
+        # Return empty state if not seeded yet
+        return {"sector_id": sector_id, "occupancy": {}, "roaming": {},
+                "sector_chat": [], "dominance": {}, "active_predators": {}}
+    except Exception as e:
+        print(f"[DB ERROR] get_sector_state {sector_id}: {e}")
+        return {"sector_id": sector_id, "occupancy": {}, "roaming": {},
+                "sector_chat": [], "dominance": {}, "active_predators": {}}
+
+def save_sector_state(sector_id: int, state: dict) -> None:
+    try:
+        state["last_updated"] = datetime.utcnow().isoformat()
+        supabase.table("sector_state").upsert(
+            {"sector_id": sector_id, **state}
+        ).execute()
+    except Exception as e:
+        print(f"[DB ERROR] save_sector_state {sector_id}: {e}")
