@@ -6449,12 +6449,18 @@ async def cb_menu_inventory(callback: types.CallbackQuery):
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
     ])
     
-    inv_text = f"🎒 *INVENTORY* ({len(inv)} items)\n\n━━━━━━━━━━━━━━━━━\n"
+    unclaimed_raw = _ensure_list(user.get("unclaimed_items", []))
+    unclaimed_count = len(unclaimed_raw)
+    inv_text = f"🎒 *INVENTORY* ({len(inv)} items)\'\n"
+    if unclaimed_count > 0:
+        inv_text += f"📬 *{unclaimed_count} unclaimed reward(s) waiting* — use /claims\n"
+    inv_text += "\n━━━━━━━━━━━━━━━━━\n"
     if inv:
-        for i, item in enumerate(inv[:5], 1):
-            inv_text += f"{i}. {item.get('name', 'Unknown')}\n"
-        if len(inv) > 5:
-            inv_text += f"... and {len(inv) - 5} more\n"
+        for i, item in enumerate(inv, 1):
+            item_label = item.get('type', item.get('name', 'Unknown')).replace('_', ' ').title()
+            qty = item.get('quantity', 1)
+            qty_str = f" x{qty}" if qty > 1 else ""
+            inv_text += f"{i}. {item_label}{qty_str}\n"
     else:
         inv_text += "_Your inventory is empty._\n"
     inv_text += "━━━━━━━━━━━━━━━━━"

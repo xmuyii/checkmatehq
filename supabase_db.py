@@ -23,6 +23,14 @@ SUPABASE_URL = os.environ.get('SUPABASE_URL', CONFIG_SUPABASE_URL).rstrip('/')
 SUPABASE_KEY = os.environ.get('SUPABASE_KEY', CONFIG_SUPABASE_KEY)
 SECTORS_FILE = os.environ.get('SECTORS_FILE', 'sectors.txt')
 
+# Items that stack into a single inventory slot.
+# Claiming more of a stackable just increments quantity on the existing slot —
+# no extra backpack space consumed. Add new item types here as needed.
+STACKABLE_ITEMS = {
+    'super_crate', 'wood_crate', 'bronze_crate', 'iron_crate',
+    'shield_potion', 'free_teleport', 'teleport', 'shield',
+}
+
 # Initialize Supabase with error handling for invalid credentials
 supabase: Client = None
 try:
@@ -986,6 +994,7 @@ def add_inventory_item(user_id, item_type: str, xp_reward: int = 0,
     item = {
         'id':               _next_id(inv),
         'type':             item_type,
+        'quantity':         1,
         'xp_reward':        xp_reward,
         'multiplier_value': multiplier_value,
         'expires_at':       expires_at,
@@ -1319,8 +1328,10 @@ def get_unclaimed_items(user_id) -> list:
 def claim_item(user_id, item_id: int):
     """
     Claim ONE unclaimed item identified by its unique 'id' field.
-    Moves it into inventory. Returns (True, msg) or (False, reason).
-    Special handling: backpack items increase backpack_slots instead.
+    - Stackable items (crates, shields, teleports) merge into one inventory slot.
+    - Non-stackable items require a free backpack slot.
+    - Backpack items increase backpack_slots instead of entering inventory.
+    Returns (True, msg) or (False, reason).
     """
     uid = str(user_id)
     user = get_user(uid)
@@ -1333,29 +1344,53 @@ def claim_item(user_id, item_id: int):
         return False, "Item not found"
 
     item_type = item.get('type', '')
-    
-    # Special handling for backpack upgrades - don't add to inventory, just increase capacity
+    inv = user.get('inventory', [])
+
+    # Special handling: backpack upgrades don't enter inventory
     if 'backpack' in item_type.lower():
         old_slots = user.get('backpack_slots', 5)
-        new_slots = old_slots + 15  # 5 → 20, for example
+        new_slots = old_slots + 15
         user['backpack_slots'] = new_slots
         user['unclaimed_items'] = [it for it in unclaimed if it.get('id') != item_id]
         save_user(uid, user)
         return True, f"Backpack upgraded! Capacity: {old_slots} → {new_slots} slots"
 
-    inv = user.get('inventory', [])
-    if len(inv) >= user.get('backpack_slots', 5):
-        return False, "Inventory full — use or open an item first"
+    # Stackable items: merge into existing slot or use one slot for all of this type
+    if item_type in STACKABLE_ITEMS:
+        existing = next((s for s in inv if s.get('type') == item_type), None)
+        if existing:
+            # Increment quantity on the existing stack — no new slot needed
+            existing['quantity'] = existing.get('quantity', 1) + 1
+        else:
+            # No existing stack — needs a free slot
+            if len(inv) >= user.get('backpack_slots', 5):
+                return False, "Inventory full — buy more backpack slots or use an item first"
+            inv.append({
+                'id':       _next_id(inv),
+                'type':     item_type,
+                'quantity': 1,
+                'xp_reward':        item.get('xp_reward', 0),
+                'multiplier_value': item.get('multiplier_value', 0),
+                'acquired': datetime.utcnow().isoformat(),
+            })
+        user['inventory']       = inv
+        user['unclaimed_items'] = [it for it in unclaimed if it.get('id') != item_id]
+        save_user(uid, user)
+        return True, f"{item_type.replace('_', ' ').title()} added to stack"
 
-    # Move to inventory
+    # Non-stackable: requires a free slot
+    if len(inv) >= user.get('backpack_slots', 5):
+        return False, "Inventory full — buy more backpack slots or use an item first"
+
     inv.append({
         'id':               _next_id(inv),
         'type':             item_type,
+        'quantity':         1,
         'xp_reward':        item.get('xp_reward', 0),
         'multiplier_value': item.get('multiplier_value', 0),
         'acquired':         datetime.utcnow().isoformat(),
     })
-    user['inventory']      = inv
+    user['inventory']       = inv
     user['unclaimed_items'] = [it for it in unclaimed if it.get('id') != item_id]
     save_user(uid, user)
     return True, "Item claimed successfully"
