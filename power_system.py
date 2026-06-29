@@ -47,11 +47,13 @@ def calculate_player_power(user: dict) -> int:
     
     # 3. Military Power (troops are power)
     military = user.get('military', {})
-    total_soldiers = military.get('soldiers', 0)
-    total_commanders = military.get('commanders', 0)
+    soldiers = 0
+    for x in military:
+        if isinstance(x, dict):
+            soldiers += x.get('count', 0)
+    total_soldiers = soldiers
     
     power += (total_soldiers * 2)  # Each soldier = 2 power
-    power += (total_commanders * 500)  # Each commander = 500 power
     
     # 4. Weapons Power
     weapons = user.get('weapons', {})
