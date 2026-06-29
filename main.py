@@ -2441,6 +2441,14 @@ async def on_show_weapons_inventory(callback: types.CallbackQuery):
             return
         
         weapons = user.get('weapons', {})
+        # Defensive: handle case where weapons is stored as JSON string
+        if isinstance(weapons, str):
+            import json as json_lib
+            try:
+                weapons = json_lib.loads(weapons)
+            except:
+                weapons = {}
+        
         if not weapons or len(weapons) == 0:
             await callback.answer("🃏 You have no weapons yet. Buy some first!", show_alert=True)
             return
@@ -4057,6 +4065,14 @@ async def cmd_base(message: types.Message):
     
     # Get military with better display
     military = user.get("military", {})
+    # Defensive: handle case where military is stored as JSON string
+    if isinstance(military, str):
+        import json as json_lib
+        try:
+            military = json_lib.loads(military)
+        except:
+            military = {}
+    
     troop_emojis = {
         "Police and Dogs": ("👹 Police and Dogs", 1),
         "knight": ("🗡️ Knights", 3),
@@ -4080,6 +4096,14 @@ async def cmd_base(message: types.Message):
     
     # Get traps with better display
     traps = user.get("traps", {})
+    # Defensive: handle case where traps is stored as JSON string
+    if isinstance(traps, str):
+        import json as json_lib
+        try:
+            traps = json_lib.loads(traps)
+        except:
+            traps = {}
+    
     trap_emojis = {
         "spike_pit": "🕳️ Spike Pits",
         "arrow_tower": "🏹 Arrow Towers",
@@ -4262,7 +4286,22 @@ async def cmd_scout(message: types.Message):
             return
         
         military = target.get("military", {})
+        # Defensive: handle case where military is stored as JSON string
+        if isinstance(military, str):
+            import json as json_lib
+            try:
+                military = json_lib.loads(military)
+            except:
+                military = {}
+        
         traps = target.get("traps", {})
+        # Defensive: handle case where traps is stored as JSON string
+        if isinstance(traps, str):
+            import json as json_lib
+            try:
+                traps = json_lib.loads(traps)
+            except:
+                traps = {}
         
         report = f"""
 ╔═══════════════════════════════════════╗
@@ -4747,7 +4786,7 @@ async def cb_defense_mousetraps(callback: types.CallbackQuery):
         return
     
     # Get available traps from inventory
-    inventory = user.get("inventory", [])
+    inventory = _ensure_list(user.get("inventory", []))
     traps_available = sum(1 for item in inventory if "trap" in item.get("type", "").lower())
     
     await callback.message.edit_text(
@@ -4816,7 +4855,7 @@ async def cb_defense_firewall(callback: types.CallbackQuery):
         return
     
     # Check if they have firewall item
-    inventory = user.get("inventory", [])
+    inventory = _ensure_list(user.get("inventory", []))
     has_fireball = any(item.get("type") == "fireball" for item in inventory)
     
     if not has_fireball:
@@ -5070,6 +5109,22 @@ def register_new_user(user_id, first_name):
     }
     save_user(user_id, new_user)
     return new_user
+
+
+def _ensure_list(val) -> list:
+    """Coerce a value that should be a list but may be a dict or string from DB."""
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str):
+        try:
+            import json as _j
+            parsed = _j.loads(val)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    if isinstance(val, dict):
+        return list(val.values())
+    return []
 
 @dp.message(_cmd("start"))
 async def cmd_start(message: types.Message):
@@ -6384,7 +6439,7 @@ async def cb_menu_inventory(callback: types.CallbackQuery):
         await callback.answer("User not found", show_alert=True)
         return
     
-    inv = user.get("inventory", [])
+    inv = _ensure_list(user.get("inventory", []))
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📦 My Items", callback_data="inv_open")],
@@ -6890,7 +6945,7 @@ async def cb_inv_use(callback: types.CallbackQuery):
         await callback.answer("User not found", show_alert=True)
         return
     
-    inv = user.get("inventory", [])
+    inv = _ensure_list(user.get("inventory", []))
     if not inv:
         await callback.answer("Your inventory is empty!", show_alert=True)
         return
@@ -7886,7 +7941,7 @@ async def cb_activate_shield(callback: types.CallbackQuery):
     # Remove the shield from inventory and set shield_expires
     user = get_user(u_id)
     if not user: await callback.answer("Account not found.", show_alert=True); return
-    inv = user.get('inventory', [])
+    inv = _ensure_list(user.get('inventory', []))
     shield = next((it for it in inv if it.get('id') == item_id and it.get('type') == 'shield'), None)
     if not shield: await callback.answer("Shield not found.", show_alert=True); return
 
