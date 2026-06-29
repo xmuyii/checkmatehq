@@ -17,6 +17,20 @@ from training_system import UNITS
 from weapon_system import WEAPONS
 from trap_system import TRAP_TYPES
 
+import json as _json
+
+def _parse_dict(value) -> dict:
+    """Ensure a value is a dict — parse it if it arrived as a JSON string."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = _json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  POWER CALCULATION
 # ═══════════════════════════════════════════════════════════════════════════
@@ -34,46 +48,30 @@ def calculate_player_power(user: dict) -> int:
     power += xp_level * 100
     
     # 2. Building Power (each building level adds power)
-    buildings = user.get('buildings', {})
-    # Defensive: handle case where buildings is stored as JSON string
-    if isinstance(buildings, str):
-        try:
-            import json
-            buildings = json.loads(buildings)
-        except:
-            buildings = {}
-    if isinstance(buildings, dict):
-        for building_id, level in buildings.items():
-            if building_id in BUILDING_TYPES:
-                # Each building level adds 50 power (500 power per max level building)
-                power += level * 50
-    
+    buildings = _parse_dict(user.get('buildings', {}))
+    for building_id, level in buildings.items():
+        if building_id in BUILDING_TYPES:
+            # Each building level adds 50 power (500 power per max level building)
+            power += level * 50
+
     # 3. Military Power (troops are power)
-    military = user.get('military', {})
-    if isinstance(military, str):
-        try:
-            import json
-            military = json.loads(military)
-        except:
-            military = {}
-    if isinstance(military, dict):
-        for military_id, count in military.items():
-            if military_id in UNITS:
-                power += (count * 2)  # Each soldier = 2 power
-    
+    military = _parse_dict(user.get('military', {}))
+    for military_id, count in military.items():
+        if military_id in UNITS:
+            power += (count * 2)  # Each soldier = 2 power
+
     # 4. Weapons Power
-    weapons = user.get('weapons', {})
-    if isinstance(weapons, dict):
-        for weapon_id, data in weapons.items():
-            if weapon_id in WEAPONS:
-                level = data.get('level', 0)
-                power += level * 30  # Each weapon level = 30 power
-            else:
-                # If it's just a number (level)
-                power += data * 30 if isinstance(data, int) else 0
-    
+    weapons = _parse_dict(user.get('weapons', {}))
+    for weapon_id, data in weapons.items():
+        if weapon_id in WEAPONS:
+            level = data.get('level', 0) if isinstance(data, dict) else 0
+            power += level * 30  # Each weapon level = 30 power
+        else:
+            # If it's just a number (level)
+            power += data * 30 if isinstance(data, int) else 0
+
     # 5. Traps Power
-    traps = user.get('traps', {})
+    traps = _parse_dict(user.get('traps', {}))
     for trap_id, count in traps.items():
         if trap_id in TRAP_TYPES:
             power += count * 10  # Each trap = 10 power
@@ -83,7 +81,7 @@ def calculate_player_power(user: dict) -> int:
     power += prestige_level * 200
     
     # 7. Base Resources Power (having resources stocked up adds slight power)
-    base_res = user.get('base_resources', {})
+    base_res = _parse_dict(user.get('base_resources', {}))
     resources = base_res.get('resources', {})
     total_resources = sum(resources.values()) if isinstance(resources, dict) else 0
     power += (total_resources // 1000)  # Every 1000 resources = 1 power
