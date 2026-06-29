@@ -57,7 +57,7 @@ def calculate_player_power(user: dict) -> int:
         except:
             military = {}
     if isinstance(military, dict):
-        for military_id, count in military.items:
+        for military_id, count in military.items():
             if military_id in UNITS:
                 power += (count * 2)  # Each soldier = 2 power
     
