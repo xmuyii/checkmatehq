@@ -16,6 +16,7 @@ import random
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 from base_layout import get_default_base_layout
+from teleport_system import on_user_load
 from config import DB_TABLE, SUPABASE_URL as CONFIG_SUPABASE_URL, SUPABASE_KEY as CONFIG_SUPABASE_KEY, ENV_NAME
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL', CONFIG_SUPABASE_URL).rstrip('/')
@@ -176,17 +177,37 @@ def _row_to_user(row: dict) -> dict:
     return u
 
 
-def get_user(user_id, columns='*') -> dict | None:
+def get_user(user_id: str, columns='*') -> dict | None:
     """Fetch user from DB. Pass columns parameter to select only needed ones for performance.
     
     Usage:
         get_user(user_id)  # Full data (backward compatible)
         get_user(user_id, 'user_id,username,credits,shield_status,level')  # Only needed columns
     """
-    r = supabase.table(DB_TABLE).select(columns).eq('user_id', str(user_id)).execute()
-    return _row_to_user(r.data[0]) if r.data else None
+    try:
+        r = supabase.table(DB_TABLE).select("*").eq("user_id", str(user_id)).execute()
+        if r.data:
+            user = r.data[0]
+            # Run all passive migrations and ticks on every load
+            user = on_user_load(user)
+            return user
+        return None
+    except Exception as e:
+        print(f"[DB ERROR] get_user: {e}")
+        return None
 
-
+def get_or_save_user(user_id: str, data: dict | None) -> dict | None:
+    '''
+    If data is None: acts as getter — returns user dict.
+    If data is dict: acts as setter — saves and returns None.
+    Used by systems that need to inject DB access without circular imports.
+    '''
+    if data is None:
+        return get_user(user_id)
+    else:
+        save_user(user_id, data)
+        return None
+    
 def save_user(user_id, data: dict):
     d = dict(data)
     d.pop('id', None)
@@ -243,15 +264,28 @@ def register_user(user_id, username: str):
             'total_words': 0,
             'bitcoin': 0,
             'xp': 0,
-            'energy': 1000,
+            'energy': 100,
             'power': 0,
             'gold': 0,
             'level': 1,
             'last_level': 1,
+            "teleport_charges": 0,
+            "home_sector":  None, # Set when player chooses base plot
+            "commander_location": {"sector_id": 1},  # Start in Sector 1
+            "base_shielded": False,
+            "shield_expires_at": None,
+            "active_suit":  None,
+            "energy_last_regen": None,
+            "march_queue":  [],
+            "research_queue": {},
+            "banishments":  {},
+            "visas":        {},
+            "alliance_id":  None,
+            "alliance_role": None,
             'backpack_slots': 5,
-            'backpack_image': 'normal_backpack',
-            'inventory': json.dumps([]),
+            'inventory': json.dumps({}),
             'unclaimed_items': json.dumps([]),
+            "researches":   {},
             'sector': None,
             'completed_tutorial': False,
             'base_name': random_base_name,
@@ -263,9 +297,10 @@ def register_user(user_id, username: str):
                 'food': 0,
                 'current_streak': 0
             }),
-            'military': json.dumps({}),
+            'military': json.dumps({"pawns": 5}),
             'traps': json.dumps({}),
             'shield_status': '⚠️ UNPROTECTED',
+            'credits': 0,
             'active_perks': {},
             'chess_stats': json.dumps({
                 'rating': 1000,

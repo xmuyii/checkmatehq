@@ -231,9 +231,11 @@ SECTORS = {
 
 
 def get_sector_info(sector_id: int) -> dict:
-    """Get sector info, return sector 1 as fallback."""
-    return SECTORS.get(sector_id, SECTORS[1])
-
+    return SECTORS.get(sector_id, SECTORS.get(1, {
+        "name": f"Sector {sector_id}",
+        "emoji": "🌍",
+        "lore": ""
+    }))
 
 def apply_sector_buffs(resources: dict, sector_id: int) -> dict:
     """
