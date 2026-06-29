@@ -114,6 +114,9 @@ def _row_to_user(row: dict) -> dict:
                 u[k] = []
         elif val is None:
             u[k] = []
+        # Defensive: ensure it's always a list (e.g. registered as {} by old code)
+        if not isinstance(u.get(k), list):
+            u[k] = []
     
     # Parse military, traps, buffs, buildings, weapons JSONB fields
     for k in ('military', 'traps', 'buffs', 'weapons', 'buildings', 'building_queue'):
@@ -188,6 +191,8 @@ def get_user(user_id: str, columns='*') -> dict | None:
         r = supabase.table(DB_TABLE).select("*").eq("user_id", str(user_id)).execute()
         if r.data:
             user = r.data[0]
+            # Deserialize JSONB fields
+            user = _row_to_user(user)
             # Run all passive migrations and ticks on every load
             user = on_user_load(user)
             return user
@@ -1253,6 +1258,9 @@ def add_unclaimed_item(user_id, item_type: str, amount: int = 1,
     if not user:
         return
     unclaimed = user.get('unclaimed_items', [])
+    # Ensure unclaimed is a list (defensive: could be dict from old registrations or bad DB state)
+    if not isinstance(unclaimed, list):
+        unclaimed = list(unclaimed.values()) if isinstance(unclaimed, dict) else []
     # Auto-assign XP for crates
     if xp_reward is None:
         xp_reward = _crate_xp(item_type) if 'crate' in item_type.lower() else 0

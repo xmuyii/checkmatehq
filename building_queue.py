@@ -153,12 +153,25 @@ def start_building(building_id: str, current_level: int, user: dict) -> dict:
     return user
 
 
+def _parse_dict(value) -> dict:
+    """Return value as a dict, parsing JSON strings defensively."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
 def get_building_progress(user: dict, building_id: str) -> Optional[dict]:
     """
     Get the progress of a building currently being built.
     Returns dict with progress info or None if not building.
     """
-    queue = user.get("building_queue", {})
+    queue = _parse_dict(user.get("building_queue", {}))
     if building_id not in queue:
         return None
     
@@ -189,7 +202,7 @@ def get_building_progress(user: dict, building_id: str) -> Optional[dict]:
 
 def get_all_building_progress(user: dict) -> list:
     """Get all buildings currently being constructed."""
-    queue = user.get("building_queue", {})
+    queue = _parse_dict(user.get("building_queue", {}))
     progress_list = []
     
     for building_id in queue:
