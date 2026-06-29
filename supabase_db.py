@@ -447,7 +447,7 @@ def ensure_bot_exists(username: str, initial_points: int = 0):
         'last_level': 1,
         'backpack_slots': 5,
         'backpack_image': 'normal_backpack',
-        'inventory': json.dumps([]),
+        'inventory': json.dumps({}),
         'unclaimed_items': json.dumps([]),
         'base_name': random_base_name,
         'base_resources': json.dumps({
@@ -973,7 +973,7 @@ def get_inventory(user_id) -> list:
     user = get_user(str(user_id))
     if not user:
         return []
-    inv = user.get('inventory', [])
+    inv = user.get('inventory', {})
     # Fix any items with None IDs
     inv = _fix_item_ids(inv)
     # Save the fixed inventory back if any items were fixed
@@ -988,7 +988,7 @@ def add_inventory_item(user_id, item_type: str, xp_reward: int = 0,
     user = get_user(str(user_id))
     if not user:
         return False
-    inv = user.get('inventory', [])
+    inv = user.get('inventory', {})
     if len(inv) >= user.get('backpack_slots', 5):
         return False
     item = {
@@ -1012,7 +1012,7 @@ def remove_inventory_item(user_id, item_id) -> bool:
     if not user:
         return False
     
-    old_inv = user.get('inventory', [])
+    old_inv = user.get('inventory', {})
     
     # First, fix any None IDs in the inventory
     old_inv = _fix_item_ids(old_inv)
@@ -1032,7 +1032,7 @@ def remove_inventory_item(user_id, item_id) -> bool:
     
     # Double-check by re-fetching
     user_after = get_user(str(user_id))
-    inv_after = user_after.get('inventory', [])
+    inv_after = user_after.get('inventory', {})
     final_ids = [it.get('id') for it in inv_after]
     print(f"[REMOVE_INV] VERIFIED: Removed item {item_id}. Remaining IDs: {final_ids}")
     return True
@@ -1054,7 +1054,7 @@ def activate_shield(user_id) -> bool:
     user = get_user(str(user_id))
     if not user:
         return False
-    inv = user.get('inventory', [])
+    inv = user.get('inventory', {})
     shield = next((it for it in inv if it.get('type', '') == 'shield'), None)
     if not shield:
         return False
@@ -1344,7 +1344,7 @@ def claim_item(user_id, item_id: int):
         return False, "Item not found"
 
     item_type = item.get('type', '')
-    inv = user.get('inventory', [])
+    inv = user.get('inventory', {})
 
     # Special handling: backpack upgrades don't enter inventory
     if 'backpack' in item_type.lower():
@@ -1430,7 +1430,7 @@ def get_profile(user_id) -> dict | None:
     user = get_user(str(user_id))
     if not user:
         return None
-    inv      = user.get('inventory', [])
+    inv      = user.get('inventory', {})
     uncl     = user.get('unclaimed_items', [])
     xp       = user.get('xp', 0)
     energy   = user.get('energy', 0)

@@ -4786,7 +4786,7 @@ async def cb_defense_mousetraps(callback: types.CallbackQuery):
         return
     
     # Get available traps from inventory
-    inventory = _ensure_list(user.get("inventory", []))
+    inventory = _ensure_list(user.get("inventory", {}))
     traps_available = sum(1 for item in inventory if "trap" in item.get("type", "").lower())
     
     await callback.message.edit_text(
@@ -4855,7 +4855,7 @@ async def cb_defense_firewall(callback: types.CallbackQuery):
         return
     
     # Check if they have firewall item
-    inventory = _ensure_list(user.get("inventory", []))
+    inventory = _ensure_list(user.get("inventory", {}))
     has_fireball = any(item.get("type") == "fireball" for item in inventory)
     
     if not has_fireball:
@@ -5172,7 +5172,7 @@ async def cmd_start(message: types.Message):
     shield_st  = user.get("shield_status") or "⚠️ UNPROTECTED"  # guard against None from DB
     unclaimed_raw = user.get("unclaimed_items", [])
     unclaimed  = len(unclaimed_raw) if isinstance(unclaimed_raw, list) else 0
-    inv_raw    = user.get("inventory", [])
+    inv_raw    = user.get("inventory", {})
     inv_count  = len(inv_raw) if isinstance(inv_raw, list) else 0
     inv_slots  = user.get("backpack_slots", 5)
     xp_bar_pct = min(100, int((xp % 100)))
@@ -5637,7 +5637,7 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
     shield_st  = user.get("shield_status") or "⚠️ UNPROTECTED"  # guard against None from DB
     unclaimed_raw = user.get("unclaimed_items", [])
     unclaimed  = len(unclaimed_raw) if isinstance(unclaimed_raw, list) else 0
-    inv_raw    = user.get("inventory", [])
+    inv_raw    = user.get("inventory", {})
     inv_count  = len(inv_raw) if isinstance(inv_raw, list) else 0
     inv_slots  = user.get("backpack_slots", 5)
     xp_bar_pct = min(100, int((xp % 100)))
@@ -6439,13 +6439,12 @@ async def cb_menu_inventory(callback: types.CallbackQuery):
         await callback.answer("User not found", show_alert=True)
         return
     
-    inv = _ensure_list(user.get("inventory", []))
+    inv = _ensure_list(user.get("inventory", {}))
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📦 My Items", callback_data="inv_open")],
         [InlineKeyboardButton(text="⚡ Store", callback_data="menu_shop")],
-        [InlineKeyboardButton(text="📦 Open Crate", callback_data="inv_open")],
-        [InlineKeyboardButton(text="⚡ Use Item", callback_data="inv_use")],
+        [InlineKeyboardButton(text="🗃 Use Item", callback_data="inv_use")],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
     ])
     
@@ -6774,14 +6773,13 @@ async def cb_account_reset_confirm(callback: types.CallbackQuery):
         "level": 1,
         "xp": 0,
         "bitcoin": 100,
-        "inventory": [],
         "wins": 0,
         "losses": 0,
         "base_level": 1,
-        "inventory": [],
+        "inventory": {},
         "completed_tutorial": True,
         "shield_status" : "🛡️ ACTIVE",
-        "unclaimed_items" : {},
+        "unclaimed_items" : [],
         "base_resources": {
             "resources": {"wood": 100, "bronze": 50, "iron": 25, "stone": 10, "relics": 0},
             "food": 100,
@@ -6951,7 +6949,7 @@ async def cb_inv_use(callback: types.CallbackQuery):
         await callback.answer("User not found", show_alert=True)
         return
     
-    inv = _ensure_list(user.get("inventory", []))
+    inv = _ensure_list(user.get("inventory", {}))
     if not inv:
         await callback.answer("Your inventory is empty!", show_alert=True)
         return
@@ -7947,7 +7945,7 @@ async def cb_activate_shield(callback: types.CallbackQuery):
     # Remove the shield from inventory and set shield_expires
     user = get_user(u_id)
     if not user: await callback.answer("Account not found.", show_alert=True); return
-    inv = _ensure_list(user.get('inventory', []))
+    inv = _ensure_list(user.get('inventory', {}))
     shield = next((it for it in inv if it.get('id') == item_id and it.get('type') == 'shield'), None)
     if not shield: await callback.answer("Shield not found.", show_alert=True); return
 
