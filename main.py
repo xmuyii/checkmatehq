@@ -10678,7 +10678,8 @@ async def main():
     round_task = asyncio.create_task(round_reset_task())
     print("[OK] Round timer started (120s rounds with streak reset)")
 
-    asyncio.create_task(start_scheduler(bot, dp))
+    from supabase_db import supabase, DB_TABLE
+    asyncio.create_task(start_scheduler(bot, dp, DB_TABLE, CHECKMATE_HQ_GROUP_ID))
     await dp.start_polling(bot)
     # Start GameMaster announcements task (using imported CHECKMATE_HQ_GROUP_ID)
     # Note: Telegram group IDs are NEGATIVE numbers (e.g., -1003835925366)
