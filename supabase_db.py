@@ -58,17 +58,17 @@ DEFAULT_BASE_NAMES = [
     "Skyward Spire", "Earthen Vault", "Twilight Realm", "The Citadel",
 ]
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PASTE BLOCK 3 — safe_json and normalize_user (fixes the append crash)
+# ═══════════════════════════════════════════════════════════════════════════
+
 import json as _json
 
 def safe_json(value, default=None):
     """
-    Safely parse a value that might be:
-      - Already a dict/list (JSONB column) → return as-is
-      - A JSON string (TEXT column) → parse it
-      - None → return default
-      - Anything else → return default
-
-    Use this everywhere you read JSON fields from Supabase.
+    Safely parse a value that might be a JSON string or already parsed.
+    Prevents 'str object has no attribute append/get/keys' errors.
     """
     if default is None:
         default = {}
@@ -77,33 +77,37 @@ def safe_json(value, default=None):
     if isinstance(value, (dict, list)):
         return value
     if isinstance(value, str):
+        value = value.strip()
+        if not value or value in ('null', 'None', ''):
+            return default
         try:
             return _json.loads(value)
         except Exception:
             return default
     return default
 
+
+
+
+
 def normalize_user(user: dict) -> dict:
     """
-    Normalize all JSON fields on a user dict loaded from Supabase.
-    Prevents 'str object has no attribute append/get/keys' errors.
-    Call this at the top of get_user() before returning.
+    Normalize all JSON fields on a user dict from Supabase.
+    Call at the top of get_user() before returning.
     """
     if not user:
         return user
 
-    # Fields that should be dicts
     dict_fields = [
         "inventory", "military", "buildings", "building_queue",
         "researches", "research_queue", "base_resources", "traps",
         "weapons", "buffs", "banishments", "visas", "visa_applications",
         "commander_location", "current_node", "active_suit",
-        "skill_points_spent", "dominance_scores", "home_sector_revealed",
+        "skill_points_spent", "dominance_scores",
     ]
     for field in dict_fields:
         user[field] = safe_json(user.get(field), default={})
 
-    # Fields that should be lists
     list_fields = [
         "unclaimed_items", "march_queue", "eject_log",
         "teleport_history", "visa_queue",
@@ -111,15 +115,12 @@ def normalize_user(user: dict) -> dict:
     for field in list_fields:
         user[field] = safe_json(user.get(field), default=[])
 
-    # Fields with specific defaults
     if not user.get("commander_location"):
         user["commander_location"] = {"sector_id": 1}
     if not isinstance(user.get("base_resources"), dict):
         user["base_resources"] = {"resources": {}, "food": 0, "current_streak": 0}
-    if not isinstance(user.get("base_resources", {}).get("resources"), dict):
+    if not isinstance(user["base_resources"].get("resources"), dict):
         user["base_resources"]["resources"] = {}
-
-    # Ensure credits exists
     if user.get("credits") is None:
         user["credits"] = 0
 
@@ -739,101 +740,6 @@ def award_word_score(user_id: str, pts: int, xp: int, bitcoin: int,
     return user
 
 
-# ─── Credit system ────────────────────────────────────────────────────────
-
-CREDITS_DAILY_LOGIN    = 50
-CREDITS_TO_PLAY        = 10   # cost per fusion round participation
-CREDITS_RANK_REWARDS   = {1: 50, 2: 45, 3: 30, 4: 20, 5: 10}
-CREDITS_RANK_DEFAULT   = 5    # ranks 6-10
-
-def get_credits(user_id: str) -> int:
-    """Return player's current credit balance."""
-    user = get_user(str(user_id))
-    return int(user.get('credits', 0)) if user else 0
-
-
-def add_credits(user_id: str, amount: int, reason: str = '') -> int:
-    """Add credits to a player. Returns new balance."""
-    uid  = str(user_id)
-    user = get_user(uid)
-    if not user:
-        return 0
-    new_bal = int(user.get('credits', 0)) + amount
-    try:
-        supabase.table(DB_TABLE).update({'credits': new_bal}).eq('user_id', uid).execute()
-        print(f"[CREDITS] +{amount} → {uid} ({reason}) balance={new_bal}")
-    except Exception as e:
-        print(f"[CREDITS] write failed for {uid}: {e}")
-        return 0
-    return new_bal
-
-
-def spend_credits(user_id: str, amount: int, reason: str = '') -> tuple:
-    """
-    Deduct credits. Returns (success: bool, new_balance: int).
-    """
-    uid  = str(user_id)
-    user = get_user(uid)
-    if not user:
-        return False, 0
-    bal = int(user.get('credits', 0))
-    if bal < amount:
-        return False, bal
-    new_bal = bal - amount
-    try:
-        supabase.table(DB_TABLE).update({'credits': new_bal}).eq('user_id', uid).execute()
-        print(f"[CREDITS] -{amount} → {uid} ({reason}) balance={new_bal}")
-    except Exception as e:
-        print(f"[CREDITS] spend failed for {uid}: {e}")
-        return False, bal
-    return True, new_bal
-
-
-def claim_daily_login_credits(user_id: str) -> tuple:
-    """
-    Award daily login credits (50). Returns (awarded: bool, credits_given: int, new_balance: int).
-    Only awards once per UTC day.
-    """
-    uid  = str(user_id)
-    user = get_user(uid)
-    if not user:
-        return False, 0, 0
-
-    from datetime import datetime
-    today = datetime.utcnow().date().isoformat()
-    last_login = user.get('last_credit_login', '')
-
-    if last_login == today:
-        return False, 0, int(user.get('credits', 0))
-
-    amount  = CREDITS_DAILY_LOGIN
-    new_bal = int(user.get('credits', 0)) + amount
-    try:
-        supabase.table(DB_TABLE).update({
-            'credits':           new_bal,
-            'last_credit_login': today,
-        }).eq('user_id', uid).execute()
-    except Exception as e:
-        print(f"[CREDITS] daily login write failed for {uid}: {e}")
-        return False, 0, int(user.get('credits', 0))
-
-    return True, amount, new_bal
-
-
-def award_scoreboard_credits(leaderboard: list):
-    """
-    Award credits to top-10 players at round end.
-    leaderboard: list of dicts with keys user_id, username, pts — sorted desc.
-    """
-    rank_rewards = {1: 50, 2: 45, 3: 30, 4: 20, 5: 10}
-    for rank, player in enumerate(leaderboard[:10], start=1):
-        uid      = str(player.get('user_id', player.get('id', '')))
-        name     = player.get('name', player.get('username', ''))
-        reward   = rank_rewards.get(rank, 5)   # ranks 6-10 get 5
-        add_credits(uid, reward, reason=f"rank#{rank} scoreboard")
-        print(f"[CREDITS] Rank {rank}: {name} → +{reward} credits")
-
-
 def use_bitcoin(user_id, amount: int) -> bool:
     user = get_user(str(user_id))
     if not user or user.get('bitcoin', 0) < amount:
@@ -1259,29 +1165,6 @@ def reset_all_shields():
         print(f"[ERROR] reset_all_shields failed: {e}")
         return 0
 
-async def grant_free_teleports_to_all():
-    """Grant 3 free teleport items to all players as unclaimed gifts."""
-    today = datetime.utcnow().strftime("%Y-%m-%d")
-    users = supabase.table(DB_TABLE).select(
-        "user_id, teleport_charges, teleport_daily_claimed_date"
-    ).execute().data or []
-    granted = 0
-    for user in users:
-        try:
-            if user.get("teleport_daily_claimed_date") == today:
-                continue
-            current = user.get("teleport_charges") or 0
-            supabase.table(DB_TABLE).update({
-                "teleport_charges": current + 3,
-                "teleport_daily_claimed_date": today,
-            }).eq("user_id", user["user_id"]).execute()
-            granted += 1
-        except Exception as e:
-            print(f"[WARN] teleport grant failed {user.get('user_id')}: {e}")
-    print(f"[TELEPORTS] Granted 3 charges to {granted} players")
-
-
-
 
 # ── Unclaimed items ────────────────────────────────────────────────────────
 
@@ -1612,6 +1495,143 @@ def reset_all_streaks():
     except Exception as e:
         print(f"[ERROR] reset_all_streaks failed: {e}")
         return 
+
+CREDITS_TO_PLAY    = 10     # Credits to enter a Fusion round
+CREDITS_DAILY_LOGIN = 50   # Credits from daily login
+CREDITS_RANK_REWARDS = {    # Credits awarded by leaderboard rank
+    1: 50, 2: 45, 3: 30,
+    4: 20, 5: 10,
+    6: 5,  7: 5,  8: 5, 9: 5, 10: 5,
+}
+
+
+def get_credits(user_id: str) -> int:
+    """Get a player's current credit balance."""
+    from supabase_db import get_user as _get_user
+    user = _get_user(str(user_id))
+    if not user:
+        return 0
+    return int(user.get("credits", 0) or 0)
+
+
+def add_credits(user_id: str, amount: int) -> int:
+    """Add credits to a player. Returns new balance."""
+    from supabase_db import get_user as _get_user, save_user as _save_user
+    user = _get_user(str(user_id))
+    if not user:
+        return 0
+    current = int(user.get("credits", 0) or 0)
+    new_bal = current + amount
+    _save_user(str(user_id), {**user, "credits": new_bal})
+    return new_bal
+
+
+def spend_credits(user_id: str, amount: int) -> tuple:
+    """
+    Spend credits. Returns (success: bool, new_balance: int).
+    Fails if player doesn't have enough.
+    """
+    from supabase_db import get_user as _get_user, save_user as _save_user
+    user = _get_user(str(user_id))
+    if not user:
+        return False, 0
+    current = int(user.get("credits", 0) or 0)
+    if current < amount:
+        return False, current
+    new_bal = current - amount
+    _save_user(str(user_id), {**user, "credits": new_bal})
+    return True, new_bal
+
+
+def claim_daily_login_credits(user_id: str) -> tuple:
+    """
+    Claim daily login credits. Returns (awarded: bool, amount: int, new_balance: int).
+    Can only be claimed once per UTC day.
+    """
+    from datetime import datetime
+    from supabase_db import get_user as _get_user, save_user as _save_user
+    user = _get_user(str(user_id))
+    if not user:
+        return False, 0, 0
+
+    today      = datetime.utcnow().strftime("%Y-%m-%d")
+    last_claim = user.get("last_daily_credit_claim", "")
+
+    if last_claim == today:
+        return False, 0, int(user.get("credits", 0) or 0)
+
+    amount  = CREDITS_DAILY_LOGIN
+    current = int(user.get("credits", 0) or 0)
+    new_bal = current + amount
+
+    _save_user(str(user_id), {
+        **user,
+        "credits":                 new_bal,
+        "last_daily_credit_claim": today,
+    })
+    return True, amount, new_bal
+
+
+def award_scoreboard_credits(user_id: str, rank: int) -> int:
+    """
+    Award credits based on leaderboard rank. Returns amount awarded.
+    Called at end of each round for top 10 players.
+    """
+    amount = CREDITS_RANK_REWARDS.get(rank, 0)
+    if amount > 0:
+        add_credits(str(user_id), amount)
+    return amount
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PASTE BLOCK 2 — Teleport grant (replaces the broken version)
+# main.py imports: grant_free_teleports_to_all
+# ═══════════════════════════════════════════════════════════════════════════
+
+def grant_free_teleports_to_all() -> int:
+    """
+    Grant 3 free teleport charges to all players who haven't claimed today.
+    Uses the teleport_charges integer column — never touches inventory.
+    Returns count of players granted.
+    Safe to call synchronously at startup.
+    """
+    from datetime import datetime
+    today   = datetime.utcnow().strftime("%Y-%m-%d")
+    granted = 0
+
+    try:
+        result = supabase.table(DB_TABLE).select(
+            "user_id, teleport_charges, teleport_daily_claimed_date"
+        ).execute()
+
+        users = result.data or []
+
+        for user in users:
+            try:
+                uid = user.get("user_id")
+                if not uid:
+                    continue
+                if user.get("teleport_daily_claimed_date") == today:
+                    continue
+
+                current = int(user.get("teleport_charges") or 0)
+                supabase.table(DB_TABLE).update({
+                    "teleport_charges":             current + 3,
+                    "teleport_daily_claimed_date":  today,
+                }).eq("user_id", uid).execute()
+                granted += 1
+
+            except Exception as e:
+                print(f"[WARN] Could not grant teleports to {user.get('user_id','?')}: {e}")
+
+        print(f"[TELEPORTS] Granted 3 charges to {granted} players")
+
+    except Exception as e:
+        print(f"[ERROR] grant_free_teleports_to_all: {e}")
+
+    return granted
+
+
 
 def get_sector_state(sector_id: int) -> dict:
     try:

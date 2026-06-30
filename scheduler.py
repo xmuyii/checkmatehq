@@ -85,66 +85,6 @@ async def grant_daily_teleports(supabase, DB_TABLE: str, bot=None):
         print(f"[ERROR] grant_daily_teleports: {e}")
 
 
-async def grant_daily_shields(supabase, DB_TABLE: str, bot=None):
-    """
-    Grant a basic shield to every player who is currently unshielded.
-    Uses base_shielded boolean + shield_expires_at text column.
-    Never appends to inventory.
-    
-    Shield duration: 8 hours.
-    Only granted if player has no active shield.
-    """
-    shield_hours = 8
-    granted      = 0
-    failed       = 0
-
-    try:
-        result = supabase.table(DB_TABLE).select(
-            "user_id, base_shielded, shield_expires_at"
-        ).execute()
-        
-        users = result.data or []
-        now   = datetime.utcnow()
-
-        for user in users:
-            try:
-                uid = user.get("user_id")
-                if not uid:
-                    continue
-
-                # Check if already shielded
-                already_shielded = False
-                if user.get("base_shielded"):
-                    exp_str = user.get("shield_expires_at")
-                    if exp_str:
-                        try:
-                            exp = datetime.fromisoformat(exp_str)
-                            already_shielded = now < exp
-                        except Exception:
-                            pass
-
-                if already_shielded:
-                    continue
-
-                expires = (now + timedelta(hours=shield_hours)).isoformat()
-
-                supabase.table(DB_TABLE).update({
-                    "base_shielded":    True,
-                    "shield_expires_at": expires,
-                }).eq("user_id", uid).execute()
-
-                granted += 1
-
-            except Exception as e:
-                failed += 1
-                print(f"[WARN] Could not grant shield to {user.get('user_id','?')}: {e}")
-
-        print(f"[SHIELDS] Granted 8h shield to {granted} players ({failed} failed)")
-
-    except Exception as e:
-        print(f"[ERROR] grant_daily_shields: {e}")
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 #  PHASE TICK — Runs every 60 seconds
 #  Checks sector phases, applies hazard penalties, pushes warnings
@@ -386,10 +326,11 @@ async def start_scheduler(bot, supabase, DB_TABLE: str, GROUP_CHAT_ID: int):
             await dp.start_polling(bot)
     """
     print("[SCHEDULER] Starting background tasks...")
-    
-    # Run daily grants immediately on startup for any missed players
+
+    # Run daily teleport grant immediately on startup for any missed players.
+    # NOTE: grant_daily_shields is intentionally NOT called — free shields
+    # have been removed by design. Players must purchase shields themselves.
     await grant_daily_teleports(supabase, DB_TABLE, bot)
-    await grant_daily_shields(supabase, DB_TABLE, bot)
 
     tick_count = 0
 
@@ -405,11 +346,11 @@ async def start_scheduler(bot, supabase, DB_TABLE: str, GROUP_CHAT_ID: int):
             if tick_count % 360 == 0:
                 await purge_old_bounties(supabase)
 
-            # ── Midnight UTC: daily grants + dominance reset ──────────────
+            # ── Midnight UTC: daily teleport grant + dominance reset ──────
+            # NOTE: grant_daily_shields intentionally removed — no free shields.
             if 0 <= secs < 65:   # Within first 65 seconds of midnight
                 if tick_count % 10 == 0:  # Throttle — only run once per minute window
                     await grant_daily_teleports(supabase, DB_TABLE, bot)
-                    await grant_daily_shields(supabase, DB_TABLE, bot)
                     await dominance_cycle_reset(supabase, DB_TABLE, bot, GROUP_CHAT_ID)
 
             tick_count += 1

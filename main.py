@@ -376,7 +376,7 @@ try:
         claim_item, remove_unclaimed_item, award_powerful_locked_item,
         add_inventory_item, activate_shield, is_shielded, get_sector_display,
         add_resources_from_word_length, update_streak_and_award_food,
-        reset_all_streaks, add_randomized_gift, give_automatic_shield, deactivate_shield, disrupt_shield, restore_shield_after_attack, grant_free_teleports_to_all,
+        reset_all_streaks, add_randomized_gift, give_automatic_shield, deactivate_shield, disrupt_shield, restore_shield_after_attack,
         grant_free_shields_to_all, get_game_weekly_leaderboard, get_game_alltime_leaderboard,
         award_word_score, get_credits, add_credits, spend_credits,
         claim_daily_login_credits, award_scoreboard_credits,
@@ -407,6 +407,8 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', CONFIG_SUPABASE_KEY)
 
 bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher()
+from tactical_handlers import tactical_router
+dp.include_router(tactical_router)
 dp.include_router(initiation_router)
 dp.include_router(base_router)
 
@@ -664,6 +666,8 @@ async def game_loop(chat_id: int, topic_id: int = None):
     eng.running      = True
     eng.empty_rounds = 0
     eng.active_topic = topic_id
+    # Track which week we last showed last-week winners so it only shows once per week
+    _winners_shown_week = ""
 
     try:
         while eng.running:
@@ -694,47 +698,45 @@ async def game_loop(chat_id: int, topic_id: int = None):
 
                 possible_words_count = compute_possible_words(eng.letters)
 
-                # Show last week winners
-                last_winners = []
+                # Show last week winners — only once per week (first round after reset)
+                winners_text = ""
                 try:
-                    _script_dir = os.path.dirname(os.path.abspath(__file__))
-                    paths_to_try = [
-                        os.path.join(_script_dir, 'last_week_winners.json'),
-                        os.path.join(os.getcwd(), 'last_week_winners.json'),
-                        'last_week_winners.json',
-                    ]
-                    _loaded = False
-                    for path in paths_to_try:
-                        if os.path.exists(path):
-                            with open(path, 'r', encoding='utf-8') as f:
-                                winners_raw = json.load(f)
-                            # Filter out bot accounts
-                            last_winners = [w for w in winners_raw if not w.get('is_bot', False)]
-                            print(f"[GAME LOOP] Loaded {len(last_winners)} last-week winners (filtered bots) from {path}")
-                            _loaded = True
-                            break
-                    if not _loaded:
-                        print(f"[GAME LOOP] No last_week_winners.json found in: {paths_to_try}")
-                        # Pull from DB as fallback — top 3 all-time players, excluding bots
-                        try:
-                            _lb = get_alltime_leaderboard(limit=10)
-                            # Filter out bots and take top 3
-                            last_winners = [{'username': p['username'], 'points': p['points']} for p in _lb if not p.get('is_bot', False)][:3]
-                            print(f"[GAME LOOP] Using alltime top-3 as last-week fallback (filtered bots): {[p['username'] for p in last_winners]}")
-                        except Exception:
-                            last_winners = []
+                    from supabase_db import _current_week_key
+                    _this_week = _current_week_key()
+                    if _winners_shown_week != _this_week:
+                        last_winners = []
+                        _script_dir = os.path.dirname(os.path.abspath(__file__))
+                        paths_to_try = [
+                            os.path.join(_script_dir, 'last_week_winners.json'),
+                            os.path.join(os.getcwd(), 'last_week_winners.json'),
+                            'last_week_winners.json',
+                        ]
+                        for path in paths_to_try:
+                            if os.path.exists(path):
+                                with open(path, 'r', encoding='utf-8') as _wf:
+                                    _winners_raw = json.load(_wf)
+                                last_winners = [w for w in _winners_raw if not w.get('is_bot', False)]
+                                print(f"[GAME LOOP] Loaded {len(last_winners)} last-week winners (filtered bots) from {path}")
+                                break
+                        else:
+                            print(f"[GAME LOOP] No last_week_winners.json found in: {paths_to_try}")
+                            try:
+                                _lb = get_alltime_leaderboard(limit=10)
+                                last_winners = [{'username': p['username'], 'points': p['points']} for p in _lb if not p.get('is_bot', False)][:3]
+                                print(f"[GAME LOOP] Using alltime top-3 as last-week fallback (filtered bots): {[p['username'] for p in last_winners]}")
+                            except Exception:
+                                last_winners = []
+
+                        if last_winners:
+                            winners_text = "🏆 *LAST WEEK'S TOP PLAYERS* 🏆\n"
+                            for i, p in enumerate(last_winners[:3]):
+                                medal = ["🥇", "🥈", "🥉"][i]
+                                winners_text += f"{medal} {p.get('username', 'Unknown')} — {p.get('points', 0):,} pts\n"
+                            winners_text += f"{divider()}\n"
+                        _winners_shown_week = _this_week  # Mark shown for this week either way
+                    # else: already shown this week, winners_text stays ""
                 except Exception as e:
                     print(f"[ERROR] Loading last week winners: {e}")
-                    last_winners = []
-
-                winners_text = ""
-                if last_winners:
-                    winners_text = "🏆 *LAST WEEK'S TOP PLAYERS* 🏆\n"
-                    # Only show up to 3 winners to prevent IndexError
-                    for i, p in enumerate(last_winners[:3]):
-                        medal = ["🥇", "🥈", "🥉"][i]
-                        winners_text += f"{medal} {p.get('username', 'Unknown')} — {p.get('points', 0):,} pts\n"
-                    winners_text += f"{divider()}\n"
 
                 # Send new round sticker to fusion topic
                 try:
@@ -9599,7 +9601,7 @@ async def on_group_message(message: types.Message):
             db_name     = user.get("username", message.from_user.first_name or "Player")
             word_len    = len(guess)
             xp_awarded  = pts * 2
-            btc_awarded = max(pts // 2, 1)
+            btc_awarded = 0  # Bitcoin not awarded for words — other resources still apply
 
             resource_map = {4: 'wood', 5: 'bronze', 6: 'iron', 7: 'stone'}
             resources_awarded = {}
@@ -9652,6 +9654,27 @@ async def on_group_message(message: types.Message):
                 eng.scores[u_id] = {'name': db_name, 'pts': 0, 'user_id': u_id, 'leveled_up': False}
             eng.scores[u_id]['pts'] += pts
 
+            # ── INSTANT feedback reply (fires immediately, no await on heavy work) ──
+            word_len_label = {3:'short',4:'solid',5:'nice',6:'great',7:'superb',8:'elite'}.get(word_len,'monster')
+            res_emoji_map = {'wood':'🪵','bronze':'🧱','iron':'⛓️','stone':'💎','relics':'🏺','incubus':'👹'}
+            res_str = ' '.join(
+                f"{res_emoji_map.get(r,'')}{a}"
+                for r, a in resources_awarded.items() if a > 0
+            )
+            streak_str = f"  🔥x{session['streak']}" if session['streak'] >= 3 else ""
+            food_str   = f"  🌽+{food_bonus}" if food_bonus > 0 else ""
+            rare_str   = f"\n🎉 <b>RARE DROP!</b>" if rare_item else ""
+            feedback_line = (
+                f"✅ <b>{_safe_name(db_name)}</b>  <code>{guess.upper()}</code>"
+                f"  <b>+{pts}pt</b>  <i>({word_len_label})</i>"
+                f"{('  ' + res_str) if res_str else ''}{streak_str}{food_str}{rare_str}"
+            )
+            asyncio.create_task(bot.send_message(
+                message.chat.id, feedback_line,
+                parse_mode="HTML",
+                message_thread_id=FUSION_TOPIC_ID
+            ))
+
             # ── Update dashboard in background (non-blocking for word validation) ───
             # Debounce to prevent queue buildup - only one pending update per player
             if u_id in eng.dashboard_update_pending:
@@ -9659,7 +9682,6 @@ async def on_group_message(message: types.Message):
                 eng.dashboard_update_pending[u_id].cancel()
             
             async def _update_dashboard_async():
-                await asyncio.sleep(0)  # Small debounce delay to batch updates
                 try:
                     dashboard_text = build_player_dashboard(db_name, session, u_id, has_jammer=has_jammer)
                     word_num       = session['word_count']
@@ -10667,19 +10689,23 @@ async def main():
             except (NotImplementedError, OSError): pass
 
     print("[INFO] Connecting to Telegram polling...")
-    
- 
-    # Grant 3 free teleports to all players
-    grant_free_teleports_to_all()
-    print("[OK] Granted 3 free teleports to all players")
-    
-    
+
+    # NOTE: Teleport grants now handled exclusively by scheduler.py's
+    # grant_daily_teleports() — runs on startup AND once-per-day with a
+    # proper teleport_daily_claimed_date dedup guard, writing directly to
+    # the teleport_charges column. The old grant_free_teleports_to_all()
+    # (unclaimed_items based, no daily limit, fired on every restart) has
+    # been removed to avoid double-granting teleports through two systems.
+
+    # NOTE: Free daily shields removed by design — players must purchase
+    # shields themselves.
+
     # Start background streak reset task (every 120s)
     round_task = asyncio.create_task(round_reset_task())
     print("[OK] Round timer started (120s rounds with streak reset)")
 
     from supabase_db import supabase, DB_TABLE
-    asyncio.create_task(start_scheduler(bot, dp, DB_TABLE, CHECKMATE_HQ_GROUP_ID))
+    asyncio.create_task(start_scheduler(bot, supabase, DB_TABLE, CHECKMATE_HQ_GROUP_ID))
     await dp.start_polling(bot)
     # Start GameMaster announcements task (using imported CHECKMATE_HQ_GROUP_ID)
     # Note: Telegram group IDs are NEGATIVE numbers (e.g., -1003835925366)
