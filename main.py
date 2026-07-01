@@ -500,6 +500,7 @@ class GameEngine:
         self.decoy_claimers   = []  # Track who got decoy crates
         self.dashboard_msgs   = {}  # user_id -> message_id for live dashboards
         self.player_sessions  = {}  # user_id -> round session stats dict
+        self.opted_in         = set()  # user_ids who typed !fusion this round
         # ── Board Freeze ──────────────────────────────────────────────────
         self.freeze_until     = 0   # epoch timestamp; >0 means timer is paused
         self.freeze_secs_added = 0  # total seconds added this round
@@ -720,6 +721,7 @@ async def game_loop(chat_id: int, topic_id: int = None):
                 eng.active     = True
                 eng.dashboard_msgs  = {}
                 eng.player_sessions = {}
+                eng.opted_in        = set()
                 eng.dashboard_update_pending = {}  # Track pending dashboard updates for debouncing
 
                 eng.word1, eng.word2 = await fetch_words()
@@ -1137,16 +1139,53 @@ async def cmd_trivia(message: types.Message):
 async def cmd_fusion(message: types.Message):
     if message.chat.type not in ("group","supergroup"):
         await message.answer("🃏 *GameMaster:* \"This is a GROUP game.\""); return
-    
-    eng = get_engine(message.chat.id)
-    if eng.running:
-        await message.reply("🃏 *GameMaster:* \"Fusion is already running!\""); return
 
-    # Use the current topic if in a topic, otherwise use default FUSION_TOPIC_ID
+    u_id = str(message.from_user.id)
+    eng  = get_engine(message.chat.id)
+
+    if eng.running and eng.active:
+        # Game already running — opt in to the current round
+        user = get_user(u_id)
+        if not user:
+            await message.reply("❌ Register first: /start in DM"); return
+
+        # Sector 1 gate
+        loc = user.get("commander_location", {}) if isinstance(user.get("commander_location"), dict) else {}
+        if loc.get("sector_id") != 1:
+            await message.reply(
+                "🏜️ <b>Badlands-8 (Sector 1) required to cast spells.</b>\n"
+                "Use <code>!teleport 1</code> to enter. You need at least 10 troops.",
+                parse_mode="HTML"
+            )
+            return
+
+        if u_id in eng.opted_in:
+            await message.reply("🃏 You're already in this round! Start spelling."); return
+
+        # Credits gate
+        cr_bal = int(user.get("credits") or 0)
+        if cr_bal < CREDITS_TO_PLAY:
+            await message.reply(
+                f"💳 <b>Not enough credits to join!</b>\n"
+                f"Need <b>{CREDITS_TO_PLAY}</b> credits (you have {cr_bal}).\n"
+                f"• /daily — free daily credits\n"
+                f"• Win rounds to earn more",
+                parse_mode="HTML"
+            )
+            return
+
+        spend_credits(u_id, CREDITS_TO_PLAY, "fusion round entry")
+        eng.opted_in.add(u_id)
+        await message.reply(
+            f"🃏 <b>You're in!</b> -{CREDITS_TO_PLAY} credits.\nLetters are active — start spelling.",
+            parse_mode="HTML"
+        )
+        return
+
+    # No game running — start one
     active_topic = message.message_thread_id if message.message_thread_id else FUSION_TOPIC_ID
     asyncio.create_task(game_loop(message.chat.id, active_topic))
-    
-    await message.answer(f"🃏 *Fusion is starting!*", parse_mode="Markdown")
+    await message.answer("🃏 *Fusion is starting!*", parse_mode="Markdown")
 
 
 @dp.message(_cmd("forcerestart"))
@@ -2821,8 +2860,7 @@ async def callback_train_menu(callback: types.CallbackQuery):
     
     await callback.message.edit_text(
         "🎖️ *MILITARY TRAINING*\n\n"
-        "Select unit type to train:"
-        "Secret code `!train [unit] [amount]`\n\n",
+        "Select unit type to train:",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👣 Pawns (2 wood)", callback_data="train_pawns"),
              InlineKeyboardButton(text="👹 Footmen (5 wood + 1 bronze)", callback_data="train_footmen")],
@@ -2834,6 +2872,7 @@ async def callback_train_menu(callback: types.CallbackQuery):
         parse_mode="Markdown"
     )
     await callback.answer()
+    txt += "Secret code `!train [unit] [amount]`\n\n"
 
 
 @dp.callback_query(lambda q: q.data == "build_menu")
@@ -2860,7 +2899,7 @@ async def callback_build_menu(callback: types.CallbackQuery):
     completed_buildings_display = format_completed_buildings(user)
     
     msg = f"🏰 *CONSTRUCTION*\n\nBase Level: {base_level}\n\n{completed_buildings_display}\n{format_building_queue_display(user)}\n\nChoose what to build:"
-
+    
     await callback.message.edit_text(
         msg,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
@@ -5361,7 +5400,13 @@ async def cmd_start(message: types.Message):
     xp_bar     = "█" * filled + "░" * (10 - filled)
 
     shield_icon = "🛡️" if "ACTIVE" in shield_st else ("💥" if "DISRUPTED" in shield_st else "⚠️")
-    claims_warn = f"⚡ <b>{unclaimed} UNCLAIMED</b>" if unclaimed > 0 else ""
+    teleport_charges = int(user.get("teleport_charges") or 0)
+    claims_warn_parts = []
+    if unclaimed > 0:
+        claims_warn_parts.append(f"⚡ <b>{unclaimed} UNCLAIMED</b>")
+    if teleport_charges > 0:
+        claims_warn_parts.append(f"🌀 {teleport_charges} teleport{'s' if teleport_charges != 1 else ''}")
+    claims_warn = "  ".join(claims_warn_parts)
     objective = get_hud_objective(user)
 
     def generate_profile_card(username, xp_bar, xp_bar_pct, level, bitcoin, sector, base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn, objective):
@@ -5598,13 +5643,12 @@ async def cb_leaderboard_view(callback: types.CallbackQuery):
 
     back_kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🔄 Refresh",      callback_data=callback.data),
-            InlineKeyboardButton(text="⬅️ Back",         callback_data="menu_leaderboards"),
+            InlineKeyboardButton(text="🔄 Refresh",        callback_data=callback.data),
+            InlineKeyboardButton(text="🃏 Fusion Weekly",  callback_data="lb_fusion_weekly"),
         ],
         [
-            InlineKeyboardButton(text="⚔️ Attack",       callback_data="battle_attack_menu"),
-            InlineKeyboardButton(text="🛡️ My Shield",    callback_data="battle_shield"),
-            InlineKeyboardButton(text="🪤 Set Trap",     callback_data="lb_set_trap"),
+            InlineKeyboardButton(text="🏆 Overall Weekly",  callback_data="lb_overall_weekly"),
+            InlineKeyboardButton(text="⭐ All-Time",         callback_data="lb_overall_alltime"),
         ],
     ])
 
@@ -5826,7 +5870,13 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
     xp_bar     = "█" * filled + "░" * (10 - filled)
 
     shield_icon = "🛡️" if "ACTIVE" in shield_st else ("💥" if "DISRUPTED" in shield_st else "⚠️")
-    claims_warn = f"⚡ <b>{unclaimed} UNCLAIMED</b>" if unclaimed > 0 else ""
+    teleport_charges = int(user.get("teleport_charges") or 0)
+    claims_warn_parts = []
+    if unclaimed > 0:
+        claims_warn_parts.append(f"⚡ <b>{unclaimed} UNCLAIMED</b>")
+    if teleport_charges > 0:
+        claims_warn_parts.append(f"🌀 {teleport_charges} teleport{'s' if teleport_charges != 1 else ''}")
+    claims_warn = "  ".join(claims_warn_parts)
 
     objective = get_hud_objective(user)
 
@@ -6515,51 +6565,67 @@ async def callback_change_commander_name(callback: types.CallbackQuery):
 async def cb_menu_shop(callback: types.CallbackQuery):
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
-    bitcoin = user.get("bitcoin", 0)
-    gold = user.get("gold", 0) # Assuming you have a premium currency
     if not user:
         await callback.answer("User not found", show_alert=True)
         return
-     
-    markup1 = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏬 GENERAL STORE", callback_data="shop_category_general")],
-        [InlineKeyboardButton(text="💀 BLACK MARKET", callback_data="shop_category_blackmarket")],
-        [InlineKeyboardButton(text="💎 PREMIUM PLAZA", callback_data="shop_category_premium")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
-    ])
-    await callback.message.edit_text(
-        f"🛍️ *THE NEXUS MARKETPLACE* 🛍️\n\n"
-        f"💳 **Bitcoin:** {bitcoin:,}\n"
-        f"🟡 **Gold:** {gold:,}\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"**General:** Basic supplies & resources\n"
-        f"**Black Market:** High-risk, rare illegal tech\n"
-        f"**Premium:** Special bundles & gold items\n"
-        f"━━━━━━━━━━━━━━━━━",
-        parse_mode="Markdown",
-        reply_markup=markup1
-    )
-    await callback.answer()
-    
-    
+
+    credits  = user.get("credits", 0)
+    bitcoin  = user.get("bitcoin", 0)
+    gold     = user.get("gold", 0)
+    teleport_charges = user.get("teleport_charges", 0)
+
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🛡️ Shields", callback_data="shop_shields")],
-        [InlineKeyboardButton(text="⚡ Weapons", callback_data="shop_weapons")],
-        [InlineKeyboardButton(text="🎁 Boosts", callback_data="shop_boosts")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
+        [InlineKeyboardButton(text="🌀 Buy Teleport (200 credits)", callback_data="shop_buy_teleport")],
+        [InlineKeyboardButton(text="🛡️ Buy Shield (150 credits)",   callback_data="shop_buy_shield")],
+        [InlineKeyboardButton(text="🏬 General Store",              callback_data="shop_category_general")],
+        [InlineKeyboardButton(text="💀 Black Market",               callback_data="shop_category_blackmarket")],
+        [InlineKeyboardButton(text="💎 Premium Plaza",              callback_data="shop_category_premium")],
+        [InlineKeyboardButton(text="⬅️ Back",                       callback_data="menu_inventory")],
     ])
-    
     await callback.message.edit_text(
-        f"🛍️ *SHOP* 🛍️\n\n"
+        f"🏬 *THE NEXUS MARKETPLACE*\n"
         f"━━━━━━━━━━━━━━━━━\n"
-        f"**Your Bitcoin:** {bitcoin} 💳\n\n"
-        f"_Browse items to protect your base,_\n"
-        f"_upgrade your arsenal, and boost gains._\n"
-        f"━━━━━━━━━━━━━━━━━",
+        f"💳 Credits: *{credits:,}*\n"
+        f"🌀 Teleport charges: *{teleport_charges}*\n"
+        f"💰 Bitcoin: *{bitcoin:,}*  🟡 Gold: *{gold:,}*\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"🌀 *Teleport* — move to any sector (200 cr)\n"
+        f"🛡️ *Shield* — protect your base 8h (150 cr)\n"
+        f"🏬 General Store — basic supplies\n"
+        f"💀 Black Market — rare & high-risk\n"
+        f"💎 Premium — bundles & gold items",
         parse_mode="Markdown",
         reply_markup=markup
     )
     await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data == "shop_buy_teleport")
+async def cb_shop_buy_teleport(callback: types.CallbackQuery):
+    """Buy a teleport charge for 200 credits."""
+    TELEPORT_COST = 200
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("User not found", show_alert=True)
+        return
+
+    credits = int(user.get("credits") or 0)
+    if credits < TELEPORT_COST:
+        await callback.answer(
+            f"❌ Need {TELEPORT_COST} credits (you have {credits}).", show_alert=True
+        )
+        return
+
+    spend_credits(u_id, TELEPORT_COST, "bought teleport charge")
+    # Add one teleport charge to user
+    new_charges = int(user.get("teleport_charges") or 0) + 1
+    from supabase_db import supabase, DB_TABLE
+    supabase.table(DB_TABLE).update({"teleport_charges": new_charges}).eq("user_id", u_id).execute()
+
+    await callback.answer(f"✅ Teleport charge added! You now have {new_charges}.", show_alert=True)
+
+
 
 #this is a function for the menu account so that reply keyboard and inline keyboard can call it 
 
@@ -6636,46 +6702,63 @@ async def cb_menu_map(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda q: q.data == "menu_inventory")
 async def cb_menu_inventory(callback: types.CallbackQuery):
-    """Show inventory."""
-    u_id = str(callback.from_user.id)
-    user = get_user(u_id)
-    
-    if not user:
-        await callback.answer("User not found", show_alert=True)
-        return
-    
-    inv = _ensure_list(user.get("inventory", {}))
-    
+    """Items hub — choose between My Items or Store."""
+    await callback.answer()
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📦 My Items", callback_data="inv_open")],
-        [InlineKeyboardButton(text="⚡ Store", callback_data="menu_shop")],
-        [InlineKeyboardButton(text="🗃 Use Item", callback_data="inv_use")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
+        [InlineKeyboardButton(text="📦 My Items",  callback_data="inv_my_items")],
+        [InlineKeyboardButton(text="🏬 Store",      callback_data="menu_shop")],
+        [InlineKeyboardButton(text="⬅️ Back",       callback_data="menu_back")],
     ])
-    
-    unclaimed_raw = _ensure_list(user.get("unclaimed_items", []))
-    unclaimed_count = len(unclaimed_raw)
-    inv_text = f"🎒 *INVENTORY* ({len(inv)} items)\'\n"
-    if unclaimed_count > 0:
-        inv_text += f"📬 *{unclaimed_count} unclaimed reward(s) waiting* — use /claims\n"
-    inv_text += "\n━━━━━━━━━━━━━━━━━\n"
-    if inv:
-        for i, item in enumerate(inv, 1):
-            item_label = item.get('type', item.get('name', 'Unknown')).replace('_', ' ').title()
-            qty = item.get('quantity', 1)
-            qty_str = f" x{qty}" if qty > 1 else ""
-            inv_text += f"{i}. {item_label}{qty_str}\n"
-    else:
-        inv_text += "_Your inventory is empty._\n"
-    inv_text += "━━━━━━━━━━━━━━━━━"
-    
     await callback.message.edit_text(
-        inv_text,
+        "🎒 *ITEMS & STORE*\n━━━━━━━━━━━━━━━━━\n"
+        "• *My Items* — view your inventory & claim rewards\n"
+        "• *Store* — buy teleports, shields, boosts & more",
         parse_mode="Markdown",
         reply_markup=markup
     )
+
+
+@dp.callback_query(lambda q: q.data == "inv_my_items")
+async def cb_inv_my_items(callback: types.CallbackQuery):
+    """Show only the player's claimed inventory items."""
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("User not found", show_alert=True)
+        return
+
+    inv           = _ensure_list(user.get("inventory", []))
+    unclaimed     = _ensure_list(user.get("unclaimed_items", []))
+    unclaimed_cnt = len(unclaimed)
+
+    lines = []
+    for i, item in enumerate(inv, 1):
+        label = item.get("type", item.get("name", "Unknown")).replace("_", " ").title()
+        qty   = item.get("quantity", 1)
+        lines.append(f"{i}. {label}" + (f" x{qty}" if qty > 1 else ""))
+
+    inv_text  = f"📦 *MY ITEMS* ({len(inv)} in bag)\n"
+    if unclaimed_cnt:
+        inv_text += f"📬 *{unclaimed_cnt} unclaimed reward(s) waiting!*\n"
+    inv_text += "━━━━━━━━━━━━━━━━━\n"
+    inv_text += ("\n".join(lines) if lines else "_Your inventory is empty._")
+    inv_text += "\n━━━━━━━━━━━━━━━━━"
+
+    kb_rows = []
+    if unclaimed_cnt:
+        kb_rows.append([InlineKeyboardButton(
+            text=f"🎁 Claim Rewards ({unclaimed_cnt})", callback_data="menu_claims"
+        )])
+    kb_rows.append([InlineKeyboardButton(text="🗃 Use Item",  callback_data="inv_use")])
+    kb_rows.append([InlineKeyboardButton(text="⬅️ Back",      callback_data="menu_inventory")])
+
     await callback.answer()
-    
+    await callback.message.edit_text(
+        inv_text, parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
+    )
+
+
 def get_user_with_fix(u_id):
     user = get_user(u_id) # Your original database fetch
     if user and "gold" not in user:
@@ -9553,7 +9636,6 @@ async def on_group_message(message: types.Message):
                     reg_success = register_user(u_id, username)
                     if reg_success:
                         user = get_user(u_id)
-                        await message.reply(f"✅ Welcome, {username}! You've been automatically registered.")
                     else:
                         return
                 except Exception as e:
@@ -9562,38 +9644,31 @@ async def on_group_message(message: types.Message):
             if not user:
                 return
 
+            # ── Sector 1 gate: must be physically in Badlands-8 ──────────────
+            loc = user.get("commander_location", {}) if isinstance(user.get("commander_location"), dict) else {}
+            if loc.get("sector_id") != 1:
+                await message.reply(
+                    "🏜️ <b>The GameMaster:</b> \"To cast spells you must stand in "
+                    "<b>Badlands-8 (Sector 1)</b>.\"\n\n"
+                    "🌀 Use <code>!teleport 1</code> to enter (10 troops minimum).",
+                    parse_mode="HTML"
+                )
+                return
+
+            # ── Opt-in gate: must have typed !fusion this round ───────────────
+            if u_id not in eng.opted_in:
+                await message.reply(
+                    "🃏 <b>Type</b> <code>!fusion</code> <b>to join this round first!</b>\n"
+                    f"Entry costs {CREDITS_TO_PLAY} credits per round.",
+                    parse_mode="HTML"
+                )
+                return
+
             guess = text.lower().strip()
             if len(guess) < 3:
                 return
 
-            # ── Credits check: deduct CREDITS_TO_PLAY on first word of round ─
-            if u_id not in eng.player_sessions:
-                cr_bal = int(user.get('credits') or 0)
-                if cr_bal < CREDITS_TO_PLAY:
-                    # Attempt a lazy grant for players who pre-date the credits column
-                    # (their row has NULL credits). Give them the daily bonus silently
-                    # so they aren't locked out on their very first attempt.
-                    if user.get('credits') is None:
-                        try:
-                            add_credits(u_id, CREDITS_DAILY_LOGIN, "first-time credit grant")
-                            cr_bal = CREDITS_DAILY_LOGIN
-                        except Exception:
-                            cr_bal = 0
-                if cr_bal < CREDITS_TO_PLAY:
-                    await message.reply(
-                        f"💳 <b>Not enough credits!</b>\n"
-                        f"You need <b>{CREDITS_TO_PLAY} credits</b> to play Fusion.\n"
-                        f"Your balance: <b>{cr_bal}</b>\n\n"
-                        f"• /daily — claim 50 free daily credits\n"
-                        f"• Appear on the scoreboard to earn more\n"
-                        f"• Purchase credits: 1000 credits = ₦1000",
-                        parse_mode="HTML"
-                    )
-                    return
-                # Deduct credits (non-blocking background task)
-                async def _deduct_entry_credits():
-                    spend_credits(u_id, CREDITS_TO_PLAY, "fusion round entry")
-                asyncio.create_task(_deduct_entry_credits())
+            # Credits already deducted at opt-in time (in cmd_fusion)
 
             if guess in eng.used_words:
                 update_streak_and_award_food(u_id, correct=False, username=user.get("username", ""), user_obj=user)
