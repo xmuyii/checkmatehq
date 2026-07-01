@@ -2821,7 +2821,8 @@ async def callback_train_menu(callback: types.CallbackQuery):
     
     await callback.message.edit_text(
         "🎖️ *MILITARY TRAINING*\n\n"
-        "Select unit type to train:",
+        "Select unit type to train:"
+        "Secret code `!train [unit] [amount]`\n\n",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="👣 Pawns (2 wood)", callback_data="train_pawns"),
              InlineKeyboardButton(text="👹 Footmen (5 wood + 1 bronze)", callback_data="train_footmen")],
@@ -2833,7 +2834,6 @@ async def callback_train_menu(callback: types.CallbackQuery):
         parse_mode="Markdown"
     )
     await callback.answer()
-    txt += "Secret code `!train [unit] [amount]`\n\n"
 
 
 @dp.callback_query(lambda q: q.data == "build_menu")
@@ -2860,7 +2860,7 @@ async def callback_build_menu(callback: types.CallbackQuery):
     completed_buildings_display = format_completed_buildings(user)
     
     msg = f"🏰 *CONSTRUCTION*\n\nBase Level: {base_level}\n\n{completed_buildings_display}\n{format_building_queue_display(user)}\n\nChoose what to build:"
-    
+
     await callback.message.edit_text(
         msg,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
