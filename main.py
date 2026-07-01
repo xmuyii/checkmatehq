@@ -741,43 +741,55 @@ async def game_loop(chat_id: int, topic_id: int = None):
 
                 possible_words_count = compute_possible_words(eng.letters)
 
-                # Show last week winners — only once per week (first round after reset)
+                # Show last week winners at the start of EVERY round this week.
+                # Cache the result in-memory (keyed by week) so we only hit the
+                # DB once per week, not once per round.
                 winners_text = ""
                 try:
-                    from supabase_db import _current_week_key
+                    from supabase_db import _current_week_key, supabase, DB_TABLE
+                    from datetime import timedelta
                     _this_week = _current_week_key()
+
+                    # Refresh cache when week rolls over
                     if _winners_shown_week != _this_week:
-                        last_winners = []
+                        _last_week = (
+                            datetime.strptime(_this_week, "%Y-%m-%d") - timedelta(weeks=1)
+                        ).date().isoformat()
+
+                        # Delete stale JSON file if still on disk
                         _script_dir = os.path.dirname(os.path.abspath(__file__))
-                        paths_to_try = [
+                        for _old_path in [
                             os.path.join(_script_dir, 'last_week_winners.json'),
                             os.path.join(os.getcwd(), 'last_week_winners.json'),
-                            'last_week_winners.json',
-                        ]
-                        for path in paths_to_try:
-                            if os.path.exists(path):
-                                with open(path, 'r', encoding='utf-8') as _wf:
-                                    _winners_raw = json.load(_wf)
-                                last_winners = [w for w in _winners_raw if not w.get('is_bot', False)]
-                                print(f"[GAME LOOP] Loaded {len(last_winners)} last-week winners (filtered bots) from {path}")
-                                break
-                        else:
-                            print(f"[GAME LOOP] No last_week_winners.json found in: {paths_to_try}")
+                        ]:
                             try:
-                                _lb = get_alltime_leaderboard(limit=10)
-                                last_winners = [{'username': p['username'], 'points': p['points']} for p in _lb if not p.get('is_bot', False)][:3]
-                                print(f"[GAME LOOP] Using alltime top-3 as last-week fallback (filtered bots): {[p['username'] for p in last_winners]}")
+                                if os.path.exists(_old_path):
+                                    os.remove(_old_path)
                             except Exception:
-                                last_winners = []
+                                pass
 
-                        if last_winners:
-                            winners_text = "🏆 *LAST WEEK'S TOP PLAYERS* 🏆\n"
-                            for i, p in enumerate(last_winners[:3]):
-                                medal = ["🥇", "🥈", "🥉"][i]
-                                winners_text += f"{medal} {p.get('username', 'Unknown')} — {p.get('points', 0):,} pts\n"
-                            winners_text += f"{divider()}\n"
-                        _winners_shown_week = _this_week  # Mark shown for this week either way
-                    # else: already shown this week, winners_text stays ""
+                        try:
+                            _res = supabase.table(DB_TABLE).select(
+                                "username, weekly_points, week_start, is_bot"
+                            ).eq("week_start", _last_week).eq("is_bot", False).order(
+                                "weekly_points", desc=True
+                            ).limit(3).execute()
+                            eng._cached_last_week_winners = _res.data or []
+                        except Exception as _e:
+                            print(f"[GAME LOOP] Could not fetch last-week winners from DB: {_e}")
+                            eng._cached_last_week_winners = []
+
+                        _winners_shown_week = _this_week  # week key — used to know when to refresh
+
+                    # Build banner from cache — shown every round
+                    cached = getattr(eng, '_cached_last_week_winners', [])
+                    if cached:
+                        winners_text = "🏆 *LAST WEEK'S CHAMPIONS* 🏆\n"
+                        for i, p in enumerate(cached):
+                            medal = ["🥇", "🥈", "🥉"][i]
+                            winners_text += f"{medal} {p.get('username', 'Unknown')} — {p.get('weekly_points', 0):,} pts\n"
+                        winners_text += f"{divider()}\n"
+
                 except Exception as e:
                     print(f"[ERROR] Loading last week winners: {e}")
 
@@ -1182,9 +1194,36 @@ async def cmd_fusion(message: types.Message):
         )
         return
 
-    # No game running — start one
+    # No game running — apply same sector/credits gate before starting
+    user = get_user(u_id)
+    if not user:
+        await message.reply("❌ Register first: /start in DM"); return
+
+    loc = user.get("commander_location", {}) if isinstance(user.get("commander_location"), dict) else {}
+    if loc.get("sector_id") != 1:
+        await message.reply(
+            "🏜️ <b>Badlands-8 (Sector 1) required to start Fusion.</b>\n"
+            "Use <code>!teleport 1</code> to enter (10 troops minimum).\n"
+            "Your teleport charges: <b>{}</b>".format(int(user.get("teleport_charges") or 0)),
+            parse_mode="HTML"
+        )
+        return
+
+    cr_bal = int(user.get("credits") or 0)
+    if cr_bal < CREDITS_TO_PLAY:
+        await message.reply(
+            f"💳 <b>Not enough credits to start!</b>\n"
+            f"Need <b>{CREDITS_TO_PLAY}</b> credits (you have {cr_bal}).\n"
+            f"• /daily — free daily credits",
+            parse_mode="HTML"
+        )
+        return
+
     active_topic = message.message_thread_id if message.message_thread_id else FUSION_TOPIC_ID
     asyncio.create_task(game_loop(message.chat.id, active_topic))
+    # Opt the starter in immediately and deduct their credits
+    spend_credits(u_id, CREDITS_TO_PLAY, "fusion round entry")
+    eng.opted_in.add(u_id)
     await message.answer("🃏 *Fusion is starting!*", parse_mode="Markdown")
 
 
@@ -6141,7 +6180,7 @@ async def cb_shield_toggle(callback: types.CallbackQuery):
 async def cb_menu_fusion_info(callback: types.CallbackQuery):
     """Fusion game info and quick-start."""
     await callback.answer()
-    fusion_link  = "https://https://t.me/checkmateHQ/36621" 
+    fusion_link  = "https://t.me/checkmateHQ/36621"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🃏 Go to Fusion Topic", url=fusion_link)],
@@ -6160,7 +6199,12 @@ async def cb_menu_fusion_info(callback: types.CallbackQuery):
         "• 6 = 4 pts  • 7 = 5 pts  • 8+ = 6 pts\n\n"
         "🔥 <b>Streak bonus:</b> 3+ correct in a row = food bonus\n"
         "🎁 <b>Crate drops:</b> React to claim mid-round crates!\n\n"
-        "<i>Type /fusion in the Fusion Topic to start a game.</i>",
+        "🌀 <b>To join:</b>\n"
+        "1. You must be in <b>Badlands-8 (Sector 1)</b>\n"
+        "   → Use <code>!teleport 1</code> in the group (needs 10 troops)\n"
+        "   → Teleport charges are granted free daily — check your dashboard\n"
+        "2. Type <code>!fusion</code> in the Fusion topic to join a round\n"
+        "   → Costs 10 credits per round entry",
         parse_mode="HTML", reply_markup=kb
     )
 
@@ -6569,10 +6613,10 @@ async def cb_menu_shop(callback: types.CallbackQuery):
         await callback.answer("User not found", show_alert=True)
         return
 
-    credits  = user.get("credits", 0)
-    bitcoin  = user.get("bitcoin", 0)
-    gold     = user.get("gold", 0)
-    teleport_charges = user.get("teleport_charges", 0)
+    credits          = int(user.get("credits") or 0)
+    bitcoin          = int(user.get("bitcoin") or 0)
+    gold             = int(user.get("gold") or 0)
+    teleport_charges = int(user.get("teleport_charges") or 0)
 
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🌀 Buy Teleport (200 credits)", callback_data="shop_buy_teleport")],
@@ -6589,8 +6633,10 @@ async def cb_menu_shop(callback: types.CallbackQuery):
         f"🌀 Teleport charges: *{teleport_charges}*\n"
         f"💰 Bitcoin: *{bitcoin:,}*  🟡 Gold: *{gold:,}*\n"
         f"━━━━━━━━━━━━━━━━━\n"
-        f"🌀 *Teleport* — move to any sector (200 cr)\n"
-        f"🛡️ *Shield* — protect your base 8h (150 cr)\n"
+        f"🌀 *Teleport* — charges are auto-granted daily.\n"
+        f"   Use `!teleport <sector>` in the group to travel.\n"
+        f"   Buy extra here for 200 credits each.\n\n"
+        f"🛡️ *Shield* — protects your base for 8h (150 cr)\n"
         f"🏬 General Store — basic supplies\n"
         f"💀 Black Market — rare & high-risk\n"
         f"💎 Premium — bundles & gold items",
