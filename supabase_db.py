@@ -1555,7 +1555,7 @@ def claim_daily_login_credits(user_id: str) -> tuple:
         return False, 0, 0
 
     today      = datetime.utcnow().strftime("%Y-%m-%d")
-    last_claim = user.get("last_daily_credit_claim", "")
+    last_claim = user.get("last_credit_login", "")
 
     if last_claim == today:
         return False, 0, int(user.get("credits", 0) or 0)
@@ -1567,7 +1567,7 @@ def claim_daily_login_credits(user_id: str) -> tuple:
     _save_user(str(user_id), {
         **user,
         "credits":                 new_bal,
-        "last_daily_credit_claim": today,
+        "last_credit_login": today,
     })
     return True, amount, new_bal
 
@@ -1777,7 +1777,7 @@ def claim_daily_login_credits(user_id: str) -> tuple:
         return False, 0, 0
 
     today      = _dt.utcnow().strftime("%Y-%m-%d")
-    last_claim = user.get("last_daily_credit_claim", "")
+    last_claim = user.get("last_credit_login", "")
 
     if last_claim == today:
         return False, 0, int(user.get("credits", 0) or 0)
@@ -1789,7 +1789,7 @@ def claim_daily_login_credits(user_id: str) -> tuple:
     save_user(str(user_id), {
         **user,
         "credits":                 new_bal,
-        "last_daily_credit_claim": today,
+        "last_credit_login": today,
     })
     return True, amount, new_bal
 
