@@ -221,7 +221,9 @@ async def phase_tick(supabase, DB_TABLE: str, bot, GROUP_CHAT_ID: int):
             # Save updated sector state
             sector_state["last_phase_name"] = phase_name
             sector_state["last_updated"]    = now.isoformat()
-            supabase.table("sector_state").update(sector_state).eq(
+            supabase.table("sector_state").update(
+                _strip_runtime_only_keys(sector_state)
+            ).eq(
                 "sector_id", sector_id
             ).execute()
 
@@ -279,7 +281,9 @@ async def dominance_cycle_reset(supabase, DB_TABLE: str, bot, GROUP_CHAT_ID: int
                 [], save_fn, log_fn, broadcast_fn
             )
 
-            supabase.table("sector_state").update(sector_state).eq(
+            supabase.table("sector_state").update(
+                _strip_runtime_only_keys(sector_state)
+            ).eq(
                 "sector_id", sector_id
             ).execute()
 
@@ -367,6 +371,26 @@ async def start_scheduler(bot, supabase, DB_TABLE: str, GROUP_CHAT_ID: int):
 # ═══════════════════════════════════════════════════════════════════════════
 #  INTERNAL HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _strip_runtime_only_keys(sector_state: dict) -> dict:
+    """
+    Remove keys from sector_state that exist only for in-memory/runtime
+    use (e.g. cached phase info computed fresh every tick from
+    sector_cycles.get_current_phase) and are NOT actual columns in the
+    sector_state Supabase table. Writing them via .update() raises
+    PGRST204 'Could not find the column in the schema cache'.
+
+    If you add a new real column to the sector_state table, do NOT add
+    it here. This list is only for computed/derived values that should
+    never be persisted.
+    """
+    RUNTIME_ONLY_KEYS = {
+        "current_phase",   # set by sector_cycles.process_phase_transition —
+                            # always recomputed live via get_current_phase(),
+                            # never read back from DB, not a real column.
+    }
+    return {k: v for k, v in sector_state.items() if k not in RUNTIME_ONLY_KEYS}
+
 
 def _append_sector_chat(sector_state: dict, message: str, is_system: bool = False):
     """Append a system message to sector chat in the state dict."""

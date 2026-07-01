@@ -377,12 +377,46 @@ try:
         add_inventory_item, activate_shield, is_shielded, get_sector_display,
         add_resources_from_word_length, update_streak_and_award_food,
         reset_all_streaks, add_randomized_gift, give_automatic_shield, deactivate_shield, disrupt_shield, restore_shield_after_attack,
-        grant_free_shields_to_all, get_game_weekly_leaderboard, get_game_alltime_leaderboard,
+        get_game_weekly_leaderboard, get_game_alltime_leaderboard,
         award_word_score, get_credits, add_credits, spend_credits,
         claim_daily_login_credits, award_scoreboard_credits,
         CREDITS_TO_PLAY, CREDITS_RANK_REWARDS, CREDITS_DAILY_LOGIN,
     )
     print("✅ Using Supabase database")
+except ImportError as e:
+    # IMPORTANT: this is almost always a single missing name in supabase_db.py
+    # on THIS deployment (e.g. an older version missing a newer function),
+    # not Supabase being unreachable. Falling back to the JSON `database`
+    # module silently drops critical functions like claim_daily_login_credits,
+    # get_credits, award_word_score, etc. — which then crash at call time with
+    # a confusing NameError instead of failing loudly here. Print exactly
+    # which name is missing so it's obvious what to fix in supabase_db.py.
+    print(f"🚨 SUPABASE IMPORT FAILED — missing name: {e}")
+    print(f"🚨 This means supabase_db.py on this server is OUT OF DATE or missing a function.")
+    print(f"🚨 Falling back to JSON database — credits/word-scoring features WILL BE BROKEN.")
+    from database import (
+        get_user, register_user, add_points, get_weekly_leaderboard,
+        get_alltime_leaderboard, add_bitcoin, set_sector, upgrade_backpack,
+        get_inventory, get_profile, add_xp, use_xp, use_bitcoin,
+        remove_inventory_item, load_sectors, save_user, calculate_level,
+        check_level_up, add_unclaimed_item, get_unclaimed_items,
+        claim_item, remove_unclaimed_item, award_powerful_locked_item,
+        add_inventory_item, get_game_weekly_leaderboard, get_game_alltime_leaderboard,
+    )
+    # Stub shield helpers for JSON fallback
+    def activate_shield(user_id): return False
+    def is_shielded(user): return False
+    # Stub credits/word-score helpers so the bot doesn't NameError-crash on
+    # every /start or word guess — they just no-op until supabase_db.py is fixed.
+    def get_credits(user_id): return 0
+    def add_credits(user_id, amount, reason=""): return 0
+    def spend_credits(user_id, amount, reason=""): return False
+    def claim_daily_login_credits(user_id): return (False, 0, 0)
+    def award_scoreboard_credits(*args, **kwargs): return 0
+    def award_word_score(*args, **kwargs): return None
+    CREDITS_TO_PLAY = 0
+    CREDITS_RANK_REWARDS = {}
+    CREDITS_DAILY_LOGIN = 0
 except Exception as e:
     print(f"⚠️  Supabase failed ({e}), using JSON database")
     from database import (
@@ -397,6 +431,15 @@ except Exception as e:
     # Stub shield helpers for JSON fallback
     def activate_shield(user_id): return False
     def is_shielded(user): return False
+    def get_credits(user_id): return 0
+    def add_credits(user_id, amount, reason=""): return 0
+    def spend_credits(user_id, amount, reason=""): return False
+    def claim_daily_login_credits(user_id): return (False, 0, 0)
+    def award_scoreboard_credits(*args, **kwargs): return 0
+    def award_word_score(*args, **kwargs): return None
+    CREDITS_TO_PLAY = 0
+    CREDITS_RANK_REWARDS = {}
+    CREDITS_DAILY_LOGIN = 0
 
 from initiation import initiation_router, CHECKMATE_HQ_GROUP_ID
 from config import BOT_TOKEN, ENV_NAME, SUPABASE_URL as CONFIG_SUPABASE_URL, SUPABASE_KEY as CONFIG_SUPABASE_KEY
@@ -407,8 +450,6 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', CONFIG_SUPABASE_KEY)
 
 bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher()
-from tactical_handlers import tactical_router
-dp.include_router(tactical_router)
 dp.include_router(initiation_router)
 dp.include_router(base_router)
 
