@@ -94,12 +94,13 @@ def normalize_user(user: dict) -> dict:
     """
     Normalize all JSON fields on a user dict from Supabase.
     Call at the top of get_user() before returning.
+    NOTE: inventory is a LIST not a dict — keep it in list_fields.
     """
     if not user:
         return user
 
     dict_fields = [
-        "inventory", "military", "buildings", "building_queue",
+        "military", "buildings", "building_queue",
         "researches", "research_queue", "base_resources", "traps",
         "weapons", "buffs", "banishments", "visas", "visa_applications",
         "commander_location", "current_node", "active_suit",
@@ -109,11 +110,13 @@ def normalize_user(user: dict) -> dict:
         user[field] = safe_json(user.get(field), default={})
 
     list_fields = [
-        "unclaimed_items", "march_queue", "eject_log",
+        "inventory", "unclaimed_items", "march_queue", "eject_log",
         "teleport_history", "visa_queue",
     ]
     for field in list_fields:
-        user[field] = safe_json(user.get(field), default=[])
+        val = safe_json(user.get(field), default=[])
+        # Ensure it really is a list — dict {} is a common stale-data case
+        user[field] = val if isinstance(val, list) else (list(val.values()) if isinstance(val, dict) else [])
 
     if not user.get("commander_location"):
         user["commander_location"] = {"sector_id": 1}
@@ -1691,42 +1694,7 @@ def safe_json(value, default=None):
     return default
 
 
-def normalize_user(user: dict) -> dict:
-    """Normalize all JSON fields on a user dict from Supabase."""
-    if not user:
-        return user
-
-    dict_fields = [
-        "inventory", "military", "buildings", "building_queue",
-        "researches", "research_queue", "base_resources", "traps",
-        "weapons", "buffs", "banishments", "visas", "visa_applications",
-        "commander_location", "current_node", "active_suit",
-        "skill_points_spent", "dominance_scores",
-    ]
-    for field in dict_fields:
-        user[field] = safe_json(user.get(field), default={})
-
-    list_fields = [
-        "unclaimed_items", "march_queue", "eject_log",
-        "teleport_history", "visa_queue",
-    ]
-    for field in list_fields:
-        user[field] = safe_json(user.get(field), default=[])
-
-    if not user.get("commander_location"):
-        user["commander_location"] = {"sector_id": 1}
-
-    base_res = user.get("base_resources", {})
-    if not isinstance(base_res, dict):
-        base_res = {}
-    if not isinstance(base_res.get("resources"), dict):
-        base_res["resources"] = {}
-    user["base_resources"] = base_res
-
-    if user.get("credits") is None:
-        user["credits"] = 0
-
-    return user
+# normalize_user (duplicate removed — see the definition above near line 93)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
