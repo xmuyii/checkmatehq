@@ -941,8 +941,8 @@ async def game_loop(chat_id: int, topic_id: int = None):
                 
                 # Inline button so players can view leaderboard right after the round
                 _round_kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="🏆 Weekly Board",  callback_data="lb_overall_weekly"),
-                    InlineKeyboardButton(text="🃏 Fusion Board",  callback_data="lb_fusion_weekly"),
+                    InlineKeyboardButton(text="🌍 All Games Weekly", callback_data="lb_overall_weekly"),
+                    InlineKeyboardButton(text="🃏 Fusion Weekly",  callback_data="lb_fusion_weekly"),
                 ]])
                 await bot.send_message(chat_id, result, parse_mode="Markdown",
                                        message_thread_id=FUSION_TOPIC_ID,
@@ -6605,6 +6605,59 @@ async def callback_change_commander_name(callback: types.CallbackQuery):
     """Handle changing commander name."""
     await callback.answer("Coming soon!", show_alert=True)
 
+# ── Store item catalogue ──────────────────────────────────────────────────
+STORE_ITEMS = {
+    "general": [
+        {"id": "teleport",     "name": "🌀 Teleport",       "desc": "Move to any sector",          "price": 200,  "currency": "credits", "emoji": "🌀"},
+        {"id": "shield_8h",   "name": "🛡️ Shield 8h",      "desc": "Protect your base for 8h",    "price": 150,  "currency": "credits", "emoji": "🛡️"},
+        {"id": "shield_24h",  "name": "🛡️ Shield 24h",     "desc": "Protect your base for 24h",   "price": 400,  "currency": "credits", "emoji": "🛡️"},
+        {"id": "wood_crate",  "name": "📦 Wood Crate",      "desc": "Random basic resources",      "price": 80,   "currency": "credits", "emoji": "📦"},
+        {"id": "xp_boost",    "name": "⚡ XP Boost",        "desc": "+50% XP for 1 hour",          "price": 300,  "currency": "credits", "emoji": "⚡"},
+    ],
+    "premium": [
+        {"id": "mirror_shield","name": "🪞 Mirror Shield",  "desc": "Deflects 70% of attack back", "price": 500,  "currency": "credits", "emoji": "🪞"},
+        {"id": "super_crate", "name": "🎁 Super Crate",     "desc": "Rare guaranteed drop",        "price": 1,    "currency": "bitcoin", "emoji": "🎁"},
+        {"id": "iron_crate",  "name": "⚙️ Iron Crate",      "desc": "Iron resource bundle",        "price": 800,  "currency": "credits", "emoji": "⚙️"},
+    ],
+    "blackmarket": [  # Sector 9 only
+        {"id": "jammer",      "name": "📡 Word Jammer",     "desc": "Block a player for 1 round",  "price": 600,  "currency": "credits", "emoji": "📡"},
+        {"id": "mirror_shield","name": "🪞 Mirror Shield",  "desc": "Deflects 70% of attack back", "price": 350,  "currency": "credits", "emoji": "🪞"},
+        {"id": "banish_scroll","name": "📜 Banish Scroll",  "desc": "Banish from sector (ruler)",  "price": 2,    "currency": "bitcoin", "emoji": "📜"},
+    ],
+}
+
+def _shop_window_text(category: str, user: dict) -> str:
+    credits = int(user.get("credits") or 0)
+    bitcoin = int(user.get("bitcoin") or 0)
+    items   = STORE_ITEMS.get(category, [])
+    cat_names = {"general": "🏬 GENERAL STORE", "premium": "💎 PREMIUM PLAZA", "blackmarket": "💀 BLACK MARKET"}
+    lines = [f"*{cat_names.get(category, 'STORE')}*", "━━━━━━━━━━━━━━━━━",
+             f"💳 Credits: *{credits:,}*   ₿ Bitcoin: *{bitcoin}*", ""]
+    for item in items:
+        price_str = f"{item['price']:,} {item['currency']}"
+        lines.append(f"{item['emoji']} *{item['name']}* — {price_str}")
+        lines.append(f"   _{item['desc']}_")
+    lines.append("")
+    lines.append("Tap an item below to purchase:")
+    return "\n".join(lines)
+
+def _shop_kb(category: str, back_cb: str = "menu_shop") -> InlineKeyboardMarkup:
+    items = STORE_ITEMS.get(category, [])
+    rows  = []
+    # Two items per row
+    for i in range(0, len(items), 2):
+        row = []
+        for item in items[i:i+2]:
+            price_str = f"{item['price']}{item['currency'][0].upper()}"
+            row.append(InlineKeyboardButton(
+                text=f"{item['emoji']} {item['name']} ({price_str})",
+                callback_data=f"shop_buy_{item['id']}"
+            ))
+        rows.append(row)
+    rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data=back_cb)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 @dp.callback_query(lambda q: q.data == "menu_shop")
 async def cb_menu_shop(callback: types.CallbackQuery):
     u_id = str(callback.from_user.id)
@@ -6617,59 +6670,145 @@ async def cb_menu_shop(callback: types.CallbackQuery):
     bitcoin          = int(user.get("bitcoin") or 0)
     gold             = int(user.get("gold") or 0)
     teleport_charges = int(user.get("teleport_charges") or 0)
+    loc              = user.get("commander_location", {}) if isinstance(user.get("commander_location"), dict) else {}
+    in_sector9       = loc.get("sector_id") == 9
 
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌀 Buy Teleport (200 credits)", callback_data="shop_buy_teleport")],
-        [InlineKeyboardButton(text="🛡️ Buy Shield (150 credits)",   callback_data="shop_buy_shield")],
-        [InlineKeyboardButton(text="🏬 General Store",              callback_data="shop_category_general")],
-        [InlineKeyboardButton(text="💀 Black Market",               callback_data="shop_category_blackmarket")],
-        [InlineKeyboardButton(text="💎 Premium Plaza",              callback_data="shop_category_premium")],
-        [InlineKeyboardButton(text="⬅️ Back",                       callback_data="menu_inventory")],
-    ])
+    rows = [
+        [InlineKeyboardButton(text="🏬 General Store",  callback_data="shop_cat_general")],
+        [InlineKeyboardButton(text="💎 Premium Plaza",  callback_data="shop_cat_premium")],
+    ]
+    if in_sector9:
+        rows.append([InlineKeyboardButton(text="💀 Black Market (Sector 9)", callback_data="shop_cat_blackmarket")])
+    else:
+        rows.append([InlineKeyboardButton(text="💀 Black Market 🔒 (Sector 9 only)", callback_data="shop_bm_locked")])
+    rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="menu_inventory")])
+
     await callback.message.edit_text(
         f"🏬 *THE NEXUS MARKETPLACE*\n"
         f"━━━━━━━━━━━━━━━━━\n"
-        f"💳 Credits: *{credits:,}*\n"
-        f"🌀 Teleport charges: *{teleport_charges}*\n"
-        f"💰 Bitcoin: *{bitcoin:,}*  🟡 Gold: *{gold:,}*\n"
+        f"💳 Credits: *{credits:,}*   🌀 Teleports: *{teleport_charges}*\n"
+        f"₿ Bitcoin: *{bitcoin}*   🟡 Gold: *{gold}*\n"
         f"━━━━━━━━━━━━━━━━━\n"
-        f"🌀 *Teleport* — charges are auto-granted daily.\n"
-        f"   Use `!teleport <sector>` in the group to travel.\n"
-        f"   Buy extra here for 200 credits each.\n\n"
-        f"🛡️ *Shield* — protects your base for 8h (150 cr)\n"
-        f"🏬 General Store — basic supplies\n"
-        f"💀 Black Market — rare & high-risk\n"
-        f"💎 Premium — bundles & gold items",
+        f"Choose a store to browse:",
         parse_mode="Markdown",
-        reply_markup=markup
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows)
     )
     await callback.answer()
 
 
-@dp.callback_query(lambda q: q.data == "shop_buy_teleport")
-async def cb_shop_buy_teleport(callback: types.CallbackQuery):
-    """Buy a teleport charge for 200 credits."""
-    TELEPORT_COST = 200
+@dp.callback_query(lambda q: q.data == "shop_bm_locked")
+async def cb_shop_bm_locked(callback: types.CallbackQuery):
+    await callback.answer("💀 Black Market is only accessible from Sector 9. Teleport there first.", show_alert=True)
+
+
+@dp.callback_query(lambda q: q.data.startswith("shop_cat_"))
+async def cb_shop_category(callback: types.CallbackQuery):
+    category = callback.data.replace("shop_cat_", "")
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
         await callback.answer("User not found", show_alert=True)
         return
+    # Extra sector-9 guard for black market
+    if category == "blackmarket":
+        loc = user.get("commander_location", {}) if isinstance(user.get("commander_location"), dict) else {}
+        if loc.get("sector_id") != 9:
+            await callback.answer("💀 Teleport to Sector 9 first to access the Black Market.", show_alert=True)
+            return
+    await callback.message.edit_text(
+        _shop_window_text(category, user),
+        parse_mode="Markdown",
+        reply_markup=_shop_kb(category, back_cb="menu_shop")
+    )
+    await callback.answer()
 
-    credits = int(user.get("credits") or 0)
-    if credits < TELEPORT_COST:
-        await callback.answer(
-            f"❌ Need {TELEPORT_COST} credits (you have {credits}).", show_alert=True
-        )
+
+@dp.callback_query(lambda q: q.data.startswith("shop_buy_"))
+async def cb_shop_buy(callback: types.CallbackQuery):
+    """Universal shop purchase handler."""
+    item_id = callback.data.replace("shop_buy_", "")
+    u_id    = str(callback.from_user.id)
+    user    = get_user(u_id)
+    if not user:
+        await callback.answer("User not found", show_alert=True)
         return
 
-    spend_credits(u_id, TELEPORT_COST, "bought teleport charge")
-    # Add one teleport charge to user
-    new_charges = int(user.get("teleport_charges") or 0) + 1
-    from supabase_db import supabase, DB_TABLE
-    supabase.table(DB_TABLE).update({"teleport_charges": new_charges}).eq("user_id", u_id).execute()
+    from supabase_db import supabase, DB_TABLE, STACKABLE_ITEMS
 
-    await callback.answer(f"✅ Teleport charge added! You now have {new_charges}.", show_alert=True)
+    # Find item in catalogue
+    item_def = None
+    for cat_items in STORE_ITEMS.values():
+        for it in cat_items:
+            if it["id"] == item_id:
+                item_def = it
+                break
+
+    if not item_def:
+        await callback.answer("❌ Unknown item.", show_alert=True)
+        return
+
+    price    = item_def["price"]
+    currency = item_def["currency"]
+
+    # Check funds
+    if currency == "credits":
+        balance = int(user.get("credits") or 0)
+        if balance < price:
+            await callback.answer(f"❌ Need {price:,} credits (you have {balance:,}).", show_alert=True)
+            return
+        spend_credits(u_id, price, f"bought {item_id}")
+    elif currency == "bitcoin":
+        balance = int(user.get("bitcoin") or 0)
+        if balance < price:
+            await callback.answer(f"❌ Need {price} Bitcoin (you have {balance}).", show_alert=True)
+            return
+        # Deduct bitcoin via save
+        user["bitcoin"] = balance - price
+        save_user(u_id, user)
+
+    # ── Grant the item ──────────────────────────────────────────────────
+    if item_id == "teleport":
+        new_charges = int(user.get("teleport_charges") or 0) + 1
+        supabase.table(DB_TABLE).update({"teleport_charges": new_charges}).eq("user_id", u_id).execute()
+        await callback.answer(f"✅ Teleport charge added! You now have {new_charges}.", show_alert=True)
+
+    elif item_id in ("shield_8h", "shield_24h"):
+        hours   = 8 if item_id == "shield_8h" else 24
+        from datetime import datetime, timedelta
+        expires = (datetime.utcnow() + timedelta(hours=hours)).isoformat()
+        supabase.table(DB_TABLE).update({
+            "base_shielded":     True,
+            "shield_expires_at": expires,
+            "shield_status":     f"🛡️ ACTIVE ({hours}h)",
+        }).eq("user_id", u_id).execute()
+        await callback.answer(f"✅ Shield active for {hours}h!", show_alert=True)
+
+    else:
+        # Add to inventory (stacking if applicable)
+        fresh_user = get_user(u_id)
+        inv        = _ensure_list(fresh_user.get("inventory", []))
+        backpack   = int(fresh_user.get("backpack_slots") or 5)
+
+        if item_id in STACKABLE_ITEMS:
+            existing = next((s for s in inv if s.get("type") == item_id), None)
+            if existing:
+                existing["quantity"] = existing.get("quantity", 1) + 1
+            else:
+                if len(inv) >= backpack:
+                    await callback.answer("❌ Bag full! Use or drop an item first.", show_alert=True)
+                    return
+                inv.append({"id": len(inv)+1, "type": item_id, "quantity": 1,
+                            "acquired": __import__("datetime").datetime.utcnow().isoformat()})
+        else:
+            if len(inv) >= backpack:
+                await callback.answer("❌ Bag full! Use or drop an item first.", show_alert=True)
+                return
+            inv.append({"id": len(inv)+1, "type": item_id, "quantity": 1,
+                        "acquired": __import__("datetime").datetime.utcnow().isoformat()})
+
+        fresh_user["inventory"] = inv
+        save_user(u_id, fresh_user)
+        await callback.answer(f"✅ {item_def['name']} added to your bag!", show_alert=True)
 
 
 
@@ -6766,7 +6905,7 @@ async def cb_menu_inventory(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda q: q.data == "inv_my_items")
 async def cb_inv_my_items(callback: types.CallbackQuery):
-    """Show only the player's claimed inventory items."""
+    """Show inventory items as a tappable grid — each item is a button."""
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
@@ -6776,33 +6915,63 @@ async def cb_inv_my_items(callback: types.CallbackQuery):
     inv           = _ensure_list(user.get("inventory", []))
     unclaimed     = _ensure_list(user.get("unclaimed_items", []))
     unclaimed_cnt = len(unclaimed)
+    slots         = int(user.get("backpack_slots") or 5)
 
-    lines = []
-    for i, item in enumerate(inv, 1):
-        label = item.get("type", item.get("name", "Unknown")).replace("_", " ").title()
-        qty   = item.get("quantity", 1)
-        lines.append(f"{i}. {label}" + (f" x{qty}" if qty > 1 else ""))
+    # Build item buttons — one per slot, greyed out if empty
+    item_btns = []
+    for i in range(slots):
+        if i < len(inv):
+            item = inv[i]
+            label = item.get("type", item.get("name", "?")).replace("_", " ").title()
+            qty   = item.get("quantity", 1)
+            btn_label = f"{label}" + (f" x{qty}" if qty > 1 else "")
+            item_id   = item.get("id", i)
+            item_btns.append(InlineKeyboardButton(
+                text=btn_label, callback_data=f"use_item_{item_id}"
+            ))
+        else:
+            item_btns.append(InlineKeyboardButton(
+                text="[ empty ]", callback_data="inv_slot_empty"
+            ))
 
-    inv_text  = f"📦 *MY ITEMS* ({len(inv)} in bag)\n"
-    if unclaimed_cnt:
-        inv_text += f"📬 *{unclaimed_cnt} unclaimed reward(s) waiting!*\n"
-    inv_text += "━━━━━━━━━━━━━━━━━\n"
-    inv_text += ("\n".join(lines) if lines else "_Your inventory is empty._")
-    inv_text += "\n━━━━━━━━━━━━━━━━━"
+    # Arrange in rows of 5
+    kb_rows = [item_btns[i:i+5] for i in range(0, len(item_btns), 5)]
 
-    kb_rows = []
     if unclaimed_cnt:
         kb_rows.append([InlineKeyboardButton(
             text=f"🎁 Claim Rewards ({unclaimed_cnt})", callback_data="menu_claims"
         )])
-    kb_rows.append([InlineKeyboardButton(text="🗃 Use Item",  callback_data="inv_use")])
-    kb_rows.append([InlineKeyboardButton(text="⬅️ Back",      callback_data="menu_inventory")])
+    kb_rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="menu_inventory")])
+
+    inv_text  = f"📦 *MY ITEMS* ({len(inv)}/{slots} slots used)\n"
+    if unclaimed_cnt:
+        inv_text += f"📬 *{unclaimed_cnt} unclaimed reward(s)* — tap Claim below\n"
+    inv_text += "━━━━━━━━━━━━━━━━━\n"
+    inv_text += "_Tap an item to use it._" if inv else "_Your bag is empty._"
 
     await callback.answer()
     await callback.message.edit_text(
         inv_text, parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows)
     )
+
+
+@dp.callback_query(lambda q: q.data == "inv_slot_empty")
+async def cb_inv_slot_empty(callback: types.CallbackQuery):
+    await callback.answer("Empty slot — claim rewards or buy items from the Store.", show_alert=False)
+
+
+@dp.callback_query(lambda q: q.data.startswith("use_item_"))
+async def cb_use_item_direct(callback: types.CallbackQuery):
+    """Use an item directly from the inventory grid."""
+    u_id = str(callback.from_user.id)
+    try:
+        item_id = int(callback.data.replace("use_item_", ""))
+    except ValueError:
+        await callback.answer("Invalid item.", show_alert=True)
+        return
+    await callback.answer()
+    await _do_use_item(callback.message, u_id, item_id)
 
 
 def get_user_with_fix(u_id):
@@ -7987,16 +8156,36 @@ async def cmd_teleport(message: types.Message):
     if not sector:
         await message.answer("❌ Sector not found", parse_mode="Markdown"); return
     
-    # Update user's current sector
-    user['sector'] = sector_id
+    # Check and deduct a teleport charge
+    charges = int(user.get("teleport_charges") or 0)
+    if charges <= 0:
+        await message.answer(
+            "❌ *No teleport charges!*\n"
+            "Charges are granted free daily by the scheduler.\n"
+            "Buy extra in the Store → General Store → 🌀 Teleport (200 credits).",
+            parse_mode="Markdown"
+        )
+        return
+
+    user["teleport_charges"] = charges - 1
+    # Update commander_location to reflect new sector
+    if not isinstance(user.get("commander_location"), dict):
+        user["commander_location"] = {}
+    user["commander_location"]["sector_id"] = sector_id
+    user["sector"] = sector_id
     save_user(u_id, user)
-    
+
     # Send detailed sector information
     detailed_info = format_sector_display(sector_id, divider)
     await message.answer(detailed_info, parse_mode="Markdown")
-    
+
     # Send confirmation
-    confirmation = f"\n🌀 *TELEPORTED TO SECTOR {sector_id}*\n\n🃏 *GameMaster:* \"Welcome to {sector['name']}. May fortune favor the bold.\"\n"
+    remaining = charges - 1
+    confirmation = (
+        f"\n🌀 *TELEPORTED TO SECTOR {sector_id}*\n\n"
+        f"🃏 *GameMaster:* \"Welcome to {sector['name']}. May fortune favor the bold.\"\n\n"
+        f"_Teleport charges remaining: {remaining}_"
+    )
     await message.answer(confirmation, parse_mode="Markdown")
     
     # ═══════════════════════════════════════════════════════════════════════════
