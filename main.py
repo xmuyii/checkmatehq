@@ -2812,28 +2812,96 @@ async def callback_prestige_info(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda q: q.data == "train_menu")
 async def callback_train_menu(callback: types.CallbackQuery):
-    """Show training unit menu with inline buttons."""
+    """Military training hub — shows all units, current counts, training queue, locked units."""
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
         await callback.answer("Not registered")
         return
-    
+
+    try:
+        from training_system import UNITS, format_training_status
+    except ImportError:
+        await callback.answer("Training system unavailable", show_alert=True)
+        return
+
+    military   = user.get("military", {}) or {}
+    level      = user.get("level", 1)
+    researches = user.get("researches", {}) or {}
+
+    # ── Training queue progress ───────────────────────────────────────────
+    try:
+        queue_display = format_training_status(u_id)
+    except Exception:
+        queue_display = ""
+
+    # ── Build message ─────────────────────────────────────────────────────
+    msg  = "🎖️ *MILITARY TRAINING CENTER*\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    # Current army
+    msg += "⚔️ *YOUR ARMY:*\n"
+    has_troops = False
+    for unit_key, unit_data in UNITS.items():
+        count = military.get(unit_key, 0)
+        if count > 0:
+            msg += f"  {unit_data['name']}: **{count}**\n"
+            has_troops = True
+    if not has_troops:
+        msg += "  _No troops yet. Train some below._\n"
+
+    # Active training queue
+    if queue_display and "No active" not in queue_display and "queue" not in queue_display.lower():
+        msg += f"\n⏳ *TRAINING IN PROGRESS:*\n{queue_display}\n"
+
+    msg += "\n🔓 *AVAILABLE TO TRAIN:*\n"
+
+    # ── Build keyboard ────────────────────────────────────────────────────
+    rows       = []
+    locked_txt = "\n🔒 *LOCKED UNITS:*\n"
+    has_locked = False
+
+    for unit_key, unit in UNITS.items():
+        req_level  = unit.get("min_level", 1)
+        req_research = unit.get("research_required")
+
+        # Check locks
+        level_ok    = level >= req_level
+        research_ok = (not req_research) or researches.get(req_research, False)
+
+        if level_ok and research_ok:
+            current = military.get(unit_key, 0)
+            # Build cost string
+            costs = unit.get("costs", {})
+            cost_parts = []
+            for res in ("wood", "bronze", "iron"):
+                if costs.get(res, 0):
+                    cost_parts.append(f"{costs[res]}{res[0].upper()}")
+            cost_str = "+".join(cost_parts) if cost_parts else "Free"
+            time_s   = unit.get("train_time", 30)
+            time_str = f"{time_s//60}m" if time_s >= 60 else f"{time_s}s"
+
+            btn_label = f"{unit['name']} [{current}] — {cost_str} / {time_str}"
+            rows.append([InlineKeyboardButton(
+                text=btn_label,
+                callback_data=f"train_{unit_key}"
+            )])
+        else:
+            has_locked = True
+            lock_reason = f"Lv{req_level}" if not level_ok else f"Research: {req_research}"
+            locked_txt += f"  🔒 {unit['name']} — {lock_reason}\n"
+
+    if has_locked:
+        msg += locked_txt
+
+    rows.append([InlineKeyboardButton(text="⬅️ Back to Base", callback_data="menu_base")])
+
     await callback.message.edit_text(
-        "🎖️ *MILITARY TRAINING*\n\n"
-        "Select unit type to train:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👣 Pawns (2 wood)", callback_data="train_pawns"),
-             InlineKeyboardButton(text="👹 Footmen (5 wood + 1 bronze)", callback_data="train_footmen")],
-            [InlineKeyboardButton(text="🏹 Archers (8 wood + 2 bronze)", callback_data="train_archers"),
-             InlineKeyboardButton(text="🗡️ Lancers (10 bronze + 3 iron)", callback_data="train_lancers")],
-            [InlineKeyboardButton(text="🏰 Castellans (5 bronze + 15 iron)", callback_data="train_castellans"),
-             InlineKeyboardButton(text="💀 Warlords (30 iron + 500 silver)", callback_data="train_warlords")],
-        ]),
+        msg,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         parse_mode="Markdown"
     )
     await callback.answer()
-    txt += "Secret code `!train [unit] [amount]`\n\n"
 
 
 @dp.callback_query(lambda q: q.data == "build_menu")
@@ -2860,7 +2928,7 @@ async def callback_build_menu(callback: types.CallbackQuery):
     completed_buildings_display = format_completed_buildings(user)
     
     msg = f"🏰 *CONSTRUCTION*\n\nBase Level: {base_level}\n\n{completed_buildings_display}\n{format_building_queue_display(user)}\n\nChoose what to build:"
-    
+
     await callback.message.edit_text(
         msg,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
@@ -3251,19 +3319,25 @@ async def callback_build_confirm(callback: types.CallbackQuery):
     building = BUILDING_TYPES[building_id]
     
     msg = f"🏗️ *{building['name']}* — CONSTRUCTION STARTED!\n\n"
-    msg += f"Level: {current_level + 1}\n"
-    msg += f"Bonus: {building['description']}\n\n"
-    
+    msg += f"Upgrading to Level {current_level + 1}\n"
+    msg += f"Effect: {building['description']}\n\n"
+
     if prog:
         build_time = prog.get('build_time_secs') or prog.get('total_time', 0)
-        msg += f"⏱️ Build Time: {build_time // 60} minutes\n"
+        mins = build_time // 60
+        secs = build_time % 60
+        time_str = f"{mins}m {secs}s" if mins else f"{secs}s"
+        msg += f"⏱️ Build Time: {time_str}\n"
         msg += f"{format_build_progress_bar(prog)}\n\n"
-    
-    msg += "💡 You can check progress with /base command"
+
+    msg += "_Progress bar stays visible on your dashboard and in My Base._"
+
     keyboard = [
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_base")]
+        [InlineKeyboardButton(text="🏗️ Build Another", callback_data="build_menu"),
+         InlineKeyboardButton(text="🏰 My Base",        callback_data="menu_base")],
+        [InlineKeyboardButton(text="🏠 Dashboard",      callback_data="menu_back")],
     ]
-    
+
     await callback.message.edit_text(msg,
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard),
         parse_mode="Markdown")
@@ -5307,6 +5381,165 @@ def _ensure_list(val) -> list:
         return list(val.values())
     return []
 
+async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
+    """
+    Single shared function that renders the main HUD.
+    Called by cmd_start (sends new message) and menu_back (edits existing).
+    Always shows live progress bars for building, training, research.
+    """
+    from datetime import datetime as _dt
+    from building_queue import format_building_queue_display, get_building_progress, format_build_progress_bar
+    try:
+        from power_system import calculate_player_power
+    except ImportError:
+        try:
+            from power_system_v2 import get_total_power as calculate_player_power
+        except ImportError:
+            calculate_player_power = lambda u: 0
+
+    username    = (user.get("username") or "Operative")[:16]
+    level       = user.get("level", 1)
+    total_power = calculate_player_power(user)
+    gold        = user.get("gold", 0)
+    bitcoin     = user.get("bitcoin", 0)
+    sector      = user.get("sector", user.get("home_sector", "—"))
+    base_name   = (user.get("base_name") or "Base")[:18]
+    shield_raw  = user.get("shield_status") or "UNPROTECTED"
+    military    = user.get("military", {}) or {}
+    base_res    = user.get("base_resources", {}) or {}
+    res         = base_res.get("resources", {}) or {}
+    xp          = user.get("xp", 0)
+
+    # Shield display
+    shield_active = "ACTIVE" in str(shield_raw).upper()
+    shield_disrupted = "DISRUPTED" in str(shield_raw).upper()
+    shield_icon = "🛡️" if shield_active else ("💥" if shield_disrupted else "⚠️")
+    shield_label = "ACTIVE" if shield_active else ("DISRUPTED" if shield_disrupted else "NONE ⚠️")
+
+    # Shield time remaining
+    shield_time = ""
+    if shield_active:
+        shield_expires = user.get("shield_expires_at", "")
+        if shield_expires:
+            try:
+                exp = _dt.fromisoformat(shield_expires)
+                rem = exp - _dt.utcnow()
+                h   = int(rem.total_seconds() // 3600)
+                m   = int((rem.total_seconds() % 3600) // 60)
+                shield_time = f" {h}h{m}m"
+            except Exception:
+                pass
+
+    # Army count
+    total_troops = sum(v for v in military.values() if isinstance(v, int) and v > 0)
+
+    # Unclaimed items warning
+    unclaimed_raw = user.get("unclaimed_items", [])
+    unclaimed     = len(unclaimed_raw) if isinstance(unclaimed_raw, list) else 0
+
+    # Objective
+    try:
+        objective = get_hud_objective(user)
+    except Exception:
+        objective = "Train troops or build structures"
+
+    # ── Build HUD text ────────────────────────────────────────────────────
+    hud  = f"<b>╔══════ ZERO DOMINUS ══════╗</b>\n"
+    hud += f"<b>║</b> 👤 <b>{username}</b>  Lv<b>{level}</b>  ⚡<b>{total_power:,}</b>\n"
+    hud += f"<b>║</b> 🪙 Gold <b>{gold}</b>  ₿ BTC <b>{bitcoin}</b>\n"
+    hud += f"<b>║</b> {shield_icon} Shield <b>{shield_label}{shield_time}</b>\n"
+    hud += f"<b>║</b> 📍 <b>{base_name}</b>  Sector <b>{sector}</b>\n"
+    hud += f"<b>║</b> ⚔️ Army <b>{total_troops}</b>  "
+    hud += f"🪵<b>{res.get('wood',0)}</b> "
+    hud += f"🧱<b>{res.get('bronze',0)}</b> "
+    hud += f"⛓️<b>{res.get('iron',0)}</b> "
+    hud += f"🪨<b>{res.get('stone',0)}</b>\n"
+
+    if unclaimed > 0:
+        hud += f"<b>║</b> 📦 <b>{unclaimed} items</b> waiting in backpack\n"
+
+    hud += f"<b>║</b> 🎯 {objective[:36]}\n"
+    hud += f"<b>╚════════════════════════╝</b>"
+
+    # ── Progress bars (appended below card, always live) ──────────────────
+    progress_parts = []
+
+    # Building queue
+    try:
+        bq = format_building_queue_display(user)
+        if bq and bq.strip():
+            progress_parts.append(bq.strip())
+    except Exception:
+        pass
+
+    # Training queue
+    try:
+        from training_system import get_training_queue_display
+        tq = get_training_queue_display(u_id)
+        if tq and tq.strip():
+            progress_parts.append(tq.strip())
+    except Exception:
+        try:
+            from training_system import format_training_status
+            ts = format_training_status(u_id)
+            if ts and ts.strip() and "no active" not in ts.lower():
+                progress_parts.append(ts.strip())
+        except Exception:
+            pass
+
+    # Research queue
+    try:
+        from research_tree import format_active_research
+        rq = format_active_research(user)
+        if rq and rq.strip():
+            progress_parts.append(rq.strip())
+    except Exception:
+        pass
+
+    if progress_parts:
+        hud += "\n\n" + "\n\n".join(progress_parts)
+
+    # ── Keyboard ──────────────────────────────────────────────────────────
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="👤 Commander",   callback_data="menu_profile"),
+            InlineKeyboardButton(text="🏰 My Base",     callback_data="menu_base"),
+        ],
+        [
+            InlineKeyboardButton(text="🎖️ Train",       callback_data="train_menu"),
+            InlineKeyboardButton(text="🏗️ Build",       callback_data="build_menu"),
+        ],
+        [
+            InlineKeyboardButton(text="🎒 Items",       callback_data="menu_inventory"),
+            InlineKeyboardButton(text="🧬 Research",    callback_data="menu_research"),
+        ],
+        [
+            InlineKeyboardButton(text="⚔️ Power",       callback_data="menu_battle"),
+            InlineKeyboardButton(text="👥 Alliance",    callback_data="menu_guild"),
+        ],
+        [
+            InlineKeyboardButton(text="🌍 Sectors",     callback_data="menu_map"),
+            InlineKeyboardButton(text="🎯 Objectives",  callback_data="menu_objective"),
+        ],
+        [
+            InlineKeyboardButton(text="🏆 Leaderboard", callback_data="menu_leaderboards"),
+            InlineKeyboardButton(text="⚙️ Account",     callback_data="menu_account"),
+        ],
+        [
+            InlineKeyboardButton(text="🎮 Fusion Game", callback_data="menu_fusion_info"),
+            InlineKeyboardButton(text="🧠 Trivia",      callback_data="menu_trivia_info"),
+        ],
+    ])
+
+    if edit:
+        try:
+            await message.edit_text(hud, parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            await message.answer(hud, parse_mode="HTML", reply_markup=kb)
+    else:
+        await message.answer(hud, parse_mode="HTML", reply_markup=kb)
+
+
 @dp.message(_cmd("start"))
 async def cmd_start(message: types.Message):
     """
@@ -5364,95 +5597,8 @@ async def cmd_start(message: types.Message):
     claims_warn = f"⚡ <b>{unclaimed} UNCLAIMED</b>" if unclaimed > 0 else ""
     objective = get_hud_objective(user)
 
-    def generate_profile_card(username, xp_bar, xp_bar_pct, level, bitcoin, sector, base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn, objective):
-        # The clean inner width of the card box (excluding the '║  ' and '  ║')
-        INNER_WIDTH = 25 
-        
-
-        def format_line(icon, label, value, is_bold_value=True):
-            """Helper to mathematically pad lines considering Telegram HTML tags."""
-            prefix = f"{icon} " if icon else ""
-            visible_text = f"{prefix}{label}{value}"
-            
-            padding_spaces = INNER_WIDTH - len(visible_text)
-            if padding_spaces < 0:
-                padding_spaces = 0
-                
-            display_value = f"<b>{value}</b>" if is_bold_value else value
-            return f"║  {prefix}{label}{display_value}{' ' * padding_spaces}║\n"
-    
-        # --- 1. Header (Centered) ---
-        card =  "╔═══════════════════════════╗\n"
-        card += "║        <b>Zero Dominus</b>        ║\n"
-        card += "╠═══════════════════════════╣\n"
-
-        # --- 2. Dynamic Stat Lines ---
-        card += format_line("👤", "Commander: ", username[:15], is_bold_value=True)
-        card += format_line("⭐", "Level: ", str(level), is_bold_value=True)
-        card += format_line("⚔️", "Power: ", str(total_power), is_bold_value=True)
-        card += format_line("🗃", "Gold: ", str(gold), is_bold_value=True)
-        
-        card += "╠═══════════════════════════╣\n"
-        card += "╠═══════════════════════════╣\n"
-        card += format_building_queue_display(user)
-        card += format_line("📍", "Sector: ", str(sector), is_bold_value=True)
-        card += format_line("🏰", "", base_name[:15], is_bold_value=True)
-        card += format_line(shield_icon, "Shield: ", str(shield_st), is_bold_value=True)
-        card += format_line("🎒", "Inv: ", f"{inv_count}/{inv_slots}", is_bold_value=True)
-        card += format_line("🎯", "Objective: ", objective[:20], is_bold_value=False)
-        
-        # --- 3. Handle Special Conditional Warn Line ---
-        if claims_warn.strip():
-            clean_warn = claims_warn.replace("<b>", "").replace("</b>", "").strip()
-            pad = INNER_WIDTH - len(clean_warn)
-            card += f"║  {claims_warn}{' ' * max(0, pad)}║\n"
-            
-        card += "╚═══════════════════════════╝"
-        return card
-
-    # FIX 1: Explicitly invoke the generator function using local variables
-    hud_display = generate_profile_card(
-        username, xp_bar, xp_bar_pct, level, bitcoin, sector, 
-        base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn, objective
-    )
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="👤 Commander",      callback_data="menu_profile"),
-            InlineKeyboardButton(text="🏰 My Base",      callback_data="menu_base"),
-        ],
-        [
-            InlineKeyboardButton(text="🎒 Items",    callback_data="menu_inventory"),
-            InlineKeyboardButton(text="🎯 Objective", callback_data="menu_objective"),
-        ],
-        [
-            InlineKeyboardButton(text="👥 Alliance",     callback_data="menu_guild"),
-        ],
-        [
-            InlineKeyboardButton(text="⚔️ Power",       callback_data="menu_battle"),
-        ],
-        [
-            InlineKeyboardButton(text="🏆 Leaderboards", callback_data="menu_leaderboards"),
-        ],
-        [
-            InlineKeyboardButton(text="⚙️ Account",      callback_data="menu_account"),
-        ],
-        [
-            InlineKeyboardButton(text="🎮 Fusion Game",  callback_data="menu_fusion_info"),
-            InlineKeyboardButton(text="🧠 Trivia Game",  callback_data="menu_trivia_info"),
-        ],
-    ])
-
-    # FIX 2: Wrap the generated string in monospace pre tags
-    formatted_message = f"<pre>{hud_display}</pre>"
-
-    # FIX 3: Deliver utilizing the correct chat identifier payload (u_id)
-    await bot.send_message(
-        chat_id=u_id, 
-        text=formatted_message, 
-        parse_mode="HTML",
-        reply_markup=kb
-    )
+    # Delegate entirely to shared HUD renderer (keeps cmd_start and menu_back identical)
+    await _render_main_hud(message, user, u_id, edit=False)
 
 @dp.callback_query(lambda q: q.data == "menu_leaderboards")
 async def cb_menu_leaderboards(callback: types.CallbackQuery):
@@ -5734,303 +5880,80 @@ async def cb_battle_revenge_info(callback: types.CallbackQuery):
 
 
 def get_objective_action_buttons(objective: str):
-    """Return direct action buttons based on the current looping objective."""
-    rows = []
-    obj  = (objective or "").lower()
+    """Return direct action buttons based on the current objective."""
+    from aiogram.types import InlineKeyboardButton
 
-    if "claim" in obj:
+    objective_text = (objective or "").lower()
+    rows = []
+
+    if "claim" in objective_text:
         rows.append([InlineKeyboardButton(text="🎁 Claim Rewards", callback_data="menu_claims")])
-    if "alliance" in obj or "assist" in obj:
-        rows.append([InlineKeyboardButton(text="👥 Guild", callback_data="menu_guild")])
-    if "build" in obj or "upgrade" in obj and "hq" not in obj:
-        rows.append([InlineKeyboardButton(text="🏗️ Build / Upgrade", callback_data="build_menu")])
-    if "hq" in obj or "base hq" in obj:
-        rows.append([InlineKeyboardButton(text="🏰 Upgrade Base HQ", callback_data="build_menu")])
-    if "research" in obj or "lab" in obj:
-        rows.append([InlineKeyboardButton(text="🔬 Research Lab", callback_data="menu_research")])
-    if "train" in obj and ("pawns" in obj or "footmen" in obj or "archers" in obj
-                           or "lancers" in obj or "castellans" in obj or "warlords" in obj):
-        rows.append([InlineKeyboardButton(text="⚔️ Train Troops", callback_data="train_menu")])
+    if "build" in objective_text or "defense" in objective_text or "strengthen" in objective_text:
+        rows.append([InlineKeyboardButton(text="🏗️ Build / Expand", callback_data="build_menu")])
+    if "research" in objective_text or "tech" in objective_text or "lab" in objective_text:
+        rows.append([InlineKeyboardButton(text="🧬 Research Lab", callback_data="menu_research")])
+    if "train" in objective_text or "troops" in objective_text or "battle-ready" in objective_text:
+        rows.append([InlineKeyboardButton(text="🎖️ Train Army", callback_data="train_menu")])
 
     if not rows:
-        rows = [
-            [InlineKeyboardButton(text="🏗️ Build / Upgrade", callback_data="build_menu")],
-            [InlineKeyboardButton(text="🔬 Research Lab",     callback_data="menu_research")],
-            [InlineKeyboardButton(text="⚔️ Train Troops",     callback_data="train_menu")],
-        ]
+        rows.extend([
+            [InlineKeyboardButton(text="🏰 Open Base", callback_data="menu_base")],
+            [InlineKeyboardButton(text="🧬 Research Lab", callback_data="menu_research")],
+            [InlineKeyboardButton(text="🎖️ Train Army", callback_data="train_menu")],
+        ])
 
     rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")])
     return rows
 
 
 def get_hud_objective(user: dict) -> str:
-    """
-    Smart looping objective system.
+    from supabase_db import calculate_level
+    from base_layout import get_empty_sectors
 
-    The loop always goes:  BUILD → RESEARCH → TRAIN TROOPS → back to BUILD
-
-    BUILD phase:
-      For every building that exists in BUILDING_TYPES, check if the player
-      has built it yet (level >= 1). List missing buildings first.
-      If all buildings are built, check if any are below the current HQ level
-      — prompt to upgrade those.
-      If all buildings match the HQ level, the build phase is done → move on.
-
-    RESEARCH phase:
-      Go through the 5 researches in order. If one is not yet unlocked AND
-      the HQ level is sufficient for it, prompt to research it.
-      If the HQ level isn't high enough yet, skip it silently (don't block).
-      If all available researches are done → move on to TRAIN.
-
-    TRAIN phase:
-      Prompt the player to train a specific number of the lowest-rank unit
-      they don't yet have enough of (threshold scales with HQ level).
-      Once they hit the threshold → loop restarts at BUILD.
-
-    Unclaimed rewards and alliance help requests are checked first since
-    they are always urgent regardless of loop phase.
-    """
-    # ── Always-urgent checks ───────────────────────────────────────────────
+    level = calculate_level(user.get('xp', 0) or 0)
     unclaimed = len(user.get('unclaimed_items', []) or [])
     if unclaimed > 0:
         return f"🎁 Claim {unclaimed} reward{'s' if unclaimed != 1 else ''}."
 
     alliance_id = user.get('alliance_id')
     if alliance_id:
-        try:
-            from alliance_system import get_alliance_help_requests
-            pending_help = get_alliance_help_requests(alliance_id)
-            if pending_help:
-                return "🆘 Assist alliance help requests in Guild."
-        except Exception:
-            pass
+        from alliance_system import get_alliance_help_requests
+        pending_help = get_alliance_help_requests(alliance_id)
+        if pending_help:
+            return "🆘 Assist alliance help requests in Guild."
 
-    # ── Core data ──────────────────────────────────────────────────────────
-    try:
-        from build_system import BUILDING_TYPES
-    except Exception:
-        BUILDING_TYPES = {}
+    training_queue = user.get('training_queue', []) or []
+    military = user.get('military', {}) or {}
+    if not military or len(training_queue) == 0:
+        return f"🎖️ Train troops to make your level {level} base battle-ready."
 
-    buildings   = user.get('buildings', {}) or {}     # {building_id: level}
-    researches  = user.get('researches', {}) or {}
-    military    = user.get('military', {}) or {}
-    hq_level    = user.get('base_hq_level', user.get('base_level', 1)) or 1
-
-    # ══════════════════════════════════════════════════════════════════════
-    #  PHASE 1 — BUILD
-    #  Ordered list of buildings every player should work through.
-    #  Priority: build everything at level 1, then upgrade to hq_level.
-    # ══════════════════════════════════════════════════════════════════════
-    BUILDING_ORDER = [
-        "base_hq", "training_grounds", "barracks", "storage",
-        "mine", "farm", "armory", "walls", "trap_factory",
-        "war_room", "infirmary", "cemetery",
+    researches = user.get('researches', {}) or {}
+    pending = [
+        "armor_plating", "speed_training", "resource_extraction",
+        "population_growth", "trap_efficiency"
     ]
+    available = [name for name in pending if not researches.get(name)]
+    if available:
+        return f"🔬 Research {available[0].replace('_', ' ').title()} next."
 
-    # Step 1a — find any building not yet built (level 0 / missing)
-    for bid in BUILDING_ORDER:
-        if bid not in BUILDING_TYPES:
-            continue
-        current_level = buildings.get(bid, 0)
-        if current_level < 1:
-            bname = BUILDING_TYPES[bid].get("name", bid.replace("_", " ").title())
-            return f"🏗️ Build {bname} — your base needs this structure."
+    empty_sectors = get_empty_sectors(user.get('base_layout', {}))
+    if empty_sectors:
+        return f"🏗️ Build in {empty_sectors[0]} to strengthen your defense."
 
-    # Step 1b — all built; check if any are behind the HQ level
-    buildings_behind = []
-    for bid in BUILDING_ORDER:
-        if bid == "base_hq" or bid not in BUILDING_TYPES:
-            continue
-        current_level = buildings.get(bid, 0)
-        if current_level < hq_level:
-            bname = BUILDING_TYPES[bid].get("name", bid.replace("_", " ").title())
-            buildings_behind.append((bname, current_level, hq_level))
-
-    if buildings_behind:
-        bname, cur, target = buildings_behind[0]
-        return f"🏗️ Upgrade {bname} to Lv{target} to match your HQ level."
-
-    # ══════════════════════════════════════════════════════════════════════
-    #  PHASE 2 — RESEARCH
-    #  Work through researches in order. Skip any that require a higher
-    #  HQ level than the player currently has (don't block the loop).
-    # ══════════════════════════════════════════════════════════════════════
-    RESEARCH_ORDER = [
-        # (key, display_name, min_hq_level_required)
-        ("armor_plating",       "⚙️ Armor Plating",         1),
-        ("speed_training",      "⚡ Speed Training",          2),
-        ("resource_extraction", "🪓 Deep Mining",             2),
-        ("population_growth",   "👨‍👩‍👧‍👦 Breeding Program",     3),
-        ("trap_efficiency",     "🔩 Trap Mastery",            3),
-    ]
-
-    for key, display, min_hq in RESEARCH_ORDER:
-        if researches.get(key):
-            continue          # already done
-        if hq_level < min_hq:
-            continue          # HQ not ready — skip silently
-        # This research is available and not done
-        return f"🔬 Research {display} in the Lab — your HQ is ready for it."
-
-    # ══════════════════════════════════════════════════════════════════════
-    #  PHASE 3 — TRAIN TROOPS
-    #  Ask for a specific number of the lowest-rank unit the player is
-    #  short on. Threshold grows with HQ level so the ask scales up.
-    #  Once met → loop restarts (return to BUILD with next upgrade tier).
-    # ══════════════════════════════════════════════════════════════════════
-    # Units in ascending rank order with their minimum counts per HQ level
-    # threshold = base + (hq_level - 1) * step
-    UNIT_TRAIN_ORDER = [
-        # (unit_key, display_name, base_count, step_per_hq_level, min_hq_to_unlock)
-        ("pawns",       "👣 Pawns",       10,  5,  1),
-        ("footmen",     "👹 Footmen",      8,  4,  1),
-        ("archers",     "🏹 Archers",      6,  3,  2),
-        ("lancers",     "🗡️ Lancers",      5,  3,  3),
-        ("castellans",  "🏰 Castellans",   4,  2,  4),
-        ("warlords",    "💀 Warlords",     2,  1,  5),
-    ]
-
-    for unit_key, display_name, base_count, step, min_hq in UNIT_TRAIN_ORDER:
-        if hq_level < min_hq:
-            continue
-        target_count = base_count + (hq_level - 1) * step
-        have = military.get(unit_key, 0)
-        if have < target_count:
-            needed = target_count - have
-            return (
-                f"⚔️ Train {needed} more {display_name} "
-                f"({have}/{target_count}) — then your build loop continues."
-            )
-
-    # ── All phases complete at current HQ level → nudge to upgrade HQ ────
-    next_hq = hq_level + 1
-    return (
-        f"🏆 Phase complete at HQ Lv{hq_level}! "
-        f"Upgrade Base HQ to Lv{next_hq} to unlock the next build cycle."
-    )
-
+    return f"⚡ Level {level} | Upgrade, train, or research to stay ahead."
 
 
 @dp.callback_query(lambda q: q.data == "menu_back")
 async def cb_menu_back_to_hud(callback: types.CallbackQuery):
-    """Return to main HUD from any sub-menu."""
+    """Return to main HUD from any sub-menu — always shows live progress bars."""
     await callback.answer()
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
-        await callback.answer("Session expired. Type /start", show_alert=True); return
+        await callback.answer("Session expired. Type /start", show_alert=True)
+        return
 
-    username   = _safe_name(user.get("username") or "Operative")
-    
-    level      = user.get("level", 1)
-    total_power = calculate_player_power(user)
-    gold       = user.get("gold", 0) 
-    xp         = user.get("xp", 0)
-    bitcoin    = user.get("bitcoin", 0)
-    sector     = user.get("sector", "—")
-    base_name  = user.get("base_name") or "No Base"
-    shield_st  = user.get("shield_status") or "⚠️ UNPROTECTED"  # guard against None from DB
-    unclaimed_raw = user.get("unclaimed_items", [])
-    unclaimed  = len(unclaimed_raw) if isinstance(unclaimed_raw, list) else 0
-    inv_raw    = user.get("inventory", {})
-    inv_count  = len(inv_raw) if isinstance(inv_raw, list) else 0
-    inv_slots  = user.get("backpack_slots", 5)
-    xp_bar_pct = min(100, int((xp % 100)))
-    filled     = xp_bar_pct // 10
-    xp_bar     = "█" * filled + "░" * (10 - filled)
-
-    shield_icon = "🛡️" if "ACTIVE" in shield_st else ("💥" if "DISRUPTED" in shield_st else "⚠️")
-    claims_warn = f"⚡ <b>{unclaimed} UNCLAIMED</b>" if unclaimed > 0 else ""
-
-    objective = get_hud_objective(user)
-
-    def generate_profile_card(username, xp_bar, xp_bar_pct, level, bitcoin, sector, base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn, total_power, gold, objective):
-        # The clean inner width of the card box (excluding the '║  ' and '  ║')
-        INNER_WIDTH = 25
-
-        def format_line(icon, label, value, is_bold_value=True):
-            """Helper to mathematically pad lines considering Telegram HTML tags."""
-            prefix = f"{icon} " if icon else ""
-            visible_text = f"{prefix}{label}{value}"
-
-            padding_spaces = INNER_WIDTH - len(visible_text)
-            if padding_spaces < 0:
-                padding_spaces = 0
-
-            display_value = f"<b>{value}</b>" if is_bold_value else value
-            return f"║  {prefix}{label}{display_value}{' ' * padding_spaces}║\n"
-
-        # --- 1. Header (Centered) ---
-        card = "╔═══════════════════════════╗\n"
-        card += "║        <b>Zero Dominus</b>        ║\n"
-        card += "╠═══════════════════════════╣\n"
-
-        # --- 2. Dynamic Stat Lines ---
-        card += format_line("👤", "Commander: ", username[:15], is_bold_value=True)
-        card += format_line("⭐", "Level: ", str(level), is_bold_value=True)
-        card += format_line("⚔️", "Power: ", str(total_power), is_bold_value=True)
-        card += format_line("🗃", "Gold: ", str(gold), is_bold_value=True)
-
-        card += "╠═══════════════════════════╣\n"
-        card += "╠═══════════════════════════╣\n"
-        card += format_line("📍", "Sector: ", str(sector), is_bold_value=True)
-        card += format_building_queue_display(user)
-        card += format_line("🏰", "", base_name[:16], is_bold_value=True)
-        card += format_line(shield_icon, "Shield: ", str(shield_st), is_bold_value=True)
-        card += format_line("🎒", "Inv: ", f"{inv_count}/{inv_slots}", is_bold_value=True)
-        card += format_line("🎯", "Objective: ", objective[:20], is_bold_value=False)
-
-        # --- 3. Handle Special Conditional Warn Line ---
-        if claims_warn.strip():
-            clean_warn = claims_warn.replace("<b>", "").replace("</b>", "").strip()
-            pad = INNER_WIDTH - len(clean_warn)
-            card += f"║  {claims_warn}{' ' * max(0, pad)}║\n"
-
-        card += "╚═══════════════════════════╝"
-        return card
-
-    hud_display = generate_profile_card(
-        username, xp_bar, xp_bar_pct, level, bitcoin, sector,
-        base_name, shield_icon, shield_st, inv_count, inv_slots, claims_warn, total_power,
-        gold, objective
-    )
-
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="👤 Commander",      callback_data="menu_profile"),
-            InlineKeyboardButton(text="🏰 My Base",      callback_data="menu_base"),
-        ],
-        [
-            InlineKeyboardButton(text="🎒 Items",    callback_data="menu_inventory"),
-            InlineKeyboardButton(text="🎯 Objective", callback_data="menu_objective"),
-        ],
-        [
-            InlineKeyboardButton(text="👥 Alliance",     callback_data="menu_guild"),
-        ],
-        [
-            InlineKeyboardButton(text="⚔️ Power",       callback_data="menu_battle"),
-        ],
-        [
-            InlineKeyboardButton(text="🏆 Leaderboards", callback_data="menu_leaderboards"),
-        ],
-        [
-            InlineKeyboardButton(text="⚙️ Account",      callback_data="menu_account"),
-        ],
-        [
-            InlineKeyboardButton(text="🎮 Fusion Game",  callback_data="menu_fusion_info"),
-            InlineKeyboardButton(text="🧠 Trivia Game",  callback_data="menu_trivia_info"),
-        ],
-    ])
-
-    # FIX 2: Wrap the generated string in monospace pre tags
-    formatted_message = f"<pre>{hud_display}</pre>"
-
-    # FIX 3: Edit the existing message instead of sending a new one
-    await callback.message.edit_text(
-        text=formatted_message, 
-        parse_mode="HTML",
-        reply_markup=kb
-    )
+    await _render_main_hud(callback.message, user, u_id, edit=True)
 
 @dp.callback_query(lambda q: q.data == "menu_objective")
 async def cb_menu_objective(callback: types.CallbackQuery):
@@ -6443,57 +6366,331 @@ async def cb_tutorial_cancel(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda q: q.data == "menu_base")
 async def cb_menu_base(callback: types.CallbackQuery):
-    """Show base information and building menu."""
+    """
+    My Base — the complete base hub.
+    Shows: resources, active progress bars for ALL activities,
+    completed buildings as interactive inline buttons.
+    """
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
-    
     if not user:
         await callback.answer("User not found", show_alert=True)
         return
-    
-    # Check and complete any finished buildings
+
+    # Complete any finished buildings/training first
     user = check_and_complete_buildings(user)
     save_user(u_id, user)
-    
-    buildings = user.get("buildings", {})
-    base_name = user.get("base_name", "Unknown")
-    base_level = user.get("base_level", 1)
-    base_res = user.get("base_resources", {})
-    
-    res = base_res.get("resources", {})
-    wood = res.get("wood", 0)
+
+    base_name  = user.get("base_name", "My Base") or "My Base"
+    base_level = user.get("base_hq_level", user.get("base_level", 1))
+    base_res   = user.get("base_resources", {}) or {}
+    res        = base_res.get("resources", {}) or {}
+    buildings  = user.get("buildings", {}) or {}
+    military   = user.get("military", {}) or {}
+
+    # ── Resources ─────────────────────────────────────────────────────────
+    wood   = res.get("wood", 0)
     bronze = res.get("bronze", 0)
-    iron = res.get("iron", 0)
-    stone = res.get("stone", 0)
-    food = base_res.get("food", 0)
-    
-    completed_buildings_display = format_completed_buildings(user)
-    
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🏰 Defend Base (Tactical)", callback_data="base:main")],
-        [InlineKeyboardButton(text="🏗️ Buildings", callback_data="building_menu"),
-         InlineKeyboardButton(text="🏗️ Build", callback_data="build_menu")],
-        [InlineKeyboardButton(text="🗺️ Map/Sectors",  callback_data="menu_map")],
-        [InlineKeyboardButton(text="🛡️ Defense", callback_data="base_defense")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
+    iron   = res.get("iron", 0)
+    stone  = res.get("stone", 0)
+    relics = res.get("relics", 0)
+    food   = base_res.get("food", 0)
+
+    msg  = f"🏰 *{base_name}* — Level {base_level}\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    msg += "📦 *RESOURCES:*\n"
+    msg += f"  🪵 Wood: **{wood}**  🧱 Bronze: **{bronze}**\n"
+    msg += f"  ⛓️ Iron: **{iron}**  🪨 Stone: **{stone}**\n"
+    msg += f"  🏺 Relics: **{relics}**  🌽 Food: **{food}**\n"
+
+    # ── ALL active progress bars ───────────────────────────────────────────
+    any_progress = False
+
+    # 1. Building queue
+    bq_display = format_building_queue_display(user)
+    if bq_display and bq_display.strip():
+        msg += f"\n{bq_display}"
+        any_progress = True
+
+    # 2. Training queue
+    try:
+        from training_system import get_training_queue_display
+        tq_display = get_training_queue_display(u_id)
+        if tq_display and tq_display.strip():
+            msg += f"\n{tq_display}"
+            any_progress = True
+    except Exception:
+        try:
+            from training_system import format_training_status
+            ts = format_training_status(u_id)
+            if ts and "No active" not in ts and ts.strip():
+                msg += f"\n⚔️ *TRAINING:*\n{ts}\n"
+                any_progress = True
+        except Exception:
+            pass
+
+    # 3. Research queue
+    try:
+        from research_tree import format_active_research
+        rq_display = format_active_research(user)
+        if rq_display and rq_display.strip():
+            msg += f"\n{rq_display}"
+            any_progress = True
+    except Exception:
+        pass
+
+    if not any_progress:
+        msg += "\n_No active construction, training, or research._\n"
+
+    # ── Army summary ──────────────────────────────────────────────────────
+    total_troops = sum(v for v in military.values() if isinstance(v, int))
+    if total_troops > 0:
+        msg += f"\n⚔️ *ARMY:* {total_troops} troops\n"
+        for unit, count in military.items():
+            if count > 0:
+                msg += f"  {unit.capitalize()}: **{count}**\n"
+
+    msg += "\n━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+
+    # ── Keyboard — completed buildings as interactive buttons ──────────────
+    rows = []
+
+    # Action buttons first
+    rows.append([
+        InlineKeyboardButton(text="🏗️ Build New",     callback_data="build_menu"),
+        InlineKeyboardButton(text="🎖️ Train Troops",  callback_data="train_menu"),
     ])
-    
-    await callback.message.edit_text(
-        f"🏰 *{base_name}* (Level {base_level})\n\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"{completed_buildings_display}\n"
-        f"{format_building_queue_display(user)}\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"*Resources:*\n"
-        f"🪵 Wood: **{wood}**\n"
-        f"🧱 Bronze: **{bronze}**\n"
-        f"⛓️ Iron: **{iron}**\n"
-        f"💎 Stone: **{stone}**\n"
-        f"🌽 Food: **{food}**\n"
-        f"━━━━━━━━━━━━━━━━━",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
+    rows.append([
+        InlineKeyboardButton(text="🔱 Traps",         callback_data="show_trap_list"),
+        InlineKeyboardButton(text="🧬 Research",      callback_data="menu_research"),
+    ])
+    rows.append([
+        InlineKeyboardButton(text="🗺️ Sectors/Map",  callback_data="menu_map"),
+        InlineKeyboardButton(text="🛡️ Defense",      callback_data="base_defense"),
+    ])
+
+    # Completed buildings as interactive buttons
+    if buildings:
+        rows.append([InlineKeyboardButton(text="─── MY BUILDINGS ───", callback_data="noop")])
+        building_row = []
+        for building_id, level in sorted(buildings.items()):
+            try:
+                bname = BUILDING_TYPES.get(building_id, {}).get("name", building_id.replace("_", " ").title())
+            except Exception:
+                bname = building_id.replace("_", " ").title()
+            btn = InlineKeyboardButton(
+                text=f"{bname} Lv{level}",
+                callback_data=f"building_detail_{building_id}"
+            )
+            building_row.append(btn)
+            if len(building_row) == 2:
+                rows.append(building_row)
+                building_row = []
+        if building_row:
+            rows.append(building_row)
+
+    rows.append([InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")])
+
+    await callback.message.edit_text(msg, parse_mode="Markdown",
+                                     reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data == "noop")
+async def cb_noop(callback: types.CallbackQuery):
+    """Section divider buttons — do nothing."""
+    await callback.answer()
+
+
+@dp.callback_query(lambda q: q.data.startswith("building_detail_"))
+async def cb_building_detail(callback: types.CallbackQuery):
+    """
+    Show the interior of a specific completed building.
+    Each building has unique actions available inside it.
+    """
+    u_id        = str(callback.from_user.id)
+    user        = get_user(u_id)
+    if not user:
+        await callback.answer("Not registered", show_alert=True)
+        return
+
+    building_id = callback.data.replace("building_detail_", "")
+    buildings   = user.get("buildings", {}) or {}
+
+    if building_id not in buildings:
+        await callback.answer("Building not found.", show_alert=True)
+        return
+
+    level = buildings[building_id]
+
+    try:
+        bdata = BUILDING_TYPES.get(building_id, {})
+    except Exception:
+        bdata = {}
+
+    bname = bdata.get("name", building_id.replace("_", " ").title())
+    bdesc = bdata.get("description", "A base structure.")
+
+    # ── Per-building content ───────────────────────────────────────────────
+    BUILDING_CONTENT = {
+        "training_grounds": {
+            "desc":   "Increases troop training speed. The beating heart of your military.",
+            "emoji":  "🏋️",
+            "action_buttons": [
+                [InlineKeyboardButton(text="🎖️ Train Troops", callback_data="train_menu")],
+            ],
+        },
+        "barracks": {
+            "desc":   "Houses your troops. Higher level = more troop capacity.",
+            "emoji":  "🏕️",
+            "action_buttons": [
+                [InlineKeyboardButton(text="🎖️ Train Troops", callback_data="train_menu"),
+                 InlineKeyboardButton(text="⚔️ View Army",   callback_data="menu_battle")],
+            ],
+        },
+        "armory": {
+            "desc":   "Stores and upgrades weapons. Unlocks advanced troop types.",
+            "emoji":  "⚔️",
+            "action_buttons": [
+                [InlineKeyboardButton(text="🗡️ Weapons",      callback_data="menu_weapons"),
+                 InlineKeyboardButton(text="🎖️ Train Elite",  callback_data="train_menu")],
+            ],
+        },
+        "war_room": {
+            "desc":   "Strategic command center. Boosts attack power and march speed.",
+            "emoji":  "🗺️",
+            "action_buttons": [
+                [InlineKeyboardButton(text="⚔️ Attack",        callback_data="menu_battle"),
+                 InlineKeyboardButton(text="🔭 Scout",         callback_data="menu_scout")],
+            ],
+        },
+        "storage": {
+            "desc":   "Protects resources from raiders. Higher level = more protected.",
+            "emoji":  "🏚️",
+            "action_buttons": [
+                [InlineKeyboardButton(text="📦 Resources",     callback_data="menu_resources")],
+            ],
+        },
+        "mine": {
+            "desc":   "Passively generates iron and stone over time.",
+            "emoji":  "⛏️",
+            "action_buttons": [
+                [InlineKeyboardButton(text="📦 View Resources", callback_data="menu_resources")],
+            ],
+        },
+        "farm": {
+            "desc":   "Generates food to keep your troops fed and your streak alive.",
+            "emoji":  "🌾",
+            "action_buttons": [
+                [InlineKeyboardButton(text="🌽 View Food",     callback_data="menu_resources")],
+            ],
+        },
+        "trap_factory": {
+            "desc":   "Manufactures traps. Higher level = more trap capacity.",
+            "emoji":  "🔱",
+            "action_buttons": [
+                [InlineKeyboardButton(text="🔱 Manage Traps",  callback_data="show_trap_list")],
+            ],
+        },
+        "walls": {
+            "desc":   "Defensive perimeter. Reduces damage from raids.",
+            "emoji":  "🏯",
+            "action_buttons": [
+                [InlineKeyboardButton(text="🛡️ Defense Status", callback_data="base_defense")],
+            ],
+        },
+        "infirmary": {
+            "desc":   "Recovers wounded troops after battle instead of losing them permanently.",
+            "emoji":  "🏥",
+            "action_buttons": [
+                [InlineKeyboardButton(text="💊 Recover Troops", callback_data="menu_battle")],
+            ],
+        },
+        "cemetery": {
+            "desc":   "Fallen troops provide morale and XP bonuses. Honour your dead.",
+            "emoji":  "⚰️",
+            "action_buttons": [
+                [InlineKeyboardButton(text="📊 View Stats",    callback_data="menu_profile")],
+            ],
+        },
+        "base_hq": {
+            "desc":   "Command headquarters. Level determines what can be built.",
+            "emoji":  "🏰",
+            "action_buttons": [
+                [InlineKeyboardButton(text="🏗️ Build More",    callback_data="build_menu"),
+                 InlineKeyboardButton(text="🧬 Research",      callback_data="menu_research")],
+            ],
+        },
+    }
+
+    content      = BUILDING_CONTENT.get(building_id, {})
+    content_desc = content.get("desc", bdesc)
+    content_emoji = content.get("emoji", "🏗️")
+    action_btns  = content.get("action_buttons", [])
+
+    # Building stats
+    military     = user.get("military", {}) or {}
+    base_res     = user.get("base_resources", {}) or {}
+    res          = base_res.get("resources", {}) or {}
+
+    msg  = f"{content_emoji} *{bname}* — Level {level}\n"
+    msg += "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    msg += f"_{content_desc}_\n\n"
+
+    # Building-specific stats
+    if building_id == "barracks" or building_id == "training_grounds":
+        total = sum(v for v in military.values() if isinstance(v, int))
+        msg += f"*Current Army:* {total} troops\n"
+        for unit, count in military.items():
+            if count > 0:
+                msg += f"  {unit.capitalize()}: **{count}**\n"
+
+    elif building_id in ("storage", "mine", "farm"):
+        msg += "*Resources Stored:*\n"
+        msg += f"  🪵 {res.get('wood',0)}  🧱 {res.get('bronze',0)}  ⛓️ {res.get('iron',0)}\n"
+        msg += f"  🪨 {res.get('stone',0)}  🌽 {base_res.get('food',0)}\n"
+
+    elif building_id == "trap_factory":
+        traps = user.get("traps", {}) or {}
+        total_traps = sum(v for v in traps.values() if isinstance(v, int))
+        msg += f"*Traps Deployed:* {total_traps}\n"
+        for trap_id, count in traps.items():
+            if count > 0:
+                try:
+                    tname = TRAP_TYPES.get(trap_id, {}).get("name", trap_id)
+                except Exception:
+                    tname = trap_id
+                msg += f"  {tname}: {count}\n"
+
+    # Upgrade info
+    try:
+        from build_system import calculate_building_cost
+        next_cost = calculate_building_cost(building_id, level + 1)
+        cost_str  = " + ".join(f"{v} {k}" for k, v in next_cost.items())
+        msg += f"\n📈 *Upgrade to Lv{level+1}:* {cost_str}\n"
+    except Exception:
+        pass
+
+    # Check if upgrading
+    bq = user.get("building_queue", {}) or {}
+    if building_id in bq:
+        prog = get_building_progress(user, building_id)
+        if prog:
+            msg += f"\n⏳ *Upgrading:*\n{format_build_progress_bar(prog)}\n"
+
+    msg += "\n━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+    # Keyboard: action buttons + upgrade + back
+    rows = list(action_btns)
+    rows.append([InlineKeyboardButton(
+        text=f"⬆️ Upgrade to Lv{level+1}",
+        callback_data=f"build_{building_id}"
+    )])
+    rows.append([InlineKeyboardButton(text="⬅️ Back to Base", callback_data="menu_base")])
+
+    await callback.message.edit_text(msg, parse_mode="Markdown",
+                                     reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
     await callback.answer()
 
 
@@ -8668,14 +8865,15 @@ async def cb_train_confirm(callback: types.CallbackQuery):
         time_str = f"{mins}m {secs}s" if mins else f"{secs}s"
 
         await callback.message.edit_text(
-            f"⚔️ *TRAINING QUEUED!*\n\n"
-            f"{unit['name']} × {quantity}\n"
-            f"⏱️ Ready in: {time_str}\n\n"
-            f"_\"Your army grows in the dark.\" — GameMaster_",
+            f"✅ *TRAINING QUEUED!*\n\n"
+            f"⚔️ {unit['name']} × {quantity}\n"
+            f"⏱️ Completes in: {time_str}\n\n"
+            f"_Progress bar visible on your dashboard and in My Base._",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🎖️ Train More", callback_data="train_menu"),
-                 InlineKeyboardButton(text="🏠 Home", callback_data="main_menu")]
+                [InlineKeyboardButton(text="🎖️ Train More",  callback_data="train_menu"),
+                 InlineKeyboardButton(text="🏰 My Base",     callback_data="menu_base")],
+                [InlineKeyboardButton(text="🏠 Dashboard",   callback_data="menu_back")],
             ])
         )
         await callback.answer("✅ Training started!")
