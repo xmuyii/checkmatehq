@@ -32,7 +32,7 @@ if ENVIRONMENT == 'prod':
     SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'your_supabase_anon_key_here').strip()
     DB_TABLE = 'players'  # Production table
     ENV_NAME = 'PRODUCTION'
-    
+
 # ============================================================================
 # TEST CONFIG
 # ============================================================================

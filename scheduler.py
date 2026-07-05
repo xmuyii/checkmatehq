@@ -30,45 +30,6 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Optional
 
-# ── DB columns that actually exist in sector_state table ─────────────────
-# Any key NOT in this set is computed/transient and must be stripped before save
-SECTOR_STATE_DB_COLUMNS = {
-    "sector_id", "occupancy", "roaming", "sector_chat", "active_predators",
-    "active_jam", "dominance", "pending_ruler_alerts", "pending_predator_loot",
-    "pending_notifications", "incoming_marches", "last_phase_name",
-    "last_updated", "event_log", "warnings_sent",
-}
-
-
-def _save_sector_state_safe(supabase, sector_id: int, state: dict) -> None:
-    """
-    Save sector state to DB, stripping any computed fields that don't
-    exist as actual columns (e.g. current_phase, time_remaining_str).
-    """
-    import json
-    clean = {}
-    for k, v in state.items():
-        if k not in SECTOR_STATE_DB_COLUMNS:
-            continue
-        # Ensure JSON-serialisable
-        if isinstance(v, (dict, list)):
-            clean[k] = v
-        elif v is None or isinstance(v, (str, int, float, bool)):
-            clean[k] = v
-        else:
-            try:
-                clean[k] = json.loads(json.dumps(v, default=str))
-            except Exception:
-                pass
-
-    clean["last_updated"] = datetime.utcnow().isoformat()
-    try:
-        supabase.table("sector_state").upsert(
-            {"sector_id": sector_id, **clean}
-        ).execute()
-    except Exception as e:
-        print(f"[SECTOR_STATE] save error S{sector_id}: {e}")
-
 # ═══════════════════════════════════════════════════════════════════════════
 #  DAILY GRANTS — These replace your existing grant functions in main.py
 # ═══════════════════════════════════════════════════════════════════════════
@@ -122,66 +83,6 @@ async def grant_daily_teleports(supabase, DB_TABLE: str, bot=None):
 
     except Exception as e:
         print(f"[ERROR] grant_daily_teleports: {e}")
-
-
-async def grant_daily_shields(supabase, DB_TABLE: str, bot=None):
-    """
-    Grant a basic shield to every player who is currently unshielded.
-    Uses base_shielded boolean + shield_expires_at text column.
-    Never appends to inventory.
-    
-    Shield duration: 8 hours.
-    Only granted if player has no active shield.
-    """
-    shield_hours = 8
-    granted      = 0
-    failed       = 0
-
-    try:
-        result = supabase.table(DB_TABLE).select(
-            "user_id, base_shielded, shield_expires_at"
-        ).execute()
-        
-        users = result.data or []
-        now   = datetime.utcnow()
-
-        for user in users:
-            try:
-                uid = user.get("user_id")
-                if not uid:
-                    continue
-
-                # Check if already shielded
-                already_shielded = False
-                if user.get("base_shielded"):
-                    exp_str = user.get("shield_expires_at")
-                    if exp_str:
-                        try:
-                            exp = datetime.fromisoformat(exp_str)
-                            already_shielded = now < exp
-                        except Exception:
-                            pass
-
-                if already_shielded:
-                    continue
-
-                expires = (now + timedelta(hours=shield_hours)).isoformat()
-
-                supabase.table(DB_TABLE).update({
-                    "base_shielded":    True,
-                    "shield_expires_at": expires,
-                }).eq("user_id", uid).execute()
-
-                granted += 1
-
-            except Exception as e:
-                failed += 1
-                print(f"[WARN] Could not grant shield to {user.get('user_id','?')}: {e}")
-
-        print(f"[SHIELDS] Granted 8h shield to {granted} players ({failed} failed)")
-
-    except Exception as e:
-        print(f"[ERROR] grant_daily_shields: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -318,10 +219,13 @@ async def phase_tick(supabase, DB_TABLE: str, bot, GROUP_CHAT_ID: int):
                 )
 
             # Save updated sector state
-            # Strip computed/transient fields that don't exist as DB columns
             sector_state["last_phase_name"] = phase_name
             sector_state["last_updated"]    = now.isoformat()
-            _save_sector_state_safe(supabase, sector_id, sector_state)
+            supabase.table("sector_state").update(
+                _strip_runtime_only_keys(sector_state)
+            ).eq(
+                "sector_id", sector_id
+            ).execute()
 
     except Exception as e:
         print(f"[ERROR] phase_tick: {e}")
@@ -377,7 +281,11 @@ async def dominance_cycle_reset(supabase, DB_TABLE: str, bot, GROUP_CHAT_ID: int
                 [], save_fn, log_fn, broadcast_fn
             )
 
-            _save_sector_state_safe(supabase, sector_id, sector_state)
+            supabase.table("sector_state").update(
+                _strip_runtime_only_keys(sector_state)
+            ).eq(
+                "sector_id", sector_id
+            ).execute()
 
         print(f"[DOMINANCE] 24h cycle reset complete for {len(sectors)} sectors")
 
@@ -422,10 +330,11 @@ async def start_scheduler(bot, supabase, DB_TABLE: str, GROUP_CHAT_ID: int):
             await dp.start_polling(bot)
     """
     print("[SCHEDULER] Starting background tasks...")
-    
-    # Run daily grants immediately on startup for any missed players
+
+    # Run daily teleport grant immediately on startup for any missed players.
+    # NOTE: grant_daily_shields is intentionally NOT called — free shields
+    # have been removed by design. Players must purchase shields themselves.
     await grant_daily_teleports(supabase, DB_TABLE, bot)
-    await grant_daily_shields(supabase, DB_TABLE, bot)
 
     tick_count = 0
 
@@ -436,16 +345,19 @@ async def start_scheduler(bot, supabase, DB_TABLE: str, GROUP_CHAT_ID: int):
 
             # ── Every 60 seconds: phase tick ─────────────────────────────
             await phase_tick(supabase, DB_TABLE, bot, GROUP_CHAT_ID)
-
+            # Phase 5 tick (every 5 minutes = every 5 loop iterations of 60s)
+            if tick_count % 5 == 0:
+                from main_p5_patch import phase5_tick
+                await phase5_tick(bot, supabase, DB_TABLE)
             # ── Every 6 hours: purge bounties (tick 0, 360, 720, 1080) ──
             if tick_count % 360 == 0:
                 await purge_old_bounties(supabase)
 
-            # ── Midnight UTC: daily grants + dominance reset ──────────────
+            # ── Midnight UTC: daily teleport grant + dominance reset ──────
+            # NOTE: grant_daily_shields intentionally removed — no free shields.
             if 0 <= secs < 65:   # Within first 65 seconds of midnight
                 if tick_count % 10 == 0:  # Throttle — only run once per minute window
                     await grant_daily_teleports(supabase, DB_TABLE, bot)
-                    await grant_daily_shields(supabase, DB_TABLE, bot)
                     await dominance_cycle_reset(supabase, DB_TABLE, bot, GROUP_CHAT_ID)
 
             tick_count += 1
@@ -462,6 +374,26 @@ async def start_scheduler(bot, supabase, DB_TABLE: str, GROUP_CHAT_ID: int):
 # ═══════════════════════════════════════════════════════════════════════════
 #  INTERNAL HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
+
+def _strip_runtime_only_keys(sector_state: dict) -> dict:
+    """
+    Remove keys from sector_state that exist only for in-memory/runtime
+    use (e.g. cached phase info computed fresh every tick from
+    sector_cycles.get_current_phase) and are NOT actual columns in the
+    sector_state Supabase table. Writing them via .update() raises
+    PGRST204 'Could not find the column in the schema cache'.
+
+    If you add a new real column to the sector_state table, do NOT add
+    it here. This list is only for computed/derived values that should
+    never be persisted.
+    """
+    RUNTIME_ONLY_KEYS = {
+        "current_phase",   # set by sector_cycles.process_phase_transition —
+                            # always recomputed live via get_current_phase(),
+                            # never read back from DB, not a real column.
+    }
+    return {k: v for k, v in sector_state.items() if k not in RUNTIME_ONLY_KEYS}
+
 
 def _append_sector_chat(sector_state: dict, message: str, is_system: bool = False):
     """Append a system message to sector chat in the state dict."""

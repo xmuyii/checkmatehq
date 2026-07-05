@@ -9,6 +9,7 @@ Game loop: simple asyncio.sleep ticks, force_stop flag.
 
 # ── Load environment variables FIRST ──────────────────────────────────────
 from dotenv import load_dotenv
+import supabase
 load_dotenv()
 
 # ── Fix Unicode/Emoji support on Windows –────────────────────────────────
@@ -47,6 +48,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton
 from aiogram.exceptions import TelegramBadRequest
 from sectors_system import SECTORS
+from server_lifecycle import on_startup, on_shutdown, check_maintenance_mode, maintenance_response
+from main_p5_patch import p5_router
+
+from server_lifecycle import (
+      on_startup, on_shutdown, check_maintenance_mode,
+      maintenance_response, SERVER_STATUS_KEY
+  )
 from formatting import (
     progress_bar, divider, broadcast, round_start_header, round_end_summary,
     level_up_announcement, battle_result, shield_status_visual, countdown_timer,
@@ -450,6 +458,7 @@ SUPABASE_KEY = os.environ.get('SUPABASE_KEY', CONFIG_SUPABASE_KEY)
 
 bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher()
+dp.include_router(p5_router)
 dp.include_router(initiation_router)
 dp.include_router(base_router)
 
@@ -5540,6 +5549,16 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
         await message.answer(hud, parse_mode="HTML", reply_markup=kb)
 
 
+async def _check_maintenance(callback):
+    """Return True if maintenance mode is active and the callback should stop."""
+    from supabase_db import supabase
+
+    if await check_maintenance_mode(supabase):
+        await maintenance_response(callback, is_callback=True)
+        return True
+    return False
+
+
 @dp.message(_cmd("start"))
 async def cmd_start(message: types.Message):
     """
@@ -5558,7 +5577,9 @@ async def cmd_start(message: types.Message):
             parse_mode="HTML", reply_markup=kb
         )
         return
-
+    if await check_maintenance_mode(supabase):
+      await maintenance_response(message)
+      return
     # Private chat — full HUD
     user = get_user(u_id)
     if user is None:
@@ -5604,6 +5625,9 @@ async def cmd_start(message: types.Message):
 async def cb_menu_leaderboards(callback: types.CallbackQuery):
     """Leaderboard hub — shows all game leaderboards with inline tabs."""
     await callback.answer()
+    if await _check_maintenance(callback):
+        return
+
     u_id = str(callback.from_user.id)
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -5947,6 +5971,9 @@ def get_hud_objective(user: dict) -> str:
 async def cb_menu_back_to_hud(callback: types.CallbackQuery):
     """Return to main HUD from any sub-menu — always shows live progress bars."""
     await callback.answer()
+    if await _check_maintenance(callback):
+        return
+
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
@@ -5957,6 +5984,9 @@ async def cb_menu_back_to_hud(callback: types.CallbackQuery):
 
 @dp.callback_query(lambda q: q.data == "menu_objective")
 async def cb_menu_objective(callback: types.CallbackQuery):
+    if await _check_maintenance(callback):
+        return
+
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
@@ -5979,6 +6009,9 @@ async def cb_menu_objective(callback: types.CallbackQuery):
 async def cb_menu_claims_shortcut(callback: types.CallbackQuery):
     """Shortcut from HUD to claims."""
     await callback.answer()
+    if await _check_maintenance(callback):
+        return
+
     u_id = str(callback.from_user.id)
     unclaimed = get_unclaimed_items(u_id)
     if not unclaimed:
@@ -6038,6 +6071,9 @@ async def cb_menu_battle(callback: types.CallbackQuery):
 async def cb_menu_battle(callback: types.CallbackQuery):
     """Battle hub."""
     await callback.answer()
+    if await _check_maintenance(callback):
+        return
+
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
@@ -6076,6 +6112,9 @@ async def cb_menu_battle(callback: types.CallbackQuery):
 async def cb_battle_shield(callback: types.CallbackQuery):
     """Shield management from battle hub."""
     await callback.answer()
+    if await _check_maintenance(callback):
+        return
+
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     
@@ -6128,6 +6167,9 @@ async def cb_shield_toggle(callback: types.CallbackQuery):
 async def cb_menu_fusion_info(callback: types.CallbackQuery):
     """Fusion game info and quick-start."""
     await callback.answer()
+    if await _check_maintenance(callback):
+        return
+
     fusion_link  = "https://https://t.me/checkmateHQ/36621" 
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -6156,6 +6198,9 @@ async def cb_menu_fusion_info(callback: types.CallbackQuery):
 async def cb_menu_trivia_info(callback: types.CallbackQuery):
     """Trivia game info and quick-start."""
     await callback.answer()
+    if await _check_maintenance(callback):
+        return
+
     chat_id_str = _chat_id_for_tg_link(CHECKMATE_HQ_GROUP_ID) if CHECKMATE_HQ_GROUP_ID else ""
     trivia_link  = f"https://t.me/c/{chat_id_str}/{TRIVIA_TOPIC_ID}" if chat_id_str else "the group"
 
@@ -6186,6 +6231,9 @@ async def cb_menu_trivia_info(callback: types.CallbackQuery):
 async def cb_menu_research(callback: types.CallbackQuery):
     """Research lab shortcut."""
     await callback.answer()
+    if await _check_maintenance(callback):
+        return
+
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔬 Open Lab",   callback_data="menu_back")],
         [InlineKeyboardButton(text="⬅️ Back",       callback_data="menu_back")],
@@ -6202,6 +6250,9 @@ async def cb_menu_research(callback: types.CallbackQuery):
 async def cb_battle_items_inline(callback: types.CallbackQuery):
     """Quick battle items listing from HUD."""
     await callback.answer()
+    if await _check_maintenance(callback):
+        return
+
     u_id = str(callback.from_user.id)
     user = get_user(u_id)
     if not user:
@@ -11015,7 +11066,11 @@ async def hourly_leaderboard_broadcast_task(bot: Bot, chat_id: int):
 async def main():
     import signal, platform
     print("Bot starting...")
-    
+    from server_lifecycle import on_startup, on_shutdown
+    asyncio.create_task(on_startup(bot, supabase, DB_TABLE))
+    dp.shutdown.register(lambda: asyncio.create_task(
+        on_shutdown(bot, supabase, DB_TABLE)
+    ))
     # Load dictionary for word validation
     print(f"[STARTUP] DICTIONARY size before load_dictionary(): {len(DICTIONARY)}")
     load_dictionary()
@@ -11058,6 +11113,12 @@ async def main():
     print("[OK] Round timer started (120s rounds with streak reset)")
 
     from supabase_db import supabase, DB_TABLE
+    
+    asyncio.create_task(on_startup(bot, supabase, DB_TABLE))
+    
+    dp.shutdown.register(lambda: asyncio.create_task(
+        on_shutdown(bot, supabase, DB_TABLE)
+    ))
     asyncio.create_task(start_scheduler(bot, supabase, DB_TABLE, CHECKMATE_HQ_GROUP_ID))
     await dp.start_polling(bot)
     # Start GameMaster announcements task (using imported CHECKMATE_HQ_GROUP_ID)
