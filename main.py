@@ -50,6 +50,8 @@ from aiogram.exceptions import TelegramBadRequest
 from sectors_system import SECTORS
 from server_lifecycle import on_startup, on_shutdown, check_maintenance_mode, maintenance_response
 from main_p5_patch import p5_router
+from main_p6_patch import p6_router
+  
 
 from server_lifecycle import (
       on_startup, on_shutdown, check_maintenance_mode,
@@ -461,6 +463,7 @@ dp  = Dispatcher()
 dp.include_router(p5_router)
 dp.include_router(initiation_router)
 dp.include_router(base_router)
+dp.include_router(p6_router)
 
 # ── Global Error Handler for Callback Timeout Errors ────────────────────
 @dp.errors
