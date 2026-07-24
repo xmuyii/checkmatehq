@@ -250,6 +250,32 @@ def get_resource_cap(xp_level: int, buildings: dict) -> int:
     return base_cap + st_bonus
 
 
+def clamp_resource_add(user: dict, res_type: str, amount: int) -> dict:
+    """
+    Add `amount` of a resource to the player's base, enforcing the
+    warehouse cap from get_resource_cap(). Mutates and returns `user`
+    in-memory — caller is responsible for save_user().
+
+    res_type: "food" or one of the base_resources.resources keys
+    (wood/bronze/iron/stone/relics/diamond/incubus).
+    """
+    xp_level  = user.get("level", 1)
+    buildings = user.get("buildings", {}) or {}
+    cap       = get_resource_cap(xp_level, buildings)
+
+    base_res = user.setdefault("base_resources", {})
+
+    if res_type == "food":
+        current = base_res.get("food", 0) or 0
+        base_res["food"] = min(cap, current + amount)
+    else:
+        resources = base_res.setdefault("resources", {})
+        current = resources.get(res_type, 0) or 0
+        resources[res_type] = min(cap, current + amount)
+
+    return user
+
+
 def get_training_speedup_pct(buildings: dict) -> int:
     """Percentage reduction in training time from Barracks."""
     br_level = buildings.get("barracks", 0)

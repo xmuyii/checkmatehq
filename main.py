@@ -8042,7 +8042,7 @@ async def cb_inv_open(callback: types.CallbackQuery):
             qty = item.get('qty', item.get('quantity', 1))
             qty_str = f" x{qty}" if qty > 1 else ""
             category = item.get('category', '')
-            cat_str = f" ({category})" if category else ""
+            cat_str = f" ({category.replace('_', ' ').title()})" if category else ""
             lines.append(f"{i}. {item_label}{qty_str}{cat_str}")
         text = "\n".join(lines)
     else:
@@ -11828,4 +11828,26 @@ async def main():
     print("Bot stopped.")
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    import time as _retry_time
+
+    MAX_BACKOFF_SECONDS = 60
+    backoff = 5
+    attempt = 0
+
+    while True:
+        attempt += 1
+        try:
+            asyncio.run(main())
+            # main() only returns on a clean shutdown (e.g. Ctrl+C reaching
+            # the signal handler) — treat that as intentional and stop.
+            print("[RETRY] main() returned normally — exiting.")
+            break
+        except KeyboardInterrupt:
+            print("[RETRY] KeyboardInterrupt — exiting.")
+            break
+        except Exception as e:
+            print(f"[RETRY] Attempt {attempt} crashed: {type(e).__name__}: {e}")
+            print(f"[RETRY] Restarting in {backoff}s...")
+            _retry_time.sleep(backoff)
+            backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
+            continue

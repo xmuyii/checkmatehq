@@ -1550,7 +1550,7 @@ def add_credits(user_id: str, amount: int) -> int:
     return new_bal
 
 
-def spend_credits(user_id: str, amount: int) -> tuple:
+def spend_credits(user_id: str, amount: int, reason: str = None) -> tuple:
     user = get_user(str(user_id))
     if not user:
         return False, 0
