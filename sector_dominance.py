@@ -154,24 +154,18 @@ def process_dominance_cycle(
     if old_ruler_id and tax_pool:
         old_ruler = save_user_fn(old_ruler_id, None)   # getter
         if old_ruler:
-            inv = old_ruler.get("inventory", {})
-            if not isinstance(inv, dict):
-                inv = {}
+            from build_system import clamp_resource_add
             for resource, amount in tax_pool.items():
-                if resource in inv:
-                    inv[resource]["qty"] = inv[resource].get("qty", 0) + amount
+                if resource == "bitcoin":
+                    old_ruler["bitcoin"] = old_ruler.get("bitcoin", 0) + amount
+                elif resource == "gold":
+                    old_ruler["gold"] = old_ruler.get("gold", 0) + amount
                 else:
-                    inv[resource] = {
-                        "qty":     amount,
-                        "display": resource.replace("_", " ").title(),
-                        "emoji":   "📦",
-                        "category": "basic",
-                    }
-            old_ruler["inventory"] = inv
+                    clamp_resource_add(old_ruler, resource, amount)
             old_ruler["pending_notification"] = (
                 f"👑 *Cycle ended — Sector {sector_id} tax collected!*\n"
                 + "\n".join(
-                    f"  {v.get('emoji','📦')} {k}: +{amt}"
+                    f"  📦 {k}: +{amt}"
                     for k, amt in tax_pool.items()
                 )
             )

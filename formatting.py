@@ -114,7 +114,7 @@ ITEM_EMOJIS = {
     "free_teleport":    "🌀",
     "fireball":         "🔥",
     "mousetrap":        "🪤",
-    "food_ration":      "🍖",
+    "food_ration":      "🥫",
     "war_horn":         "📯",
     "spy_kit":          "🔭",
     "repair_kit":       "🔧",
@@ -136,7 +136,7 @@ ITEM_DISPLAY_NAMES = {
     "free_teleport":    "Free Teleport",
     "fireball":         "Fireball",
     "mousetrap":        "Mousetrap",
-    "food_ration":      "Food Ration",
+    "food_ration":      "Rations",
     "war_horn":         "War Horn",
     "spy_kit":          "Spy Kit",
     "repair_kit":       "Repair Kit",
@@ -248,7 +248,7 @@ RESOURCE_EMOJIS = {
     "diamond": "💎",
     "relics":  "🏺",
     "silver":  "🥈",
-    "food":    "🍖",
+    "food":    "🥫",
 }
 
 def format_resources(resources: dict, food: int = 0, silver: int = 0) -> str:
@@ -260,7 +260,7 @@ def format_resources(resources: dict, food: int = 0, silver: int = 0) -> str:
         emoji = RESOURCE_EMOJIS.get(res, "📦")
         lines.append(f"  {emoji} {res.capitalize():<10} {amt:>6,}")
     if food:
-        lines.append(f"  🍖 Food      {food:>9,}")
+        lines.append(f"  🥫 Rations      {food:>9,}")
     if silver:
         lines.append(f"  🥈 Silver    {silver:>9,}")
     return "\n".join(lines)
@@ -412,7 +412,7 @@ def format_military_status(military: dict, food: int = 0, food_upkeep: float = 0
     lines.append(f"  ▸ Total Forces: *{total:,}*")
     if food_upkeep > 0:
         food_hours = int(food / food_upkeep) if food_upkeep > 0 else 0
-        lines.append(f"  🍖 Food Remaining: {food:,}  _{food_hours}h supply_")
+        lines.append(f"  🥫 Rations Remaining: {food:,}  _{food_hours}h supply_")
     return "\n".join(lines)
 
 def format_training_queue(queue: list) -> str:

@@ -140,7 +140,7 @@ def equip_suit(user: dict, suit_key: str) -> Tuple[bool, str, dict]:
         return False, f"❌ {suit_key} is not a protective suit.", user
 
     # Check inventory
-    inv = user.get("inventory", {})
+    inv = user.get("inventory", []) or []
     if suit_key not in inv or inv[suit_key].get("qty", 0) < 1:
         return False, (
             f"❌ You don't have a *{get_display_name(suit_key)}* in your backpack.\n"
@@ -321,31 +321,30 @@ def apply_hazard_penalty(
     # ── Satoshi conversion (rug pull) ─────────────────────────────────────
     satoshi_conv_pct = penalty.get("satoshi_convert_pct", 0)
     if satoshi_conv_pct > 0:
-        inv = user.get("inventory", {})
-        satoshi_held = inv.get("satoshi", {}).get("qty", 0)
+        from supabase_db import get_inventory_item, add_inventory_item, remove_inventory_item
+        satoshi_row  = get_inventory_item(user, "satoshi")
+        satoshi_held = int(satoshi_row.get("qty", satoshi_row.get("quantity", 0)) or 0) if satoshi_row else 0
         convert_amt  = int(satoshi_held * satoshi_conv_pct)
         if convert_amt > 0:
             # Deduct satoshi
-            inv["satoshi"]["qty"] = max(0, satoshi_held - convert_amt)
+            for _ in range(convert_amt):
+                user = remove_inventory_item(user, "satoshi")
             # Add crypto_dust
             dust_gained = convert_amt // 10   # 10 satoshi → 1 dust
-            if "crypto_dust" in inv:
-                inv["crypto_dust"]["qty"] = inv["crypto_dust"].get("qty", 0) + dust_gained
-            else:
-                inv["crypto_dust"] = {"qty": dust_gained, "display": "Crypto Dust",
-                                       "emoji": "✨", "category": "crypto"}
-            user["inventory"] = inv
+            if dust_gained > 0:
+                user = add_inventory_item(user, "crypto_dust", dust_gained, "Crypto Dust", category="crypto")
             messages.append(f"⚡₿ {convert_amt} Satoshi converted to {dust_gained} Crypto Dust")
 
     # ── Satoshi flat drain (scammer) ──────────────────────────────────────
     satoshi_drain = penalty.get("satoshi_drain_flat", 0)
     if satoshi_drain > 0:
-        inv = user.get("inventory", {})
-        satoshi_held = inv.get("satoshi", {}).get("qty", 0)
+        from supabase_db import get_inventory_item, remove_inventory_item
+        satoshi_row  = get_inventory_item(user, "satoshi")
+        satoshi_held = int(satoshi_row.get("qty", satoshi_row.get("quantity", 0)) or 0) if satoshi_row else 0
         drained = min(satoshi_held, satoshi_drain)
         if drained > 0:
-            inv["satoshi"]["qty"] = satoshi_held - drained
-            user["inventory"] = inv
+            for _ in range(drained):
+                user = remove_inventory_item(user, "satoshi")
             messages.append(f"🦹 Scammer stole {drained} Satoshi from your wallet")
 
     # Update occupancy
@@ -458,16 +457,15 @@ def alliance_stock_suit(
         )
 
     # Check leader inventory
-    inv = leader_user.get("inventory", {})
-    have = inv.get(suit_key, {}).get("qty", 0)
+    from supabase_db import get_inventory_item, remove_inventory_item
+    leader_row = get_inventory_item(leader_user, suit_key)
+    have = int(leader_row.get("qty", leader_row.get("quantity", 0)) or 0) if leader_row else 0
     if have < quantity:
         return False, f"❌ You only have {have} × {get_display_name(suit_key)}. Need {quantity}."
 
     # Deduct from leader inventory
-    inv[suit_key]["qty"] -= quantity
-    if inv[suit_key]["qty"] <= 0:
-        del inv[suit_key]
-    leader_user["inventory"] = inv
+    for _ in range(quantity):
+        leader_user = remove_inventory_item(leader_user, suit_key)
 
     # Add to alliance shop
     alliance = alliances.get(alliance_id, {})
@@ -524,32 +522,24 @@ def alliance_buy_suit(
     stock     = shop[suit_key]
     price     = stock.get("price_gold", 999)
 
-    # Check gold
-    inv        = buyer_user.get("inventory", {})
-    gold_held  = inv.get("gold", {}).get("qty", 0)
+    # Check gold — gold is a top-level field, never an inventory item
+    gold_held = buyer_user.get("gold", 0) or 0
     if gold_held < price:
         return False, (
             f"❌ Not enough gold. Need {price} 🪙, have {gold_held} 🪙."
         ), buyer_user
 
     # Deduct gold
-    inv["gold"]["qty"] = gold_held - price
-    if inv["gold"]["qty"] <= 0:
-        del inv["gold"]
+    buyer_user["gold"] = gold_held - price
 
     # Add suit to buyer inventory
+    from supabase_db import add_inventory_item
     res = RESOURCES.get(suit_key, {})
-    if suit_key in inv:
-        inv[suit_key]["qty"] += 1
-    else:
-        inv[suit_key] = {
-            "qty":      1,
-            "display":  get_display_name(suit_key),
-            "emoji":    get_emoji(suit_key),
-            "category": "protective_item",
-        }
-
-    buyer_user["inventory"] = inv
+    buyer_user = add_inventory_item(
+        buyer_user, suit_key, 1,
+        res.get("display_name", get_display_name(suit_key)),
+        category=res.get("category", "protective"),
+    )
 
     # Deduct from shop stock
     shop[suit_key]["qty"] -= 1
@@ -613,8 +603,13 @@ def format_alliance_shop_suits(alliance: dict, buyer_user: dict) -> str:
 
 def format_suit_inventory(user: dict) -> str:
     """List all suits a player currently owns in their backpack."""
-    inv = user.get("inventory", {})
-    suit_items = [(k, inv[k]) for k in SUIT_KEYS if k in inv and inv[k].get("qty", 0) > 0]
+    from supabase_db import get_inventory_item
+    suit_items = []
+    for k in SUIT_KEYS:
+        row = get_inventory_item(user, k)
+        qty = int(row.get("qty", row.get("quantity", 0)) or 0) if row else 0
+        if qty > 0:
+            suit_items.append((k, row))
 
     if not suit_items:
         return "🧪 No protective suits in backpack."
@@ -668,8 +663,9 @@ def can_enter_node(user: dict, sector_id: int, node_key: str) -> Tuple[bool, str
         return True, "OK"
 
     # Not protected — check if they own one
-    inv        = user.get("inventory", {})
-    own_qty    = inv.get(required_suit, {}).get("qty", 0)
+    from supabase_db import get_inventory_item
+    row        = get_inventory_item(user, required_suit)
+    own_qty    = int(row.get("qty", row.get("quantity", 0)) or 0) if row else 0
     suit_name  = get_display_name(required_suit)
 
     if own_qty > 0:

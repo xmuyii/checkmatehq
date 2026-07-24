@@ -1,182 +1,354 @@
 # -*- coding: utf-8 -*-
 """
-prestige_system.py — Prestige & Level Reset Progression
-========================================================
-Players reaching level 1000+ can prestige to reset level but keep bonuses.
+prestige_system.py — Prestige System
+======================================
+Players who reach Level 100 can Prestige — reset to Level 1 with a
+permanent power multiplier that stacks across prestige tiers.
+
+PRESTIGE TIERS:
+  Tier 0 — No prestige          ×1.00 (base)
+  Tier 1 — Iron Commander       ×1.10
+  Tier 2 — Bronze Commander     ×1.25
+  Tier 3 — Steel Commander      ×1.50
+  Tier 4 — Gold Commander       ×2.00
+  Tier 5 — Diamond Commander    ×3.00 (maximum)
+
+WHAT RESETS:
+  Level, XP, building levels, research, military (troops),
+  training queue, building queue, sector nodes occupied,
+  current_node, march_queue
+
+WHAT IS KEPT:
+  Gold, Bitcoin, Credits, Relics (inventory items),
+  Alliance membership and AP, Bounty Hunter career + XP,
+  Prestige tier and multiplier, Base name,
+  Suit inventory, Discovered recipes, Sector dominance scores
+
+PRESTIGE REWARDS (on top of multiplier):
+  Tier 1 → 500 gold + "Iron Commander" title
+  Tier 2 → 1000 gold + unique avatar badge
+  Tier 3 → 2000 gold + 3 days shield
+  Tier 4 → 5000 gold + permanent +1 teleport charge daily
+  Tier 5 → 10000 gold + Legendary recipe tome unlocked
+
+Called from main.py via:
+  from prestige_system import can_prestige, execute_prestige,
+      get_prestige_tier, format_prestige_status, PRESTIGE_BONUSES
 """
 
-from typing import Dict, Tuple
+from datetime import datetime, timedelta
+from typing import Tuple
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  PRESTIGE TIERS
+#  CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════
+
+PRESTIGE_REQUIRED_LEVEL = 100
 
 PRESTIGE_BONUSES = {
-    0: {  # No prestige
-        "name": "Commoner",
-        "xp_multiplier": 1.0,
-        "silver_multiplier": 1.0,
-        "resource_multiplier": 1.0,
-        "troop_training_speed": 1.0,
-        "description": "No prestige yet. Reach level 1000 to prestige.",
+    0: {
+        "name":        "Commander",
+        "emoji":       "🎖️",
+        "multiplier":  1.00,
+        "gold_reward": 0,
+        "description": "Base state. No prestige yet.",
     },
     1: {
-        "name": "🌟 Initiate",
-        "xp_multiplier": 1.1,
-        "silver_multiplier": 1.1,
-        "resource_multiplier": 1.05,
-        "troop_training_speed": 1.05,
-        "description": "First prestige. Unlock beginning bonuses.",
+        "name":        "Iron Commander",
+        "emoji":       "⚙️",
+        "multiplier":  1.10,
+        "gold_reward": 500,
+        "description": "+10% permanent power. Iron will forged through fire.",
+        "special":     "iron_title",
     },
     2: {
-        "name": "⭐ Ascended",
-        "xp_multiplier": 1.25,
-        "silver_multiplier": 1.2,
-        "resource_multiplier": 1.10,
-        "troop_training_speed": 1.15,
-        "description": "Second prestige. Power consolidates.",
+        "name":        "Bronze Commander",
+        "emoji":       "🥉",
+        "multiplier":  1.25,
+        "gold_reward": 1000,
+        "description": "+25% permanent power. The battlefield remembers you.",
+        "special":     "bronze_badge",
     },
     3: {
-        "name": "👑 Legendary",
-        "xp_multiplier": 1.5,
-        "silver_multiplier": 1.4,
-        "resource_multiplier": 1.20,
-        "troop_training_speed": 1.25,
-        "description": "Third prestige. You are unstoppable.",
+        "name":        "Steel Commander",
+        "emoji":       "⚔️",
+        "multiplier":  1.50,
+        "gold_reward": 2000,
+        "description": "+50% permanent power. A 3-day shield granted.",
+        "special":     "shield_72h",
     },
     4: {
-        "name": "🔱 Mythic",
-        "xp_multiplier": 2.0,
-        "silver_multiplier": 1.75,
-        "resource_multiplier": 1.50,
-        "troop_training_speed": 1.5,
-        "description": "Fourth prestige. Reality bends to your will.",
+        "name":        "Gold Commander",
+        "emoji":       "🥇",
+        "multiplier":  2.00,
+        "gold_reward": 5000,
+        "description": "×2 permanent power. +1 bonus teleport charge per day.",
+        "special":     "bonus_daily_teleport",
     },
     5: {
-        "name": "🌌 Cosmic",
-        "xp_multiplier": 3.0,
-        "silver_multiplier": 2.5,
-        "resource_multiplier": 2.0,
-        "troop_training_speed": 2.0,
-        "description": "Fifth prestige. You transcend the game.",
+        "name":        "Diamond Commander",
+        "emoji":       "💎",
+        "multiplier":  3.00,
+        "gold_reward": 10000,
+        "description": "×3 permanent power. Maximum prestige. Legendary recipe tome unlocked.",
+        "special":     "legendary_recipe_tome",
     },
 }
 
+MAX_PRESTIGE = 5
+
+# Fields that get reset on prestige
+RESET_FIELDS = {
+    "level":           1,
+    "xp":              0,
+    "buildings":       {},
+    "building_queue":  {},
+    "researches":      {},
+    "research_queue":  {},
+    "research_power":  0,
+    "military":        {},
+    "training_queue":  [],
+    "march_queue":     [],
+    "current_node":    None,
+    "traps":           {},
+    "base_hq_level":   1,
+    "base_level":      1,
+    "energy":          100,
+    "skill_points_spent": {"volt": 0, "incendiary": 0, "recon": 0, "bulwark": 0},
+    "dominance_scores": {},
+    "dominance_total":  0,
+    "banishments":      {},
+}
+
+# Fields that are KEPT on prestige (everything not in RESET_FIELDS)
+KEPT_FIELDS_NOTE = """
+Kept: gold, bitcoin, credits, inventory (suits/items/recipes),
+      base_name, alliance_id, alliance_role, alliance_points,
+      is_bounty_hunter, hunter_xp, hunter_tier, hunter_kills,
+      hunter_earnings, prestige (incremented), prestige_multiplier,
+      discovered_recipes, notification_prefs, notifications_seen,
+      home_sector, teleport_charges, last_active, username
+"""
+
+
 # ═══════════════════════════════════════════════════════════════════════════
-#  PRESTIGE FUNCTIONS
+#  CORE FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════
 
 def can_prestige(level: int, current_prestige: int) -> Tuple[bool, str]:
-    """Check if player can prestige."""
-    if level < 1000:
-        return False, f"You need level 1000+. Currently: {level}"
-    
-    if current_prestige >= 5:
-        return False, "You have reached max prestige (5)."
-    
+    """
+    Check if a player can prestige.
+    Returns (can: bool, reason: str)
+    """
+    if level < PRESTIGE_REQUIRED_LEVEL:
+        return False, (
+            f"❌ Prestige requires Level {PRESTIGE_REQUIRED_LEVEL}.\n"
+            f"You are Level {level}. "
+            f"({PRESTIGE_REQUIRED_LEVEL - level} levels remaining)"
+        )
+
+    if current_prestige >= MAX_PRESTIGE:
+        return False, (
+            f"✅ You are already at maximum prestige "
+            f"({PRESTIGE_BONUSES[MAX_PRESTIGE]['emoji']} "
+            f"{PRESTIGE_BONUSES[MAX_PRESTIGE]['name']}).\n"
+            f"There is nowhere higher to climb."
+        )
+
     return True, "OK"
 
 
-def execute_prestige(user: Dict) -> Dict:
-    """Reset player to level 1, increase prestige tier, award bonuses."""
-    current_level = user.get("level", 1)
-    current_prestige = user.get("prestige", 0)
-    
-    can_do, error = can_prestige(current_level, current_prestige)
-    if not can_do:
-        return {"success": False, "message": error}
-    
-    # Calculate rewards
-    new_prestige = current_prestige + 1
-    bonus_xp = 50000 * (new_prestige ** 1.5)  # Scaling bonus XP
-    bonus_silver = 10000 * new_prestige  # Scaling bonus silver
-    bonus_troops = {
-        "pawn": 500 * new_prestige,
-        "knight": 250 * new_prestige,
+def get_prestige_tier(user: dict) -> int:
+    """Get current prestige tier (0-5)."""
+    return min(MAX_PRESTIGE, max(0, int(user.get("prestige", 0) or 0)))
+
+
+def get_prestige_multiplier(user: dict) -> float:
+    """Get the player's current power multiplier from prestige."""
+    tier = get_prestige_tier(user)
+    return PRESTIGE_BONUSES.get(tier, PRESTIGE_BONUSES[0])["multiplier"]
+
+
+def execute_prestige(user: dict) -> dict:
+    """
+    Execute a prestige. Increments tier, resets fields, applies rewards.
+    Returns updated user dict.
+    Call save_user() after this.
+    """
+    current_tier = get_prestige_tier(user)
+    new_tier     = min(MAX_PRESTIGE, current_tier + 1)
+    bonus        = PRESTIGE_BONUSES[new_tier]
+
+    # Apply all resets
+    for field, default in RESET_FIELDS.items():
+        user[field] = default
+
+    # Increment prestige
+    user["prestige"]             = new_tier
+    user["prestige_multiplier"]  = bonus["multiplier"]
+    user["prestige_title"]       = bonus["name"]
+    user["prestige_emoji"]       = bonus["emoji"]
+    user["prestige_date"]        = datetime.utcnow().isoformat()
+
+    # Apply gold reward
+   # Apply gold reward — gold is a top-level field, never an inventory item
+    gold_reward   = bonus.get("gold_reward", 0)
+    user["gold"]  = (user.get("gold", 0) or 0) + gold_reward
+
+    # Apply special rewards
+    special = bonus.get("special", "")
+
+    if special == "shield_72h":
+        expires = (datetime.utcnow() + timedelta(hours=72)).isoformat()
+        user["base_shielded"]    = True
+        user["shield_expires_at"] = expires
+
+    elif special == "bonus_daily_teleport":
+        user["prestige_bonus_teleport"] = True   # Scheduler checks this flag
+
+    elif special == "legendary_recipe_tome":
+        discovered = user.get("discovered_recipes", []) or []
+        for recipe in [
+            "craft_commanders_sigil",
+            "craft_void_lattice_trap",
+            "craft_ancient_banner",
+        ]:
+            if recipe not in discovered:
+                discovered.append(recipe)
+        user["discovered_recipes"] = discovered
+
+    # Reset base resources to starter amounts
+    user["base_resources"] = {
+        "resources": {
+            "wood":   100,
+            "bronze": 50,
+            "iron":   20,
+            "stone":  10,
+            "relics": 0,
+        },
+        "food":           50,
+        "current_streak": 0,
     }
-    
-    # Reset level but keep other data
-    user["level"] = 1
-    user["prestige"] = new_prestige
-    user["xp"] = int(bonus_xp)
-    user["silver"] = user.get("silver", 0) + bonus_silver
-    
-    # Add bonus troops
-    military = user.get("military", {})
-    military["pawn"] = military.get("pawn", 0) + bonus_troops["pawn"]
-    military["knight"] = military.get("knight", 0) + bonus_troops["knight"]
-    user["military"] = military
-    
-    return {
-        "success": True,
-        "new_prestige": new_prestige,
-        "bonus_xp": int(bonus_xp),
-        "bonus_silver": bonus_silver,
-        "bonus_troops": bonus_troops,
-    }
+
+    # Add prestige achievement to history
+    history = user.get("prestige_history", []) or []
+    history.append({
+        "tier":     new_tier,
+        "date":     datetime.utcnow().isoformat(),
+        "gold_reward": gold_reward,
+    })
+    user["prestige_history"] = history
+
+    return user
 
 
-def get_prestige_tier(prestige_level: int) -> Dict:
-    """Get bonuses for prestige tier."""
-    return PRESTIGE_BONUSES.get(prestige_level, PRESTIGE_BONUSES[0])
+# ═══════════════════════════════════════════════════════════════════════════
+#  DISPLAY
+# ═══════════════════════════════════════════════════════════════════════════
 
+def format_prestige_status(user: dict) -> str:
+    """Full prestige status page."""
+    tier       = get_prestige_tier(user)
+    bonus      = PRESTIGE_BONUSES[tier]
+    level      = user.get("level", 1)
+    mult       = bonus["multiplier"]
+    next_tier  = tier + 1
 
-def format_prestige_status(level: int, prestige: int) -> str:
-    """Format prestige display in profile."""
-    tier = get_prestige_tier(prestige)
-    
-    message = f"👑 PRESTIGE TIER: {tier['name']}\n"
-    message += f"Current Level: {level}/1000\n"
-    message += f"Progress: {(level/1000)*100:.1f}%\n\n"
-    
-    if level >= 1000:
-        message += "✅ READY TO PRESTIGE!\n"
-        message += "Use !prestige to reset level and gain bonuses.\n\n"
+    lines = [
+        f"👑 *PRESTIGE STATUS*",
+        f"━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"{bonus['emoji']} *{bonus['name']}*",
+        f"Power Multiplier: ×{mult}",
+        f"Current Level: {level} / {PRESTIGE_REQUIRED_LEVEL}",
+        f"",
+    ]
+
+    # Progress to next prestige
+    if tier < MAX_PRESTIGE:
+        next_bonus = PRESTIGE_BONUSES[next_tier]
+        levels_left = max(0, PRESTIGE_REQUIRED_LEVEL - level)
+        pct  = min(100, int(level / PRESTIGE_REQUIRED_LEVEL * 100))
+        filled = pct // 5
+        bar  = "█" * filled + "░" * (20 - filled)
+        lines += [
+            f"*Next: {next_bonus['emoji']} {next_bonus['name']}* (Tier {next_tier})",
+            f"[{bar}] {level}/{PRESTIGE_REQUIRED_LEVEL}",
+            f"Levels remaining: {levels_left}",
+            f"",
+            f"*Prestige {next_tier} rewards:*",
+            f"  ×{next_bonus['multiplier']} permanent power multiplier",
+            f"  +{next_bonus['gold_reward']:,} 🪙 gold",
+            f"  {next_bonus['description']}",
+        ]
+        if levels_left == 0:
+            lines += ["", "✅ *Ready to Prestige!* Tap below."]
     else:
-        levels_left = 1000 - level
-        message += f"Levels until prestige: {levels_left}\n\n"
-    
-    message += f"*Prestige Bonuses (Tier {prestige}):*\n"
-    message += f"  XP: ×{tier['xp_multiplier']}\n"
-    message += f"  Silver: ×{tier['silver_multiplier']}\n"
-    message += f"  Resources: ×{tier['resource_multiplier']}\n"
-    message += f"  Training Speed: ×{tier['troop_training_speed']}\n"
-    
-    return message
+        lines.append("💎 *Maximum prestige achieved.*")
+
+    lines.append("")
+    lines.append("*All Prestige Tiers:*")
+    for t, b in PRESTIGE_BONUSES.items():
+        if t == 0:
+            continue
+        marker = "✅" if tier >= t else ("⬜" if tier < t else "🔓")
+        lines.append(f"  {marker} {b['emoji']} {b['name']} — ×{b['multiplier']}")
+
+    lines.append(f"\n━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append(
+        "*What resets:* Level, XP, Buildings, Research, Troops\n"
+        "*What stays:* Gold, Bitcoin, Items, Alliance, Hunter career, Inventory"
+    )
+    return "\n".join(lines)
 
 
-def format_prestige_confirmation(current_prestige: int, bonus_xp: int, bonus_silver: int) -> str:
-    """Format prestige confirmation message."""
-    next_tier = get_prestige_tier(current_prestige + 1)
-    
-    message = f"""🌟 PRESTIGE CONFIRMATION
+def format_prestige_confirm(user: dict) -> str:
+    """Confirmation screen before prestige."""
+    tier     = get_prestige_tier(user)
+    new_tier = tier + 1
+    bonus    = PRESTIGE_BONUSES[new_tier]
+    level    = user.get("level", 1)
 
-Your level has been reset to 1.
-
-*New Prestige Tier:* {next_tier['name']}
-{next_tier['description']}
-
-*Rewards:*
-  ✅ +{bonus_xp:,} XP
-  ✅ +{bonus_silver:,} Silver
-  ✅ +Bonus Troops
-  ✅ All permanent bonuses carry over
-
-*New Multipliers:*
-  XP: ×{next_tier['xp_multiplier']}
-  Silver: ×{next_tier['silver_multiplier']}
-  Resources: ×{next_tier['resource_multiplier']}
-  Training: ×{next_tier['troop_training_speed']}
-
-Your journey continues... 🔱
-"""
-    return message
+    return (
+        f"⚠️ *PRESTIGE CONFIRMATION*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"You are about to Prestige to:\n"
+        f"{bonus['emoji']} *{bonus['name']}* (Tier {new_tier})\n\n"
+        f"*You will receive:*\n"
+        f"  ×{bonus['multiplier']} permanent power multiplier\n"
+        f"  +{bonus['gold_reward']:,} 🪙 gold\n"
+        f"  {bonus['description']}\n\n"
+        f"*You will lose:*\n"
+        f"  All levels, XP, buildings, research\n"
+        f"  All troops and training queues\n"
+        f"  All sector occupancy and node positions\n\n"
+        f"*You keep:*\n"
+        f"  Gold, Bitcoin, items, alliance, hunter career\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"This action *cannot be undone.*"
+    )
 
 
-def get_prestige_multiplier(user: Dict, multiplier_type: str) -> float:
-    """Get active multiplier for prestige tier."""
-    prestige = user.get("prestige", 0)
-    tier = get_prestige_tier(prestige)
-    
-    return tier.get(f"{multiplier_type}_multiplier", 1.0)
+# ═══════════════════════════════════════════════════════════════════════════
+#  KEYBOARDS
+# ═══════════════════════════════════════════════════════════════════════════
 
+def kb_prestige_status(user: dict) -> InlineKeyboardMarkup:
+    tier  = get_prestige_tier(user)
+    level = user.get("level", 1)
+    can, _ = can_prestige(level, tier)
+    buttons = []
+    if can:
+        buttons.append([InlineKeyboardButton(
+            text="👑 PRESTIGE NOW",
+            callback_data="prestige:confirm"
+        )])
+    buttons.append([InlineKeyboardButton("⬅️ Profile", callback_data="menu_profile")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def kb_prestige_confirm() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("✅ YES — Prestige Now", callback_data="prestige:execute")],
+        [InlineKeyboardButton("✗ Cancel",             callback_data="prestige:status")],
+    ])

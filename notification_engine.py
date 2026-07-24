@@ -138,7 +138,7 @@ async def send_notification(
     notification_type: str,
     message: str,
     supabase=None,
-    DB_TABLE: str = "players",
+    DB_TABLE: str = "users",
     save_notification_seen: bool = True,
 ) -> bool:
     """
@@ -252,7 +252,7 @@ async def notify_player(
     notification_type: str,
     message: str,
     supabase=None,
-    DB_TABLE: str = "players",
+    DB_TABLE: str = "users",
 ) -> bool:
     """Convenience wrapper — single player notification."""
     return await send_notification(bot, player_id, notification_type, message, supabase, DB_TABLE)
@@ -261,14 +261,14 @@ async def notify_player(
 # ── Specific notification builders ───────────────────────────────────────
 
 async def notify_build_complete(bot, player_id: str, building_name: str, level: int,
-                                 supabase=None, DB_TABLE="players"):
+                                 supabase=None, DB_TABLE="users"):
     msg = (f"*{building_name}* has reached Level {level}.\n"
            f"Your base grows stronger. Check My Base for full details.")
     return await notify_player(bot, player_id, "build_complete", msg, supabase, DB_TABLE)
 
 
 async def notify_research_complete(bot, player_id: str, research_name: str, unlocks: list,
-                                    supabase=None, DB_TABLE="players"):
+                                    supabase=None, DB_TABLE="users"):
     unlocks_str = "\n".join(f"  • {u.replace('_',' ').title()}" for u in unlocks[:5])
     msg = (f"*{research_name}* complete.\n"
            f"New capabilities unlocked:\n{unlocks_str}")
@@ -276,7 +276,7 @@ async def notify_research_complete(bot, player_id: str, research_name: str, unlo
 
 
 async def notify_training_complete(bot, player_id: str, unit_name: str, count: int,
-                                    supabase=None, DB_TABLE="players"):
+                                    supabase=None, DB_TABLE="users"):
     msg = (f"*{count}× {unit_name}* ready for deployment.\n"
            f"Your army grows. Open Military to deploy them.")
     return await notify_player(bot, player_id, "training_complete", msg, supabase, DB_TABLE)
@@ -284,7 +284,7 @@ async def notify_training_complete(bot, player_id: str, unit_name: str, count: i
 
 async def notify_incoming_march(bot, defender_id: str, attacker_name: str,
                                  node_name: str, arrival_mins: int,
-                                 supabase=None, DB_TABLE="players"):
+                                 supabase=None, DB_TABLE="users"):
     msg = (f"@{attacker_name} is marching on *{node_name}*.\n"
            f"Arrival in: *{arrival_mins} minutes*\n"
            f"Collect your resources and prepare — or teleport out.")
@@ -293,7 +293,7 @@ async def notify_incoming_march(bot, defender_id: str, attacker_name: str,
 
 async def notify_battle_result(bot, player_id: str, attacker_name: str, defender_name: str,
                                 won: bool, node_name: str, looted: dict,
-                                supabase=None, DB_TABLE="players"):
+                                supabase=None, DB_TABLE="users"):
     if won:
         loot_str = " ".join(f"+{v} {k}" for k, v in looted.items()) if looted else "no resources"
         msg = (f"Victory at *{node_name}*.\n"
@@ -306,7 +306,7 @@ async def notify_battle_result(bot, player_id: str, attacker_name: str, defender
 
 async def notify_hazard_warning(bot, player_id: str, sector_name: str,
                                  hazard_type: str, minutes: int,
-                                 supabase=None, DB_TABLE="players"):
+                                 supabase=None, DB_TABLE="users"):
     msg = (f"*{sector_name}* entering hazard phase in *{minutes} minutes*.\n"
            f"Hazard: {hazard_type.replace('_',' ').title()}\n"
            f"Equip protective suit or teleport before phase begins.")
@@ -314,7 +314,7 @@ async def notify_hazard_warning(bot, player_id: str, sector_name: str,
 
 
 async def notify_suit_expiring(bot, player_id: str, suit_name: str, seconds: int,
-                                supabase=None, DB_TABLE="players"):
+                                supabase=None, DB_TABLE="users"):
     mins = seconds // 60
     secs = seconds % 60
     msg = (f"*{suit_name}* expires in *{mins}m {secs}s*.\n"
@@ -323,7 +323,7 @@ async def notify_suit_expiring(bot, player_id: str, suit_name: str, seconds: int
 
 
 async def notify_dominance_ruler(bot, player_id: str, sector_name: str, score: int,
-                                  supabase=None, DB_TABLE="players"):
+                                  supabase=None, DB_TABLE="users"):
     msg = (f"You are now the *Ruler of {sector_name}*.\n"
            f"Cycle Score: {score}\n"
            f"You now earn 10% tax on all resources collected in this sector.\n"
@@ -332,7 +332,7 @@ async def notify_dominance_ruler(bot, player_id: str, sector_name: str, score: i
 
 
 async def notify_daily_rewards_ready(bot, player_id: str, teleport_count: int,
-                                      supabase=None, DB_TABLE="players"):
+                                      supabase=None, DB_TABLE="users"):
     msg = (f"*{teleport_count} free teleport charges* are ready to claim.\n"
            f"Daily login bonus also available.\n"
            f"Unclaimed charges expire at midnight UTC.")
@@ -341,7 +341,7 @@ async def notify_daily_rewards_ready(bot, player_id: str, teleport_count: int,
 
 async def notify_alliance_mission_available(bot, player_id: str, alliance_name: str,
                                              mission_count: int,
-                                             supabase=None, DB_TABLE="players"):
+                                             supabase=None, DB_TABLE="users"):
     msg = (f"*{alliance_name}* has {mission_count} active mission(s) ready.\n"
            f"Complete them to earn Alliance Points for your alliance.\n"
            f"Open Alliance → Missions to see your assignments.")
@@ -350,7 +350,7 @@ async def notify_alliance_mission_available(bot, player_id: str, alliance_name: 
 
 async def notify_priority_mission(bot, player_id: str, mission_name: str,
                                    reward_summary: str, time_limit_hours: int,
-                                   supabase=None, DB_TABLE="players"):
+                                   supabase=None, DB_TABLE="users"):
     msg = (f"*PRIORITY ORDER: {mission_name}*\n"
            f"Time limit: {time_limit_hours}h\n"
            f"Reward: {reward_summary}\n"
@@ -358,7 +358,7 @@ async def notify_priority_mission(bot, player_id: str, mission_name: str,
     return await notify_player(bot, player_id, "priority_mission", msg, supabase, DB_TABLE)
 
 
-async def notify_server_online(bot, player_id: str, supabase=None, DB_TABLE="players"):
+async def notify_server_online(bot, player_id: str, supabase=None, DB_TABLE="users"):
     msg = get_gamemaster_line("server_online")
     return await notify_player(bot, player_id, "server_online", msg, supabase, DB_TABLE)
 

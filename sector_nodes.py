@@ -1311,24 +1311,29 @@ def _distribute_predator_loot(
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _add_to_inventory(user: dict, resource_key: str, amount) -> dict:
-    """Add resources to player's stacked inventory."""
-    if "inventory" not in user or not isinstance(user.get("inventory"), dict):
-        user["inventory"] = {}
+    """
+    Credit collected node resources to the correct place based on type.
+    IMPORTANT: this must NEVER write to user["inventory"] — that's a
+    separate list-of-item-dicts schema for backpack items (suits, crates,
+    speedups). An earlier version of this function forced user["inventory"]
+    into a dict on every call, silently wiping the player's real backpack
+    items each time any resource was collected from a sector node.
+    """
+    amount = int(amount)
 
-    res = RESOURCES.get(resource_key, {})
-    inv = user["inventory"]
-
-    if resource_key in inv:
-        inv[resource_key]["qty"] = inv[resource_key].get("qty", 0) + amount
+    if resource_key == "bitcoin":
+        # Top-level field, not part of base_resources.resources
+        user["bitcoin"] = user.get("bitcoin", 0) + amount
+    elif resource_key == "satoshi":
+        # No existing schema field for this yet — flagged rather than
+        # silently misfiling it. Add a real field/decision before this
+        # node type is reachable in production.
+        print(f"[WARN] _add_to_inventory: 'satoshi' has no destination field yet — {amount} not credited.")
     else:
-        inv[resource_key] = {
-            "qty": amount,
-            "display": res.get("display_name", resource_key.replace("_", " ").title()),
-            "emoji": res.get("emoji", "📦"),
-            "category": res.get("category", "misc"),
-        }
+        # wood / bronze / iron / stone / relics — base resources, warehouse-capped
+        from build_system import clamp_resource_add
+        clamp_resource_add(user, resource_key, amount)
 
-    user["inventory"] = inv
     return user
 
 

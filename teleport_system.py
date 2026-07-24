@@ -114,7 +114,7 @@ def get_daily_claim_status(user: dict) -> dict:
     }
 
 
-def claim_daily_teleports(user: dict) -> Tuple[bool, str, dict]:
+#def claim_daily_teleports(user: dict) -> Tuple[bool, str, dict]:
     """
     Claim today's free teleport charges.
     Must be called explicitly — charges do not auto-grant.
@@ -122,32 +122,33 @@ def claim_daily_teleports(user: dict) -> Tuple[bool, str, dict]:
 
     Returns (success, message, updated_user)
     """
-    status = get_daily_claim_status(user)
+  #  status = get_daily_claim_status(user)
 
-    if not status["can_claim"]:
-        resets = status["resets_in"]
-        charges = get_teleport_charges(user)
-        return False, (
-            f"✅ Already claimed today's teleports.\n"
-            f"You have *{charges}* charge(s) remaining.\n"
-            f"Next claim available in: *{resets}*"
-        ), user
+#    if not status["can_claim"]:
+ #       resets = status["resets_in"]
+  #      charges = get_teleport_charges(user)
+   #     return False, (
+    #        f"✅ Already claimed today's teleports.\n"
+     #       f"You have *{charges}* charge(s) remaining.\n"
+      #      f"Next claim available in: *{resets}*"
+       # ), user
 
     # Grant charges
-    now       = datetime.utcnow()
-    today_str = now.strftime("%Y-%m-%d")
+#    now       = datetime.utcnow()
+ #   today_str = now.strftime("%Y-%m-%d")
+#
+ #   current   = user.get("teleport_
+ # charges", 0)
+  #  user["teleport_charges"]             = current + DAILY_FREE_TELEPORTS
+   # user["teleport_daily_claimed_date"]  = today_str
+    #user["teleport_last_claim_ts"]       = now.isoformat()
 
-    current   = user.get("teleport_charges", 0)
-    user["teleport_charges"]             = current + DAILY_FREE_TELEPORTS
-    user["teleport_daily_claimed_date"]  = today_str
-    user["teleport_last_claim_ts"]       = now.isoformat()
-
-    return True, (
-        f"🌀 *Daily teleports claimed!*\n"
-        f"+{DAILY_FREE_TELEPORTS} teleport charges added.\n"
-        f"Total charges: *{current + DAILY_FREE_TELEPORTS}*\n"
-        f"Expires: midnight UTC tonight (use them or lose them tomorrow)"
-    ), user
+#    return True, (
+ #       f"🌀 *Daily teleports claimed!*\n"
+  #      f"+{DAILY_FREE_TELEPORTS} teleport charges added.\n"
+   #     f"Total charges: *{current + DAILY_FREE_TELEPORTS}*\n"
+    #    f"Expires: midnight UTC tonight (use them or lose them tomorrow)"
+   # ), user
 
 
 def purchase_teleport_charges(
@@ -163,8 +164,7 @@ def purchase_teleport_charges(
         return False, "❌ Can purchase 1–20 charges at a time.", user
 
     total_cost = quantity * STORE_COST_PER_CHARGE
-    inv        = user.get("inventory", {})
-    gold_held  = inv.get("gold", {}).get("qty", 0)
+    gold_held  = user.get("gold", 0) or 0
 
     if gold_held < total_cost:
         return False, (
@@ -174,10 +174,7 @@ def purchase_teleport_charges(
         ), user
 
     # Deduct gold
-    inv["gold"]["qty"] = gold_held - total_cost
-    if inv["gold"]["qty"] <= 0:
-        del inv["gold"]
-    user["inventory"] = inv
+    user["gold"] = gold_held - total_cost
 
     # Add charges
     user["teleport_charges"] = user.get("teleport_charges", 0) + quantity
@@ -525,8 +522,9 @@ def issue_banishment(
         return False, "❌ Only the Sector Ruler can issue banishments.", ruler_user
 
     # Check scroll in inventory
-    inv          = ruler_user.get("inventory", {})
-    scroll_qty   = inv.get("banishment_scroll", {}).get("qty", 0)
+    from supabase_db import get_inventory_item
+    scroll_row = get_inventory_item(ruler_user, "banishment_scroll")
+    scroll_qty = int(scroll_row.get("qty", scroll_row.get("quantity", 0)) or 0) if scroll_row else 0
     if scroll_qty < 1:
         return False, (
             "❌ No Banishment Scrolls in inventory.\n"
@@ -548,10 +546,8 @@ def issue_banishment(
         ), ruler_user
 
     # Consume scroll
-    inv["banishment_scroll"]["qty"] -= 1
-    if inv["banishment_scroll"]["qty"] <= 0:
-        del inv["banishment_scroll"]
-    ruler_user["inventory"] = inv
+    from supabase_db import remove_inventory_item
+    ruler_user = remove_inventory_item(ruler_user, "banishment_scroll")
 
     # Apply banishment to target
     expires_at   = (datetime.utcnow() + timedelta(hours=48)).isoformat()
@@ -1416,22 +1412,27 @@ def _format_jam_remaining(jam: dict) -> str:
 def on_user_load(user: dict) -> dict:
     """
     Hook called every time a user is loaded from the database.
-    Handles all silent migrations and passive updates:
-      1. Inventory format migration (list → stacked dict)
-      2. Energy regeneration tick
-      3. Research queue completion check
-      4. Suit expiry check
-      5. Teleport charge daily reset detection
+    Handles passive updates:
+      1. Research queue completion check
+      2. Suit expiry check
+      3. Teleport charge daily reset detection
+
+    NOTE: inventory migration and energy regen used to run here but were
+    removed — both were actively destructive/conflicting:
+      - migrate_inventory() assumed inventory should be a DICT and ran
+        unconditionally on every load (its own guard could never pass
+        against the real, correct LIST schema), silently wiping every
+        player's backpack AND permanently deleting unclaimed_items on
+        every single interaction. Do not re-add this call.
+      - apply_energy_regen() used a separate timestamp field
+        (energy_last_regen) and cap source than the one actually used
+        everywhere else (sync_player_passive_energy / energy_last_updated_at
+        / hardcoded 1000 cap in supabase_db.py), causing energy to be
+        double-calculated by two disagreeing systems on every load.
+        Energy regen is handled once, correctly, inside get_user() itself.
+
     Returns updated user dict (must be saved back).
     """
-    # 1. Inventory migration
-    from resource_registry import migrate_inventory
-    user = migrate_inventory(user)
-
-    # 2. Energy regen
-    from resource_registry import apply_energy_regen
-    user = apply_energy_regen(user)
-
     # 3. Research completion
     from research_tree import check_and_complete_research
     user, completed = check_and_complete_research(user)

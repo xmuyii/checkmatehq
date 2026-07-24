@@ -136,9 +136,9 @@ PLOT_TYPES = {
         "hazard_immune": True,
     },
     "food_plot": {
-        "emoji":       "🌾",
-        "label":       "Farm Plot",
-        "description": "Generates food for the settlement.",
+        "emoji":       "🥫",
+        "label":       "Hydroponic Bay",
+        "description": "Generates rations for the settlement.",
         "generates":   "food",
         "yield_per_hour": 30,
         "capacity":    1000,
@@ -176,9 +176,9 @@ PLOT_TYPES = {
 # ── Weather effects inside private sector (mirrors sector cycle but gentler) ──
 PRIVATE_WEATHER = {
     "calm":        {"emoji": "☀️",  "desc": "Clear skies. All yields normal.",          "yield_mod": 1.0},
-    "rain":        {"emoji": "🌧️", "desc": "Rain. Farm plots +50% food yield.",         "yield_mod": 1.0, "food_mod": 1.5},
+    "rain":        {"emoji": "🌧️", "desc": "Rain. Hydroponic Bay plots +50% rations yield.",         "yield_mod": 1.0, "food_mod": 1.5},
     "storm":       {"emoji": "⛈️", "desc": "Storm. Iron plots +30% yield. Visibility reduced.", "yield_mod": 1.0, "iron_mod": 1.3},
-    "heatwave":    {"emoji": "🔥",  "desc": "Heatwave. Stone plots +20%. Food plots -30%.", "stone_mod": 1.2, "food_mod": 0.7, "yield_mod": 1.0},
+    "heatwave":    {"emoji": "🔥",  "desc": "Heatwave. Stone plots +20%. Rations plots -30%.", "stone_mod": 1.2, "food_mod": 0.7, "yield_mod": 1.0},
     "fog":         {"emoji": "🌫️", "desc": "Dense fog. All yields -20%. Stealth enhanced.", "yield_mod": 0.8},
     "aurora":      {"emoji": "🌌",  "desc": "Aurora event. All yields +25% for 30 minutes.", "yield_mod": 1.25, "rare": True},
 }

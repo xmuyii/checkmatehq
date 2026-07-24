@@ -593,7 +593,7 @@ async def handle_craft(cb: types.CallbackQuery):
     # ── craft:speedup_menu:recipe_key ────────────────────────────────────
     elif action == "speedup_menu":
         recipe_key = param
-        inv        = user.get("inventory", {}) or {}
+        inv        = user.get("inventory", []) or []
         speedups   = [(k, v) for k, v in inv.items()
                       if "speedup" in k and isinstance(v, dict) and v.get("qty", 0) > 0]
         if not speedups:
@@ -716,17 +716,17 @@ async def handle_market(cb: types.CallbackQuery):
             )
             return
         # Show listable inventory items
-        inv     = user.get("inventory", {}) or {}
+        inv     = user.get("inventory", []) or []
         buttons = []
-        for ikey, idata in inv.items():
-            if not isinstance(idata, dict) or idata.get("qty", 0) <= 0:
+        for i in inv:
+            if not isinstance(i, dict) or i.get("qty", 0) <= 0:
                 continue
-            emoji = idata.get("emoji", "📦")
-            name  = idata.get("display", ikey)
-            qty   = idata.get("qty", 0)
+            emoji = i.get("emoji", "📦")
+            name  = i.get("display", i.get("key"))
+            qty   = i.get("qty", 0)
             buttons.append([InlineKeyboardButton(
                 text=f"{emoji} {name} ×{qty}",
-                callback_data=f"market:list_select:{ikey}"
+                callback_data=f"market:list_select:{i.get('key')}"
             )])
 
         if not buttons:
@@ -746,8 +746,8 @@ async def handle_market(cb: types.CallbackQuery):
     # ── market:list_select:item_key ───────────────────────────────────────
     elif action == "list_select":
         item_key = param
-        inv      = user.get("inventory", {}) or {}
-        item     = inv.get(item_key, {})
+        inv      = user.get("inventory", []) or []
+        item     = next((i for i in inv if i.get("key") == item_key), {})
         if not isinstance(item, dict) or item.get("qty", 0) <= 0:
             await cb.answer("Item not available.", show_alert=True)
             return

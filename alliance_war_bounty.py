@@ -589,12 +589,9 @@ def should_appear_on_bounty_board(user: dict) -> Tuple[bool, str]:
         # Never had a shield — always visible
         return True, "never_shielded"
 
-    # Bitcoin Whale
-    inv = user.get("inventory", {})
-    if isinstance(inv, dict):
-        btc = inv.get("bitcoin", {})
-        if isinstance(btc, dict) and btc.get("qty", 0) >= BITCOIN_WHALE_THRESHOLD:
-            return True, "bitcoin_whale"
+    # Bitcoin Whale — bitcoin is a top-level field, never an inventory item
+    if (user.get("bitcoin", 0) or 0) >= BITCOIN_WHALE_THRESHOLD:
+        return True, "bitcoin_whale"
 
     # Sector Ruler (always visible)
     # This is checked separately in the board formatter
@@ -619,17 +616,13 @@ def place_bounty(
     if reward_gold < BOUNTY_MIN_REWARD:
         return False, f"❌ Minimum bounty is {BOUNTY_MIN_REWARD} 🪙.", poster_user
 
-    inv        = poster_user.get("inventory", {})
-    gold_held  = inv.get("gold", {}).get("qty", 0) if isinstance(inv, dict) else 0
+    gold_held  = poster_user.get("gold", 0) or 0
 
     if gold_held < reward_gold:
         return False, f"❌ Not enough gold. Have {gold_held} 🪙, need {reward_gold} 🪙.", poster_user
 
     # Deduct gold
-    if isinstance(inv, dict):
-        if "gold" in inv:
-            inv["gold"]["qty"] = gold_held - reward_gold
-        poster_user["inventory"] = inv
+    poster_user["gold"] = gold_held - reward_gold
 
     bounty_id  = f"bounty_{int(datetime.utcnow().timestamp())}_{target_id[-4:]}"
     expires_at = (datetime.utcnow() + timedelta(hours=BOUNTY_DURATION_HOURS)).isoformat()
@@ -688,16 +681,7 @@ def claim_bounty(
     # Verify target was just defeated (check battle was recent — within 5 minutes)
     # In practice this is called right after a successful battle
     reward = bounty.get("reward_gold", 0)
-    inv    = hunter_user.get("inventory", {})
-    if not isinstance(inv, dict):
-        inv = {}
-
-    if "gold" in inv:
-        inv["gold"]["qty"] = inv["gold"].get("qty", 0) + reward
-    else:
-        inv["gold"] = {"qty": reward, "display": "Gold", "emoji": "🪙", "category": "premium"}
-
-    hunter_user["inventory"] = inv
+    hunter_user["gold"] = (hunter_user.get("gold", 0) or 0) + reward
 
     # Mark bounty claimed
     bounty["status"]       = "claimed"
@@ -752,8 +736,7 @@ def format_bounty_board(
             home_str   = f"  🏠 {home_info.get('emoji','')} {home_info.get('name',f'S{home_sector}')}" if home_sector else ""
 
             if "bitcoin_whale" in reason:
-                inv    = player.get("inventory", {})
-                btc    = inv.get("bitcoin", {}).get("qty", 0) if isinstance(inv, dict) else 0
+                btc    = player.get("bitcoin", 0) or 0
                 tag    = f"₿ BITCOIN WHALE ({btc:.4f} BTC)"
                 lines.append(f"  💰 @{name} — {tag}{home_str}")
             elif "unshielded" in reason:

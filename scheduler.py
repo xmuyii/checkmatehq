@@ -29,7 +29,8 @@ TASKS:
 import asyncio
 from datetime import datetime, timedelta
 from typing import Optional
-
+from wiring_hooks import on_user_action, tick_training_notifications
+from supabase_db import global_weekly_reset, _current_week_key, supabase  # Adjust based on your actual export names
 # ── DB columns that actually exist in sector_state table ─────────────────
 # Any key NOT in this set is computed/transient and must be stripped before save
 SECTOR_STATE_DB_COLUMNS = {
@@ -71,118 +72,7 @@ def _save_sector_state_safe(supabase, sector_id: int, state: dict) -> None:
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  DAILY GRANTS — These replace your existing grant functions in main.py
-# ═══════════════════════════════════════════════════════════════════════════
-
-async def grant_daily_teleports(supabase, DB_TABLE: str, bot=None):
-    """
-    Grant 3 free teleport charges to every player daily.
-    Uses the teleport_charges integer column directly — never touches inventory.
-    This fixes the 'str object has no attribute append' crash.
-    
-    Previously this was appending to inventory list — wrong approach.
-    Teleport charges are their own integer column now.
-    """
-    today   = datetime.utcnow().strftime("%Y-%m-%d")
-    granted = 0
-    failed  = 0
-
-    try:
-        # Only fetch the columns we need — faster, less data
-        result = supabase.table(DB_TABLE).select(
-            "user_id, teleport_charges, teleport_daily_claimed_date"
-        ).execute()
-        
-        users = result.data or []
-
-        for user in users:
-            try:
-                uid = user.get("user_id")
-                if not uid:
-                    continue
-
-                # Skip if already claimed today
-                if user.get("teleport_daily_claimed_date") == today:
-                    continue
-
-                current = user.get("teleport_charges") or 0
-
-                supabase.table(DB_TABLE).update({
-                    "teleport_charges":              current + 3,
-                    "teleport_daily_claimed_date":   today,
-                    "teleport_last_claim_ts":        datetime.utcnow().isoformat(),
-                }).eq("user_id", uid).execute()
-
-                granted += 1
-
-            except Exception as e:
-                failed += 1
-                print(f"[WARN] Could not grant teleports to {user.get('user_id','?')}: {e}")
-
-        print(f"[TELEPORTS] Granted 3 charges to {granted} players ({failed} failed)")
-
-    except Exception as e:
-        print(f"[ERROR] grant_daily_teleports: {e}")
-
-
-async def grant_daily_shields(supabase, DB_TABLE: str, bot=None):
-    """
-    Grant a basic shield to every player who is currently unshielded.
-    Uses base_shielded boolean + shield_expires_at text column.
-    Never appends to inventory.
-    
-    Shield duration: 8 hours.
-    Only granted if player has no active shield.
-    """
-    shield_hours = 8
-    granted      = 0
-    failed       = 0
-
-    try:
-        result = supabase.table(DB_TABLE).select(
-            "user_id, base_shielded, shield_expires_at"
-        ).execute()
-        
-        users = result.data or []
-        now   = datetime.utcnow()
-
-        for user in users:
-            try:
-                uid = user.get("user_id")
-                if not uid:
-                    continue
-
-                # Check if already shielded
-                already_shielded = False
-                if user.get("base_shielded"):
-                    exp_str = user.get("shield_expires_at")
-                    if exp_str:
-                        try:
-                            exp = datetime.fromisoformat(exp_str)
-                            already_shielded = now < exp
-                        except Exception:
-                            pass
-
-                if already_shielded:
-                    continue
-
-                expires = (now + timedelta(hours=shield_hours)).isoformat()
-
-                supabase.table(DB_TABLE).update({
-                    "base_shielded":    True,
-                    "shield_expires_at": expires,
-                }).eq("user_id", uid).execute()
-
-                granted += 1
-
-            except Exception as e:
-                failed += 1
-                print(f"[WARN] Could not grant shield to {user.get('user_id','?')}: {e}")
-
-        print(f"[SHIELDS] Granted 8h shield to {granted} players ({failed} failed)")
-
-    except Exception as e:
-        print(f"[ERROR] grant_daily_shields: {e}")
-
+# ══════════════════════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  PHASE TICK — Runs every 60 seconds
@@ -404,64 +294,92 @@ async def purge_old_bounties(supabase):
 # ═══════════════════════════════════════════════════════════════════════════
 #  MAIN SCHEDULER — Add one call to main.py
 # ═══════════════════════════════════════════════════════════════════════════
-
 async def start_scheduler(bot, supabase, DB_TABLE: str, GROUP_CHAT_ID: int):
     """
-    Start all background tasks.
-    Call this once from main() before dp.start_polling().
-    
-    Usage in main.py:
-        from scheduler import start_scheduler
-        
-        async def main():
-            bot = Bot(token=TOKEN)
-            ...
-            asyncio.create_task(
-                start_scheduler(bot, supabase, DB_TABLE, GROUP_CHAT_ID)
-            )
-            await dp.start_polling(bot)
+    Start all background tasks with persistence catch-up mechanics.
     """
     print("[SCHEDULER] Starting background tasks...")
     
-    # Run daily grants immediately on startup for any missed players
-    await grant_daily_teleports(supabase, DB_TABLE, bot)
-    await grant_daily_shields(supabase, DB_TABLE, bot)
-
+    # 1. Run daily teleports immediately on startup if it's a new day
+    await tick_training_notifications(bot, supabase, DB_TABLE)
+    
     tick_count = 0
 
     while True:
         try:
-            now  = datetime.utcnow()
-            secs = (now - now.replace(hour=0, minute=0, second=0)).total_seconds()
+            now = datetime.utcnow()
+            today_str = now.strftime("%Y-%m-%d")
+            
+            # Use Python's calendar system to get a reliable ISO week string (e.g., "2026-W28")
+            current_year, current_week_num, current_day = now.isocalendar()
+            current_week_str = f"{current_year}-W{current_week_num}"
 
-            # ── Every 60 seconds: phase tick ─────────────────────────────
+            # ── Every 60 seconds: core game mechanics tick ─────────────────
             await phase_tick(supabase, DB_TABLE, bot, GROUP_CHAT_ID)
 
-            # ── Every 6 hours: purge bounties (tick 0, 360, 720, 1080) ──
+            # ── Every 6 hours: purge old bounties ──────────────────────────
             if tick_count % 360 == 0:
                 await purge_old_bounties(supabase)
-            # Phase 5 tick (every 5 minutes = every 5 loop iterations of 60s)
-            if tick_count % 5 == 0:
-                from main_p5_patch import phase5_tick
-                await phase5_tick(bot, supabase, DB_TABLE)
 
-            # ── Midnight UTC: daily grants + dominance reset ──────────────
-            if 0 <= secs < 65:   # Within first 65 seconds of midnight
-                if tick_count % 10 == 0:  # Throttle — only run once per minute window
-                    await grant_daily_teleports(supabase, DB_TABLE, bot)
-                    await grant_daily_shields(supabase, DB_TABLE, bot)
-                    await dominance_cycle_reset(supabase, DB_TABLE, bot, GROUP_CHAT_ID)
+            # ── CRITICAL: PERSISTENT TIMELINE CATCH-UP MECHANISM ───────────
+            # Fetch global system state to see when resets last actually ran
+            # (Create a simple 'system_state' table with 1 row to track execution logs)
+            try:
+                state_res = supabase.table("system_state").select("*").eq("id", 1).execute()
+                sys_state = state_res.data[0] if state_res.data else {}
+            except Exception as e:
+                print(f"[SCHEDULER WARNING] Could not fetch system state table: {e}")
+                sys_state = {}
+
+            last_daily_run = sys_state.get("last_daily_reset_date")   # e.g. "2026-07-09"
+            last_weekly_run = sys_state.get("last_weekly_reset_week") # e.g. "2026-W27"
+            
+            # ── A. Check Daily Reset (Triggers if a new day has arrived or was missed) ──
+            if last_daily_run != today_str:
+                print(f"[TIMELINE] New day detected ({today_str}). Running daily cycles...")
+                await dominance_cycle_reset(supabase, DB_TABLE, bot, GROUP_CHAT_ID)
+                
+                # Persist that daily reset completed successfully for this date
+                supabase.table("system_state").upsert({
+                    "id": 1, 
+                    "last_daily_reset_date": today_str
+                }).execute()
+
+            # ── B. Check Weekly Reset (Triggers if a new week has arrived or was missed) ──
+            # ISO weeks roll over precisely at Monday 00:00:00
+            if last_weekly_run != current_week_str:
+                print(f"[TIMELINE] New week detected ({current_week_str}). Running weekly cleanups...")
+                
+                # 1. Announce last week's winners BEFORE wiping data
+                # (You can call your announcement function here or inside global_weekly_reset)
+                
+                # 2. Hard reset all weekly points globally
+                reset_success = global_weekly_reset()
+                
+                if reset_success:
+                    # Persist that weekly reset completed for this ISO week
+                    supabase.table("system_state").upsert({
+                        "id": 1, 
+                        "last_weekly_reset_week": current_week_str
+                    }).execute()
+
+            # ── C. Check Hourly Gift Grant (Triggers if a new hour has arrived or was missed) ──
+            current_hour_str = now.strftime("%Y-%m-%dT%H")  # e.g. "2026-07-17T14"
+            last_gift_hour = sys_state.get("last_gift_grant_hour")
+
+            if last_gift_hour != current_hour_str:
+                print(f"[TIMELINE] New hour detected ({current_hour_str}). Granting gifts...")
+                from gift_system import grant_hourly_gifts_to_all
+                granted = grant_hourly_gifts_to_all(supabase, DB_TABLE)
+                print(f"[GIFTS] Granted to {granted} players")
+
+                supabase.table("system_state").upsert({
+                    "id": 1,
+                    "last_gift_grant_hour": current_hour_str
+                }).execute()
 
             tick_count += 1
             await asyncio.sleep(60)
-            if tick_count % 5 == 0:      # Every 5 minutes
-                from main_p6_patch import phase6_tick
-                await phase6_tick(bot, supabase, DB_TABLE, GROUP_CHAT_ID)
-
-            if should_publish_chronicle():   # Monday midnight UTC
-                from chronicle import publish_chronicle, should_publish_now
-                if should_publish_now():
-                    await publish_chronicle(bot, supabase, DB_TABLE, GROUP_CHAT_ID)
 
         except asyncio.CancelledError:
             print("[SCHEDULER] Stopped.")

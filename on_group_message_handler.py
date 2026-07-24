@@ -3,7 +3,13 @@ Clean on_group_message handler for main.py
 This file contains a working version of the word validation handler.
 Copy the function below into main.py to replace the corrupted version.
 """
-
+from aiogram import types
+from aiogram.types import InlineKeyboardButton
+from aiogram import Bot
+import random
+import asyncio
+from main import get_engine
+from supabase import get_engine, get_user, save_user, add_points, add_xp
 # ═══════════════════════════════════════════════════════════════════════════
 #  WORD-GUESS CATCH-ALL  ←── MUST BE THE LAST @dp.message HANDLER
 # ═══════════════════════════════════════════════════════════════════════════
@@ -157,7 +163,7 @@ async def on_group_message(message: types.Message):
         
         # Add food
         if streak_info.get("food_awarded", 0) > 0:
-            fb += f" +{streak_info['food_awarded']} 🌽"
+            fb += f" +{streak_info['food_awarded']} 🥫"
         
         # Add combo milestone
         if combo.get("milestone_message"):

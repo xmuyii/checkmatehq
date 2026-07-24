@@ -61,7 +61,7 @@ EMOJI_MAPPING = {
     "infirmary": "🏥",
     "storage": "🏦",
     "mine": "⛏️",
-    "farm": "🌾",
+    "farm": "🥫",
     "trap_factory": "🔩",
     "walls": "🧱",
     "gatehouse": "🚪",

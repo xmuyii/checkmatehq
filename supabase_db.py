@@ -9,11 +9,11 @@ Key fixes vs previous version:
   - Shield: stored with expiry timestamp; is_shielded() helper
   - Crate XP: super_crate=50-200, wood=50-100, bronze=100-150, iron=150-200
 """
-
+from typing import Tuple, Dict, Any
 import os
 import json
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC, timezone
 from supabase import create_client, Client
 from base_layout import get_default_base_layout
 from teleport_system import on_user_load
@@ -65,73 +65,11 @@ DEFAULT_BASE_NAMES = [
 
 import json as _json
 
-def safe_json(value, default=None):
-    """
-    Safely parse a value that might be a JSON string or already parsed.
-    Prevents 'str object has no attribute append/get/keys' errors.
-    """
-    if default is None:
-        default = {}
-    if value is None:
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    if isinstance(value, str):
-        value = value.strip()
-        if not value or value in ('null', 'None', ''):
-            return default
-        try:
-            return _json.loads(value)
-        except Exception:
-            return default
-    return default
-
-
-
-
-
-def normalize_user(user: dict) -> dict:
-    """
-    Normalize all JSON fields on a user dict from Supabase.
-    Call at the top of get_user() before returning.
-    """
-    if not user:
-        return user
-
-    # NOTE: inventory is a LIST not a dict — kept in list_fields
-    dict_fields = [
-        "military", "buildings", "building_queue",
-        "researches", "research_queue", "base_resources", "traps",
-        "weapons", "buffs", "banishments", "visas", "visa_applications",
-        "commander_location", "current_node", "active_suit",
-        "skill_points_spent", "dominance_scores",
-    ]
-    for field in dict_fields:
-        user[field] = safe_json(user.get(field), default={})
-
-    list_fields = [
-        "inventory", "unclaimed_items", "march_queue", "eject_log",
-        "teleport_history", "visa_queue",
-    ]
-    for field in list_fields:
-        val = safe_json(user.get(field), default=[])
-        user[field] = val if isinstance(val, list) else (list(val.values()) if isinstance(val, dict) else [])
-
-    if not user.get("commander_location"):
-        user["commander_location"] = {"sector_id": 1}
-    if not isinstance(user.get("base_resources"), dict):
-        user["base_resources"] = {"resources": {}, "food": 0, "current_streak": 0}
-    if not isinstance(user["base_resources"].get("resources"), dict):
-        user["base_resources"]["resources"] = {}
-    if user.get("credits") is None:
-        user["credits"] = 0
-
-    return user
 # ── Week helper ────────────────────────────────────────────────────────────
 
 def _current_week_key() -> str:
     """ISO date string of the Monday that starts this week (Mon-Sun). Resets Monday 00:00 WAT (Sunday 11:59 PM)."""
-    today = datetime.utcnow() + timedelta(hours=1)
+    today = datetime.now(UTC) + timedelta(hours=1)
     days_since_monday = today.weekday()   # Monday=0 … Sunday=6
     monday = today - timedelta(days=days_since_monday)
     return monday.date().isoformat()
@@ -266,11 +204,14 @@ def get_user(user_id: str) -> dict | None:
             user = normalize_user(user)      # Fix all JSON fields
             from teleport_system import on_user_load
             user = on_user_load(user)        # Run passive ticks
+            user = sync_player_passive_energy(user)  # Recalculate energy every load, not just on use
+            user = sync_shield_state(user)  # Correct expired shield_status/shield_expires_at every load
             return user
         return None
     except Exception as e:
         print(f"[DB ERROR] get_user: {e}")
         return None
+    
     
 def get_or_save_user(user_id: str, data: dict | None) -> dict | None:
     '''
@@ -296,7 +237,6 @@ def save_user(user_id, data: dict):
     d.pop('challenges', None)
     d.pop('metadata', None)
     d.pop('training_queue', None)
-    d.pop('shield_cooldown', None)  # Shield cooldown doesn't exist in schema
     d.pop('prestige', None)  # Prestige tier is in-memory only, not in DB
     
     # Serialize JSONB fields (inventory, unclaimed_items, military, traps, buffs, base_resources, weapons, buildings, building_queue)
@@ -340,7 +280,7 @@ def register_user(user_id, username: str):
             'total_words': 0,
             'bitcoin': 0,
             'xp': 0,
-            'energy': 100,
+            'energy': 1000,
             'power': 0,
             'gold': 0,
             'level': 1,
@@ -348,7 +288,6 @@ def register_user(user_id, username: str):
             "teleport_charges": 0,
             "home_sector":  None, # Set when player chooses base plot
             "commander_location": {"sector_id": 1},  # Start in Sector 1
-            "base_shielded": False,
             "shield_expires_at": None,
             "active_suit":  None,
             "energy_last_regen": None,
@@ -359,13 +298,14 @@ def register_user(user_id, username: str):
             "alliance_id":  None,
             "alliance_role": None,
             'backpack_slots': 5,
-            'inventory': json.dumps({}),
-            'unclaimed_items': json.dumps([]),
+            'inventory': [],
+            'unclaimed_items': [],
             "researches":   {},
             'sector': None,
             'completed_tutorial': False,
             'base_name': random_base_name,
             'base_hq_level': 1,
+            'login_streak': 0,
             'buildings': json.dumps({}),
             'building_queue': json.dumps({}),
             'base_resources': json.dumps({
@@ -375,7 +315,7 @@ def register_user(user_id, username: str):
             }),
             'military': json.dumps({"pawns": 5}),
             'traps': json.dumps({"spike_pit": 0}),
-            'shield_status': '⚠️ UNPROTECTED',
+            'shield_status': 'UNPROTECTED',
             'credits': 0,
             'active_perks': {},
             'chess_stats': json.dumps({
@@ -388,6 +328,7 @@ def register_user(user_id, username: str):
                 'total_games': 0
             }),
         }).execute()
+        give_automatic_shield(uid)   # ← add this line, one-time new-player shield
         print(f"[REGISTER SUCCESS] User {uid} ({username}) registered to Supabase")
         return True  # Registration succeeded
     except Exception as e:
@@ -395,6 +336,44 @@ def register_user(user_id, username: str):
         import traceback
         traceback.print_exc()
         return False  # Registration failed
+def global_weekly_reset() -> bool:
+    """
+    Hard-resets weekly_points for ALL players in the database.
+    Run this at Sunday midnight WAT / Monday 00:00 AM via a cron scheduler.
+    """
+    this_week = _current_week_key()
+    try:
+        print("[RESET] Starting global weekly points reset...")
+        
+        # 1. Fetch all rows that currently have weekly points or game-specific weekly points > 0
+        # (This prevents modifying every single row if your DB scales up)
+        result = supabase.table(DB_TABLE).select("user_id").gt("weekly_points", 0).execute()
+        players_to_reset = result.data or []
+        
+        if not players_to_reset:
+            print("[RESET] No active weekly scores found to clear.")
+            return True
+            
+        print(f"[RESET] Clearing weekly scores for {len(players_to_reset)} players...")
+        
+        # 2. Update their records globally
+        for row in players_to_reset:
+            uid = row.get("user_id")
+            payload = {
+                'weekly_points': 0,
+                'week_start': this_week,
+                # Clear game specific columns if you use them:
+                'fusion_weekly_points': 0,
+                'fusion_week_start': this_week
+            }
+            supabase.table(DB_TABLE).update(payload).eq('user_id', uid).execute()
+            
+        print("[RESET] Global weekly slate wiped successfully!")
+        return True
+    except Exception as e:
+        print(f"[RESET ERROR] Failed global reset: {e}")
+        return False
+    
 def get_game_weekly_leaderboard(game_type="fusion", limit=10):
     """
     Weekly leaderboard for a specific game type.
@@ -424,7 +403,7 @@ def get_game_weekly_leaderboard(game_type="fusion", limit=10):
                 'id':                p['user_id'],
                 'username':          p.get('username', 'Unknown'),
                 'points':            pts,
-                'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
+                'shield_status':     p.get('shield_status') or 'UNPROTECTED',
                 'name_shield_until': p.get('name_shield_until') or "Expired",
             })
 
@@ -469,7 +448,7 @@ def get_game_alltime_leaderboard(game_type="fusion", limit=10):
                 'id':                p['user_id'],
                 'username':          p.get('username', 'Unknown'),
                 'points':            pts,
-                'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
+                'shield_status':     p.get('shield_status') or 'UNPROTECTED',
                 'name_shield_until': p.get('name_shield_until') or "Expired",
             })
 
@@ -510,8 +489,8 @@ def ensure_bot_exists(username: str, initial_points: int = 0):
         'last_level': 1,
         'backpack_slots': 5,
         'backpack_image': 'normal_backpack',
-        'inventory': json.dumps({}),
-        'unclaimed_items': json.dumps([]),
+        'inventory': [],
+        'unclaimed_items': [],
         'base_name': random_base_name,
         'base_resources': json.dumps({
             'resources': {'wood': 0, 'bronze': 0, 'iron': 0, 'stone': 0, 'relics': 0},
@@ -611,11 +590,24 @@ def add_xp(user_id, amount: int) -> bool:
     user = get_user(str(user_id))
     if not user:
         return False
+        
     user['xp'] = user.get('xp', 0) + amount
-    user['level'] = 1 + (user['xp'] // 100)
+    
+    # Simple Progressive Curve: Each level requires (Level * 150) XP
+    # Level 1->2: 150 XP | Level 2->3: 300 XP | Level 10->11: 1500 XP
+    current_xp = user['xp']
+    lvl = 1
+    while True:
+        xp_needed_for_next = lvl * 150
+        if current_xp >= xp_needed_for_next:
+            current_xp -= xp_needed_for_next
+            lvl += 1
+        else:
+            break
+            
+    user['level'] = lvl
     save_user(str(user_id), user)
     return True
-
 
 def use_xp(user_id, amount: int) -> bool:
     user = get_user(str(user_id))
@@ -835,9 +827,9 @@ def update_streak_and_award_food(user_id, correct: bool, username: str = '', use
             base_res['food'] = base_res.get('food', 0) + food_to_award
             food_awarded = food_to_award
             streak_status = f"streak_{current_streak}"
-            print(f"[STREAK_CALC] Streak {old_streak}→{current_streak}, Food: {old_food}→{base_res['food']} (+{food_to_award})")
+            print(f"[STREAK_CALC] Streak {old_streak}→{current_streak}, Rations: {old_food}→{base_res['food']} (+{food_to_award})")
         else:
-            print(f"[STREAK_CALC] Streak {old_streak}→{current_streak}, Food: 0 (need 3)")
+            print(f"[STREAK_CALC] Streak {old_streak}→{current_streak}, Rations: 0 (need 3)")
     else:
         # Wrong word - reset streak
         base_res['current_streak'] = 0
@@ -890,7 +882,7 @@ def get_weekly_leaderboard(limit: int = 10) -> list:
                 'id':                p['user_id'],
                 'username':          p.get('username', 'Unknown'),
                 'points':            pts,
-                'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
+                'shield_status':     p.get('shield_status') or 'UNPROTECTED',
                 'name_shield_until': p.get('name_shield_until') or "Expired",
             })
 
@@ -921,7 +913,7 @@ def get_alltime_leaderboard(limit: int = 10) -> list:
                 'username':          p.get('username', 'Unknown'),
                 'points':            int(p.get('all_time_points') or 0),
                 'words':             int(p.get('total_words') or 0),
-                'shield_status':     p.get('shield_status') or '⚠️ UNPROTECTED',
+                'shield_status':     p.get('shield_status') or 'UNPROTECTED',
                 'name_shield_until': p.get('name_shield_until') or "Expired",
             }
             for p in raw
@@ -936,210 +928,184 @@ def get_alltime_leaderboard(limit: int = 10) -> list:
 
 
 # ── Inventory ──────────────────────────────────────────────────────────────
-
-def get_inventory(user_id) -> list:
-    user = get_user(str(user_id))
-    if not user:
-        return []
-    inv = user.get('inventory', {})
-    # Fix any items with None IDs
-    inv = _fix_item_ids(inv)
-    # Save the fixed inventory back if any items were fixed
-    if any(it.get('id') is None for it in user.get('inventory', [])):
-        user['inventory'] = inv
-        save_user(str(user_id), user)
-    return inv
-
-
-def add_inventory_item(user_id, item_type: str, xp_reward: int = 0,
-                        expires_at: str = None, multiplier_value: int = 0) -> bool:
-    user = get_user(str(user_id))
-    if not user:
-        return False
-    inv = user.get('inventory', {})
-    if len(inv) >= user.get('backpack_slots', 5):
-        return False
-    item = {
-        'id':               _next_id(inv),
-        'type':             item_type,
-        'quantity':         1,
-        'xp_reward':        xp_reward,
-        'multiplier_value': multiplier_value,
-        'expires_at':       expires_at,
-        'acquired':         datetime.utcnow().isoformat(),
-    }
-    inv.append(item)
-    user['inventory'] = inv
-    save_user(str(user_id), user)
-    return True
-
-
-def remove_inventory_item(user_id, item_id) -> bool:
-    """Remove by unique item['id'], not list index. Verify deletion succeeded."""
-    user = get_user(str(user_id))
-    if not user:
-        return False
-    
-    old_inv = user.get('inventory', {})
-    
-    # First, fix any None IDs in the inventory
-    old_inv = _fix_item_ids(old_inv)
-    old_count = len(old_inv)
-    
-    # Filter out matching item - handle both int and string IDs
-    item_id_int = int(item_id) if isinstance(item_id, (int, str)) else item_id
-    new_inv = [it for it in old_inv if it.get('id') is not None and int(it.get('id')) != item_id_int]
-    
-    # Verify something was actually removed
-    if len(new_inv) == old_count:
-        print(f"[REMOVE_INV] WARNING: Item {item_id} not found in inventory. Old: {[it.get('id') for it in old_inv]}, New: {[it.get('id') for it in new_inv]}")
-        return False
-    
-    user['inventory'] = new_inv
-    save_user(str(user_id), user)
-    
-    # Double-check by re-fetching
-    user_after = get_user(str(user_id))
-    inv_after = user_after.get('inventory', {})
-    final_ids = [it.get('id') for it in inv_after]
-    print(f"[REMOVE_INV] VERIFIED: Removed item {item_id}. Remaining IDs: {final_ids}")
-    return True
-
-
-def upgrade_backpack(user_id, new_slots: int = 20):
-    user = get_user(str(user_id))
-    if not user:
-        return
-    user['backpack_slots'] = new_slots
-    user['backpack_image'] = 'premium_backpack' if new_slots > 5 else 'normal_backpack'
-    save_user(str(user_id), user)
-
-
-# ── Shield helpers ─────────────────────────────────────────────────────────
-
-def activate_shield(user_id) -> bool:
-    """Move a shield from inventory to the 'shield_expires' field. Returns True if done."""
-    user = get_user(str(user_id))
-    if not user:
-        return False
-    inv = user.get('inventory', {})
-    shield = next((it for it in inv if it.get('type', '') == 'shield'), None)
-    if not shield:
-        return False
-    # Remove from inventory
-    user['inventory'] = [it for it in inv if it.get('id') != shield['id']]
-    # Set expiry 24 h from now
-    expires = (datetime.utcnow() + timedelta(hours=24)).isoformat()
-    user['shield_expires'] = expires
-    save_user(str(user_id), user)
-    return True
-
-
-def is_shielded(user: dict) -> bool:
-    """Return True if user has an active (non-disrupted) shield.
-    
-    Shield statuses:
-    - UNPROTECTED: No shield active
-    - ACTIVE: Shield is on
-    - DISRUPTED: Shield was hit, no protection for 1 attack
+def get_inventory_item(user: dict, item_key: str) -> dict:
+    """Safely retrieves an item from the user's inventory list array.
+    Matches on either 'item_key' (Schema A) or 'type' (Schema B) since
+    both field names can appear on inventory rows.
     """
-    shield_status = user.get('shield_status', 'UNPROTECTED')
-    
-    # Only ACTIVE shields provide protection
-    if shield_status == 'ACTIVE':
-        return True
-    
-    # DISRUPTED or UNPROTECTED = no shield
-    if shield_status in ['DISRUPTED', 'UNPROTECTED']:
-        return False
-    
-    # Legacy support for old fields
-    exp = user.get('shield_expires')
-    if exp and exp != 'permanent':
-        # Check if expiry time has passed
-        try:
-            if datetime.utcnow() < datetime.fromisoformat(exp):
-                return True
-        except Exception:
-            pass
-    
-    return False
+    inventory = user.get("inventory", []) or []
+    for item in inventory:
+        if isinstance(item, dict) and (item.get("item_key") == item_key or item.get("type") == item_key):
+            return item
+    return {}
 
+def add_inventory_item(user: dict, item_key: str, qty: int, display_name: str, category: str = "consumable", xp_reward: int = 0, multiplier_value: int = 0) -> dict:
+    """Adds an item or increments its quantity safely, ensuring no data loss.
+    Writes BOTH field-name schemas so every inventory-reading code path works:
+      Schema A: item_key / qty / display   (used by get_inventory_item, store purchases)
+      Schema B: type / quantity            (used by claim_item, most of main.py's display/use code)
+    """
+    if not isinstance(user.get("inventory"), list):
+        user["inventory"] = []  # never silently accept a dict/None here
 
-def activate_shield(user_id: str) -> tuple[bool, str]:
-    """Activate shield for a player. Returns (success, message)."""
-    user = get_user(user_id)
-    if not user:
-        return False, "User not found"
-    
-    shield_status = user.get('shield_status', 'UNPROTECTED')
-    
-    # Can't activate if shield is DISRUPTED (was just hit)
-    if shield_status == 'DISRUPTED':
-        return False, "⚠️ Your shield is DISRUPTED from an attack. Wait for it to auto-restore."
-    
-    # Already ACTIVE
-    if shield_status == 'ACTIVE':
-        return False, "✅ Your shield is already ACTIVE!"
-    
-    # Activate from UNPROTECTED
-    user['shield_status'] = 'ACTIVE'
-    user.pop('shield_cooldown', None)  # Clear any cooldowns
-    save_user(user_id, user)
-    return True, "✅ Shield activated!"
+    # Check if the player already owns at least one copy of this item
+    item = get_inventory_item(user, item_key)
+    if item:
+        new_qty = item.get("qty", item.get("quantity", 0)) + qty
+        item["qty"]      = new_qty
+        item["quantity"] = new_qty
+    else:
+        from supabase_db import _next_id
+        user["inventory"].append({
+            "id": _next_id(user["inventory"]),
+            # Schema A
+            "item_key": item_key,
+            "qty": qty,
+            "display": display_name,
+            "category": category,
+            # Schema B aliases
+            "type": item_key,
+            "quantity": qty,
+            "name": display_name,
+            "xp_reward": xp_reward,
+            "multiplier_value": multiplier_value,
+            "acquired": datetime.utcnow().isoformat(),
+        })
+    return user
 
-
-def deactivate_shield(user_id: str) -> tuple[bool, str]:
-    """Deactivate shield voluntarily. Returns (success, message)."""
-    user = get_user(user_id)
-    if not user:
-        return False, "User not found"
+def remove_inventory_item(user: Dict[str, Any], item_key: str) -> Dict[str, Any]:
+    """Removes one instance of an item by key."""
+    inventory = user.get("inventory", [])
     
-    shield_status = user.get('shield_status', 'UNPROTECTED')
-    
-    if shield_status != 'ACTIVE':
-        return False, "⚠️ Your shield is not currently ACTIVE"
-    
-    # Deactivate
-    user['shield_status'] = 'UNPROTECTED'
-    save_user(user_id, user)
-    return True, "⚠️ Shield deactivated! You're now vulnerable."
+    for item in inventory:
+        if item.get("item_key") == item_key:
+            if item.get("quantity", 1) > 1:
+                item["quantity"] -= 1
+            else:
+                inventory.remove(item)
+            break
+            
+    user["inventory"] = inventory
+    return user
 
+def get_max_slots(user: dict) -> int:
+    """Helper to return max backpack slots, defaulting to 20 if missing."""
+    return int(user.get('backpack_slots', 5))
 
-def disrupt_shield(user_id: str) -> tuple[bool, str]:
-    """Temporarily disrupt enemy shield (1 attack only). Returns (success, message)."""
-    user = get_user(user_id)
-    if not user:
-        return False, "User not found"
-    
-    if not is_shielded(user):
-        return False, "Target has no active shield to disrupt"
-    
-    user['shield_status'] = 'DISRUPTED'
-    save_user(user_id, user)
-    return True, "Shield disrupted for 1 attack!"
+def is_backpack_full(user: dict) -> bool:
+    """
+    Checks if the total unique item slots used exceeds the maximum allowed slots.
+    Note: Stackable items grouped in a single dictionary count as 1 slot.
+    """
+    current_slots_used = len(user.get('inventory', []) or [])
+    max_slots = get_max_slots(user)
+    return current_slots_used >= max_slots
 
-
-def restore_shield_after_attack(user_id: str):
-    """Restore shield from DISRUPTED back to ACTIVE after 1 attack."""
-    user = get_user(user_id)
-    if user and user.get('shield_status') == 'DISRUPTED':
-        user['shield_status'] = 'ACTIVE'
-        save_user(user_id, user)
-        print(f"[SHIELD] Shield restored for {user_id}: DISRUPTED → ACTIVE")
-
-
-def give_automatic_shield(user_id):
-    """Grant a shield to a player (in-memory only, not persisted to DB)."""
+def upgrade_backpack(user_id, additional_slots: int = 5) -> Tuple[bool, str]:
+    """
+    Increases the player's total storage cap and updates their backpack tier aesthetics.
+    """
     user = get_user(str(user_id))
-    if user:
-        # Shield status is kept in-memory only, not in database
-        user['shield_status'] = 'ACTIVE'
-        user.pop('shield_expires', None)  # Remove legacy permanent shield
-        # NOTE: shield_status is NOT saved to database (column doesn't exist)
-        return True
-    return False
+    if not user:
+        return False, "❌ Player profile not found."
+        
+    current_slots = get_max_slots(user)
+    new_slots = current_slots + additional_slots
+    
+    user['backpack_slots'] = new_slots
+    
+    # Dynamically scale tiers based on slot sizes
+    if new_slots >= 40:
+        user['backpack_image'] = 'military_tactical_pack'
+    elif new_slots >= 30:
+        user['backpack_image'] = 'premium_vault_backpack'
+    else:
+        user['backpack_image'] = 'normal_backpack'
+        
+    save_user(str(user_id), user)
+    return True, f"✅ Backpack upgraded successfully! Max capacity increased from {current_slots} ➡️ {new_slots} slots."
+# ── Shield helpers ──────────────────────────────────────────────────────
+SHIELD_DISRUPT_MINUTES = 10       # fixed lockout + amount drained from remaining shield time
+NEW_PLAYER_SHIELD_HOURS = 24      # one-time grant at registration only
+def sync_shield_state(user: dict) -> dict:
+    """
+    Bring shield_status up to date based on elapsed time. Call this before
+    reading OR mutating shield state anywhere.
+    - ACTIVE past shield_expires_at -> UNPROTECTED
+    - DISRUPTED past shield_disrupted_until -> reactivate with whatever
+      shield_expires_at is left, or UNPROTECTED if nothing's left
+    """
+    status = user.get("shield_status", "UNPROTECTED")
+    now = datetime.utcnow()
 
+    if status == "ACTIVE":
+        exp_str = user.get("shield_expires_at")
+        if exp_str:
+            try:
+                if now >= datetime.fromisoformat(exp_str):
+                    user["shield_status"] = "UNPROTECTED"
+                    user["shield_expires_at"] = None
+            except Exception:
+                pass
+
+    elif status == "DISRUPTED":
+        until_str = user.get("shield_disrupted_until")
+        if until_str:
+            try:
+                if now >= datetime.fromisoformat(until_str):
+                    exp_str = user.get("shield_expires_at")
+                    still_has_time = False
+                    if exp_str:
+                        try:
+                            still_has_time = now < datetime.fromisoformat(exp_str)
+                        except Exception:
+                            pass
+                    user["shield_status"] = "ACTIVE" if still_has_time else "UNPROTECTED"
+                    if not still_has_time:
+                        user["shield_expires_at"] = None
+                    user["shield_disrupted_until"] = None
+            except Exception:
+                pass
+
+    return user
+def is_shielded(user: dict) -> bool:
+    user = sync_shield_state(user)
+    return user.get('shield_status', 'UNPROTECTED') == 'ACTIVE'
+
+def activate_shield(user_id: str, item_key: str) -> tuple[bool, str]:
+    """Player-triggered only — consumes one shield item from the backpack."""
+    user = get_user(user_id)
+    if not user:
+        return False, "❌ User profile not found."
+
+    from store_system import STORE_ITEMS
+    shield_data = STORE_ITEMS.get(item_key)
+    if not shield_data:
+        return False, "❌ Shield configuration not found."
+
+    user = sync_shield_state(user)
+    status = user.get('shield_status', 'UNPROTECTED')
+
+    if status == 'DISRUPTED':
+        until_str = user.get('shield_disrupted_until')
+        try:
+            until = datetime.fromisoformat(until_str) if until_str else None
+        except Exception:
+            until = None
+        mins_left = int((until - datetime.utcnow()).total_seconds() // 60) + 1 if until else SHIELD_DISRUPT_MINUTES
+        return False, f"⚠️ Shield DISRUPTED — locked out for {mins_left} more minute(s)."
+
+    hours = shield_data.get("duration_h", 8)
+    now = datetime.utcnow()
+
+    user['shield_status'] = 'ACTIVE'
+    user['shield_expires_at'] = (now + timedelta(hours=hours)).isoformat()
+    user['shield_disrupted_until'] = None
+    user = remove_inventory_item(user, item_key)   # actually consume it now
+    user.pop('shield_cooldown', None)  # Clear old structural cooldown tracking flags safely
+
+    save_user(user_id, user)
+    return True, f"🛡️ Shield activated successfully! Base protected for the next {hours} hours."
 
 def reset_all_shields():
     """Reset all players' shields to UNPROTECTED (in-memory only)."""
@@ -1209,32 +1175,6 @@ def add_unclaimed_item(user_id, item_type: str, amount: int = 1,
     user['unclaimed_items'] = unclaimed
     save_user(str(user_id), user)
 
-
-def add_randomized_gift(user_id):
-    """Award random gift: XP crate, powerful item, or resources bundle."""
-    choice = random.randint(1, 3)
-    if choice == 1:
-        # XP Crate
-        gift_type = random.choice(['wood_crate', 'bronze_crate', 'iron_crate', 'super_crate'])
-        add_unclaimed_item(user_id, gift_type, 1, xp_reward=None)
-    elif choice == 2:
-        # Powerful locked item
-        award_powerful_locked_item(user_id)
-    else:
-        # Resources bundle (give direct resources)
-        user = get_user(str(user_id))
-        if user:
-            base_res = user.get('base_resources', {})
-            resources = base_res.get('resources', {})
-            # Random resource boost
-            res_choice = random.choice(['wood', 'bronze', 'iron', 'stone'])
-            amount = random.randint(50, 200) if res_choice != 'stone' else random.randint(10, 50)
-            resources[res_choice] = resources.get(res_choice, 0) + amount
-            base_res['resources'] = resources
-            user['base_resources'] = base_res
-            save_user(str(user_id), user)
-
-
 def get_unclaimed_items(user_id) -> list:
     user = get_user(str(user_id))
     if not user:
@@ -1268,7 +1208,9 @@ def claim_item(user_id, item_id: int):
         return False, "Item not found"
 
     item_type = item.get('type', '')
-    inv = user.get('inventory', {})
+    inv = user.get('inventory', [])
+    if not isinstance(inv, list):
+        inv = []
 
     # Special handling: backpack upgrades don't enter inventory
     if 'backpack' in item_type.lower():
@@ -1281,10 +1223,12 @@ def claim_item(user_id, item_id: int):
 
     # Stackable items: merge into existing slot or use one slot for all of this type
     if item_type in STACKABLE_ITEMS:
-        existing = next((s for s in inv if s.get('type') == item_type), None)
+        existing = next((s for s in inv if s.get('type') == item_type or s.get('item_key') == item_type), None)
         if existing:
             # Increment quantity on the existing stack — no new slot needed
-            existing['quantity'] = existing.get('quantity', 1) + 1
+            new_qty = existing.get('quantity', existing.get('qty', 1)) + 1
+            existing['quantity'] = new_qty
+            existing['qty'] = new_qty
         else:
             # No existing stack — needs a free slot
             if len(inv) >= user.get('backpack_slots', 5):
@@ -1293,6 +1237,10 @@ def claim_item(user_id, item_id: int):
                 'id':       _next_id(inv),
                 'type':     item_type,
                 'quantity': 1,
+                'item_key': item_type,
+                'qty':      1,
+                'display':  item_type.replace('_', ' ').title(),
+                'category': 'consumable',
                 'xp_reward':        item.get('xp_reward', 0),
                 'multiplier_value': item.get('multiplier_value', 0),
                 'acquired': datetime.utcnow().isoformat(),
@@ -1310,6 +1258,10 @@ def claim_item(user_id, item_id: int):
         'id':               _next_id(inv),
         'type':             item_type,
         'quantity':         1,
+        'item_key':         item_type,
+        'qty':              1,
+        'display':          item_type.replace('_', ' ').title(),
+        'category':         'consumable',
         'xp_reward':        item.get('xp_reward', 0),
         'multiplier_value': item.get('multiplier_value', 0),
         'acquired':         datetime.utcnow().isoformat(),
@@ -1354,7 +1306,7 @@ def get_profile(user_id) -> dict | None:
     user = get_user(str(user_id))
     if not user:
         return None
-    inv      = user.get('inventory', {})
+    inv      = user.get('inventory', [])
     uncl     = user.get('unclaimed_items', [])
     xp       = user.get('xp', 0)
     energy   = user.get('energy', 0)
@@ -1388,9 +1340,10 @@ def get_profile(user_id) -> dict | None:
         'inventory_count': len(inv),
         'unclaimed_count': len(uncl),
         'crate_count':     sum(1 for i in inv if 'crate' in i.get('type','').lower()),
-        'shield_count':    sum(1 for i in inv if i.get('type','') == 'shield'),
+        'shield_count':    sum(1 for i in inv if i.get('item_key', '').startswith('shield_')),
         'shielded':        shielded,
-        'shield_expires':  user.get('shield_expires'),
+        'shield_expires_at':user.get('shield_expires_at'),
+        'shield_disrupted_until':  user.get('shield_disrupted_until'),
         'base_name':       user.get('base_name'),
         'base_resources':  resources_dict,
         'base_food':       food,
@@ -1466,175 +1419,10 @@ def get_all_users() -> list:
         print(f"[ERROR] get_all_users failed: {e}")
         return []
 
-
-def reset_all_streaks():
-    """Reset current_streak to 0 for all players (called every 120s for new game round)."""
-    try:
-        users = get_all_users()
-        reset_count = 0
-        
-        for user_data in users:
-            try:
-                user = _row_to_user(user_data)  # Deserialize
-                if not user:
-                    continue
-                
-                base_res = user.get('base_resources', {})
-                old_streak = base_res.get('current_streak', 0)
-                
-                if old_streak > 0:  # Only update if there's a streak to reset
-                    base_res['current_streak'] = 0
-                    user['base_resources'] = base_res
-                    save_user(user.get('user_id'), user)
-                    reset_count += 1
-            except Exception as e:
-                print(f"[ERROR] Failed to reset streak for user {user_data.get('user_id')}: {e}")
-                continue
-        
-        if reset_count > 0:
-            print(f"[ROUND] Streak reset for {reset_count} players - NEW ROUND STARTED ⚡")
-        return reset_count
-    except Exception as e:
-        print(f"[ERROR] reset_all_streaks failed: {e}")
-        return 
-
-CREDITS_TO_PLAY    = 10     # Credits to enter a Fusion round
-CREDITS_DAILY_LOGIN = 50   # Credits from daily login
-CREDITS_RANK_REWARDS = {    # Credits awarded by leaderboard rank
-    1: 50, 2: 45, 3: 30,
-    4: 20, 5: 10,
-    6: 5,  7: 5,  8: 5, 9: 5, 10: 5,
-}
-
-
-def get_credits(user_id: str) -> int:
-    """Get a player's current credit balance."""
-    from supabase_db import get_user as _get_user
-    user = _get_user(str(user_id))
-    if not user:
-        return 0
-    return int(user.get("credits", 0) or 0)
-
-
-def add_credits(user_id: str, amount: int) -> int:
-    """Add credits to a player. Returns new balance."""
-    from supabase_db import get_user as _get_user, save_user as _save_user
-    user = _get_user(str(user_id))
-    if not user:
-        return 0
-    current = int(user.get("credits", 0) or 0)
-    new_bal = current + amount
-    _save_user(str(user_id), {**user, "credits": new_bal})
-    return new_bal
-
-
-def spend_credits(user_id: str, amount: int) -> tuple:
-    """
-    Spend credits. Returns (success: bool, new_balance: int).
-    Fails if player doesn't have enough.
-    """
-    from supabase_db import get_user as _get_user, save_user as _save_user
-    user = _get_user(str(user_id))
-    if not user:
-        return False, 0
-    current = int(user.get("credits", 0) or 0)
-    if current < amount:
-        return False, current
-    new_bal = current - amount
-    _save_user(str(user_id), {**user, "credits": new_bal})
-    return True, new_bal
-
-
-def claim_daily_login_credits(user_id: str) -> tuple:
-    """
-    Claim daily login credits. Returns (awarded: bool, amount: int, new_balance: int).
-    Can only be claimed once per UTC day.
-    """
-    from datetime import datetime
-    from supabase_db import get_user as _get_user, save_user as _save_user
-    user = _get_user(str(user_id))
-    if not user:
-        return False, 0, 0
-
-    today      = datetime.utcnow().strftime("%Y-%m-%d")
-    last_claim = user.get("last_credit_login", "")
-
-    if last_claim == today:
-        return False, 0, int(user.get("credits", 0) or 0)
-
-    amount  = CREDITS_DAILY_LOGIN
-    current = int(user.get("credits", 0) or 0)
-    new_bal = current + amount
-
-    _save_user(str(user_id), {
-        **user,
-        "credits":                 new_bal,
-        "last_credit_login": today,
-    })
-    return True, amount, new_bal
-
-
-def award_scoreboard_credits(user_id: str, rank: int) -> int:
-    """
-    Award credits based on leaderboard rank. Returns amount awarded.
-    Called at end of each round for top 10 players.
-    """
-    amount = CREDITS_RANK_REWARDS.get(rank, 0)
-    if amount > 0:
-        add_credits(str(user_id), amount)
-    return amount
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # PASTE BLOCK 2 — Teleport grant (replaces the broken version)
 # main.py imports: grant_free_teleports_to_all
 # ═══════════════════════════════════════════════════════════════════════════
-
-def grant_free_teleports_to_all() -> int:
-    """
-    Grant 3 free teleport charges to all players who haven't claimed today.
-    Uses the teleport_charges integer column — never touches inventory.
-    Returns count of players granted.
-    Safe to call synchronously at startup.
-    """
-    from datetime import datetime
-    today   = datetime.utcnow().strftime("%Y-%m-%d")
-    granted = 0
-
-    try:
-        result = supabase.table(DB_TABLE).select(
-            "user_id, teleport_charges, teleport_daily_claimed_date"
-        ).execute()
-
-        users = result.data or []
-
-        for user in users:
-            try:
-                uid = user.get("user_id")
-                if not uid:
-                    continue
-                if user.get("teleport_daily_claimed_date") == today:
-                    continue
-
-                current = int(user.get("teleport_charges") or 0)
-                supabase.table(DB_TABLE).update({
-                    "teleport_charges":             current + 3,
-                    "teleport_daily_claimed_date":  today,
-                }).eq("user_id", uid).execute()
-                granted += 1
-
-            except Exception as e:
-                print(f"[WARN] Could not grant teleports to {user.get('user_id','?')}: {e}")
-
-        print(f"[TELEPORTS] Granted 3 charges to {granted} players")
-
-    except Exception as e:
-        print(f"[ERROR] grant_free_teleports_to_all: {e}")
-
-    return granted
-
-
-
 def get_sector_state(sector_id: int) -> dict:
     try:
         r = supabase.table("sector_state").select("*").eq(
@@ -1736,14 +1524,14 @@ def normalize_user(user: dict) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 #  CREDITS SYSTEM
 # ═══════════════════════════════════════════════════════════════════════════
-
+CREDITS_PER_STAR = 30   # 1 ⭐ Star = 30 Credits (matches the rate shown in credits_info)
 CREDITS_TO_PLAY     = 10
 CREDITS_DAILY_LOGIN = 50
 CREDITS_RANK_REWARDS = {
     1: 50, 2: 45, 3: 30, 4: 20, 5: 10,
     6: 5,  7: 5,  8: 5,  9: 5,  10: 5,
 }
-
+GOLD_PER_STAR = 1
 
 def get_credits(user_id: str) -> int:
     user = get_user(str(user_id))
@@ -1773,29 +1561,100 @@ def spend_credits(user_id: str, amount: int) -> tuple:
     save_user(str(user_id), {**user, "credits": new_bal})
     return True, new_bal
 
-
-def claim_daily_login_credits(user_id: str) -> tuple:
-    """Returns (awarded: bool, amount: int, new_balance: int)."""
+def add_gold(user_id: str, amount: int) -> int:
+    """Add gold to a player. Returns new balance."""
     user = get_user(str(user_id))
     if not user:
-        return False, 0, 0
-
-    today      = _dt.utcnow().strftime("%Y-%m-%d")
-    last_claim = user.get("last_credit_login", "")
-
-    if last_claim == today:
-        return False, 0, int(user.get("credits", 0) or 0)
-
-    amount  = CREDITS_DAILY_LOGIN
-    current = int(user.get("credits", 0) or 0)
+        return 0
+    current = int(user.get("gold", 0) or 0)
     new_bal = current + amount
+    save_user(str(user_id), {**user, "gold": new_bal})
+    return new_bal
 
-    save_user(str(user_id), {
+
+def spend_gold(user_id: str, amount: int) -> tuple:
+    """
+    Spend gold. Returns (success: bool, new_balance: int).
+    Fails if player doesn't have enough.
+    """
+    user = get_user(str(user_id))
+    if not user:
+        return False, 0
+    current = int(user.get("gold", 0) or 0)
+    if current < amount:
+        return False, current
+    new_bal = current - amount
+    save_user(str(user_id), {**user, "gold": new_bal})
+    return True, new_bal
+
+
+def claim_daily_login_credits(user_id: str) -> tuple:
+    """
+    Claim daily login credits with a 7-day reward streak.
+    Returns (awarded: bool, amount: int, new_balance: int, current_streak: int).
+    Can only be claimed once per UTC day.
+    """
+    from datetime import datetime, timedelta, timezone
+    from supabase_db import get_user as _get_user, save_user as _save_user
+    
+    user = _get_user(str(user_id))
+    if not user:
+        return False, 0, 0, 0
+
+    # Define the 7-day credit reward matrix
+    STREAK_REWARDS = {1: 50, 2: 60, 3: 75, 4: 100, 5: 125, 6: 150, 7: 200}
+
+    # Use modern timezone-aware UTC dates to clear your terminal warnings
+    now = datetime.now(timezone.utc)
+    today = now.strftime("%Y-%m-%d")
+    yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    last_claim = user.get("last_credit_login", "")
+    current_credits = int(user.get("credits", 0) or 0)
+    login_streak = int(user.get("login_streak", 0) or 0)
+
+    # 1. Block if already claimed today
+    if last_claim == today:
+        return False, 0, current_credits, login_streak
+
+    # 2. Calculate the streak progress
+    if last_claim == yesterday:
+        # Progress streak, reset back to 1 if they completed day 7 yesterday
+        if login_streak >= 7:
+            new_streak = 1
+        else:
+            new_streak = login_streak + 1
+    else:
+        # Missed a day or brand new player -> Start at Day 1
+        new_streak = 1
+
+    # 3. Determine reward values
+    amount = STREAK_REWARDS.get(new_streak, 50)
+    new_bal = current_credits + amount
+
+    # 4. Save updated payload back to Supabase
+    updated_fields = {
         **user,
-        "credits":                 new_bal,
+        "credits": new_bal,
         "last_credit_login": today,
-    })
-    return True, amount, new_bal
+        "login_streak": new_streak
+    }
+
+    # Optional: If Day 7, add your bronze crate item here!
+    if new_streak == 7:
+        from supabase_db import add_inventory_item
+        user = add_inventory_item(user, "crt_brz", 1, "🥉 Bronze Crate", category="consumable")
+
+    updated_fields = {
+        **user,
+        "credits": new_bal,
+        "last_credit_login": today,
+        "login_streak": new_streak
+    }
+
+    _save_user(str(user_id), updated_fields)
+    
+    return True, amount, new_bal, new_streak
 
 
 def award_scoreboard_credits(user_id: str, rank: int) -> int:
@@ -1808,41 +1667,33 @@ def award_scoreboard_credits(user_id: str, rank: int) -> int:
 # ═══════════════════════════════════════════════════════════════════════════
 #  TELEPORT GRANT
 # ═══════════════════════════════════════════════════════════════════════════
+# supabase_db.py — add near add_credits/add_gold
 
-def grant_free_teleports_to_all() -> int:
+def claim_daily_teleports(user_id: str) -> tuple:
     """
-    Grant 3 free teleport charges to all players who haven't claimed today.
-    Uses teleport_charges integer column — never touches inventory list.
-    Returns count granted. Safe to call synchronously at startup.
+    Claim 3 free teleport charges. ADDS to existing balance — never overwrites.
+    Once per UTC calendar day; if the player doesn't tap the claim button that
+    day, that day's free teleports simply don't get granted — no stacking of
+    missed days, but charges they already own are never touched.
+    Returns (claimed: bool, message: str, new_charges: int).
     """
-    today   = _dt.utcnow().strftime("%Y-%m-%d")
-    granted = 0
+    user = get_user(str(user_id))
+    if not user:
+        return False, "❌ User not found.", 0
 
-    try:
-        result = supabase.table(DB_TABLE).select(
-            "user_id, teleport_charges, teleport_daily_claimed_date"
-        ).execute()
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    if user.get("teleport_daily_claimed_date") == today:
+        current = int(user.get("teleport_charges", 0) or 0)
+        return False, "⏳ Already claimed today — come back tomorrow!", current
 
-        for row in (result.data or []):
-            try:
-                uid = row.get("user_id")
-                if not uid:
-                    continue
-                if row.get("teleport_daily_claimed_date") == today:
-                    continue
-                current = int(row.get("teleport_charges") or 0)
-                supabase.table(DB_TABLE).update({
-                    "teleport_charges":            current + 3,
-                    "teleport_daily_claimed_date": today,
-                }).eq("user_id", uid).execute()
-                granted += 1
-            except Exception as e:
-                print(f"[WARN] teleport grant {row.get('user_id','?')}: {e}")
-
-    except Exception as e:
-        print(f"[ERROR] grant_free_teleports_to_all: {e}")
-
-    return granted
+    current = int(user.get("teleport_charges", 0) or 0)
+    new_charges = current + 3
+    save_user(str(user_id), {
+        **user,
+        "teleport_charges": new_charges,
+        "teleport_daily_claimed_date": today,
+    })
+    return True, f"🌀 +3 Teleport Charges claimed! Total: {new_charges}", new_charges
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1851,110 +1702,83 @@ def grant_free_teleports_to_all() -> int:
 #  grant_free_shields_to_all is a no-op stub — it's imported by main.py
 #  but does nothing. The other functions are real.
 # ═══════════════════════════════════════════════════════════════════════════
-
-def grant_free_shields_to_all() -> int:
+def give_automatic_shield(user_id: str, duration_hours: int = NEW_PLAYER_SHIELD_HOURS) -> bool:
     """
-    Stub — free shields disabled by design.
-    Players must purchase shields. This exists only so main.py import works.
-    Returns 0.
-    """
-    print("[SHIELDS] Auto-grant disabled — players purchase shields.")
-    return 0
-
-
-def give_automatic_shield(user_id: str, duration_hours: int = 8) -> bool:
-    """
-    Give a timed shield to a specific player (e.g. after base siege, new player).
-    Returns True if applied.
+    Grant a shield ONLY at registration, to help new players learn the game
+    safely. Never called automatically after this — every shield beyond
+    this one is player-activated from their backpack.
     """
     try:
         user = get_user(str(user_id))
         if not user:
             return False
-        expires = (_dt.utcnow() + _td(hours=duration_hours)).isoformat()
+        expires = (datetime.now(timezone.utc) + timedelta(hours=duration_hours)).isoformat()
         save_user(str(user_id), {
             **user,
-            "base_shielded":    True,
+            "shield_status": "ACTIVE",
             "shield_expires_at": expires,
+            "shield_disrupted_until": None,
         })
         return True
     except Exception as e:
         print(f"[SHIELD] give_automatic_shield error: {e}")
         return False
 
-
 def deactivate_shield(user_id: str) -> tuple:
     """
-    Manually deactivate a player's shield.
-    Returns (success: bool, message: str)
+    Called automatically by scout/attack action handlers — going on the
+    offensive forfeits your own shield. Not a player-facing command.
     """
+    user = get_user(str(user_id))
+    if not user:
+        return False, "Player not found"
+
+    user = sync_shield_state(user)
+    if user.get("shield_status") != "ACTIVE":
+        return False, "No active shield to deactivate"
+
+    save_user(str(user_id), {
+        **user,
+        "shield_status": "UNPROTECTED",
+        "shield_expires_at": None,
+    })
+    return True, "🔓 Shield deactivated — you're now vulnerable."
+
+def disrupt_shield(user_id: str) -> tuple:
+    """
+    First hit on a shielded base: locks the player out of shield protection
+    for a fixed SHIELD_DISRUPT_MINUTES, and drains that same amount off the
+    remaining shield timer. Cannot be sped up. If the remaining timer was
+    shorter than the disrupt window, the shield expires outright once the
+    lockout ends instead of going negative.
+    """
+    user = get_user(str(user_id))
+    if not user:
+        return False, "Player not found"
+
+    user = sync_shield_state(user)
+    if user.get("shield_status") != "ACTIVE":
+        return False, "Target has no active shield to disrupt"
+
+    now = datetime.utcnow()
+    exp_str = user.get("shield_expires_at")
     try:
-        user = get_user(str(user_id))
-        if not user:
-            return False, "Player not found"
-        if not user.get("base_shielded"):
-            return False, "No active shield to deactivate"
-        save_user(str(user_id), {
-            **user,
-            "base_shielded":    False,
-            "shield_expires_at": None,
-        })
-        return True, "🔓 Shield deactivated"
-    except Exception as e:
-        return False, f"Error: {e}"
+        exp = datetime.fromisoformat(exp_str) if exp_str else now
+    except Exception:
+        exp = now
 
+    remaining = exp - now
+    drained = remaining - timedelta(minutes=SHIELD_DISRUPT_MINUTES)
+    new_expires_at = (now + drained).isoformat() if drained > timedelta(0) else None
+    disrupted_until = (now + timedelta(minutes=SHIELD_DISRUPT_MINUTES)).isoformat()
 
-def disrupt_shield(user_id: str, drain_hours: int = 2) -> tuple:
-    """
-    Attacker disrupts a defender's shield — reduces duration by drain_hours.
-    Called when an attack on a shielded base lands.
-    Returns (disrupted: bool, hours_remaining: float)
-    """
-    try:
-        user = get_user(str(user_id))
-        if not user:
-            return False, 0
-
-        if not user.get("base_shielded"):
-            return False, 0
-
-        exp_str = user.get("shield_expires_at")
-        if not exp_str:
-            return False, 0
-
-        try:
-            exp = _dt.fromisoformat(exp_str)
-        except Exception:
-            return False, 0
-
-        now         = _dt.utcnow()
-        if now >= exp:
-            # Already expired
-            save_user(str(user_id), {**user, "base_shielded": False, "shield_expires_at": None})
-            return False, 0
-
-        new_exp     = exp - _td(hours=drain_hours)
-        hours_left  = max(0, (new_exp - now).total_seconds() / 3600)
-
-        if new_exp <= now:
-            # Shield fully drained
-            save_user(str(user_id), {
-                **user,
-                "base_shielded":    False,
-                "shield_expires_at": None,
-                "shield_just_expired": True,
-            })
-            return True, 0
-        else:
-            save_user(str(user_id), {
-                **user,
-                "shield_expires_at": new_exp.isoformat(),
-            })
-            return True, round(hours_left, 1)
-
-    except Exception as e:
-        print(f"[SHIELD] disrupt_shield error: {e}")
-        return False, 0
+    save_user(str(user_id), {
+        **user,
+        "shield_status": "DISRUPTED",
+        "shield_expires_at": new_expires_at,
+        "shield_disrupted_until": disrupted_until,
+    })
+    return True, f"Shield disrupted for {SHIELD_DISRUPT_MINUTES} minutes!"
 
 
 def restore_shield_after_attack(user_id: str) -> bool:
@@ -2041,3 +1865,253 @@ def reset_all_streaks() -> None:
 
     except Exception as e:
         print(f"[STREAKS] reset_all_streaks error: {e}")
+
+def sync_player_passive_energy(user: dict) -> dict:
+    """
+    Calculates passive energy recovery based on elapsed time.
+    Regenerates up to a hard ceiling of 1000 energy in exactly 1 hour.
+    """
+    max_energy = 1000
+    reg_rate_per_sec = 1000 / 3600  # 0.2778 per second
+    
+    current_energy = user.get("energy", 0)
+    
+    # If already at max capacity, update the tracking timestamp and return
+    if current_energy >= max_energy:
+        user["energy"] = max_energy
+        user["energy_last_updated_at"] = datetime.utcnow().isoformat()
+        return user
+
+    last_update_str = user.get("energy_last_updated_at")
+    if not last_update_str:
+        # Fallback if the field doesn't exist yet
+        user["energy_last_updated_at"] = datetime.utcnow().isoformat()
+        return user
+
+    try:
+        last_update = datetime.fromisoformat(last_update_str)
+        elapsed_seconds = (datetime.utcnow() - last_update).total_seconds()
+        
+        if elapsed_seconds > 0:
+            # Calculate gained energy
+            gained = elapsed_seconds * reg_rate_per_sec
+            new_energy = min(max_energy, current_energy + gained)
+            
+            user["energy"] = int(new_energy)
+            user["energy_last_updated_at"] = datetime.utcnow().isoformat()
+    except Exception:
+        pass
+
+    return user
+
+def activate_energy_cell_from_backpack(user_id: str, item_key: str) -> tuple[bool, str]:
+    """
+    Consumes an energy item from the player's backpack.
+    Restricts total energy from exceeding the hard ceiling cap of 1000.
+    """
+    user = get_user(user_id)
+    if not user:
+        return False, "❌ User profile not found."
+
+    # Force a passive regeneration sync first so their energy is up-to-date
+    user = sync_player_passive_energy(user)
+
+    current_energy = user.get("energy", 0)
+    max_energy = 1000
+
+    if current_energy >= max_energy:
+        return False, f"⚠️ Your Energy Core is already completely filled! ({current_energy}/{max_energy})"
+
+    # Fetch configuration properties from catalog
+    from store_system import STORE_ITEMS
+    item_data = STORE_ITEMS.get(item_key)
+    if not item_data:
+        return False, "❌ Item data configurations not found."
+
+    # Determine how much energy this specific cell item restores (default to 250)
+    energy_to_restore = item_data.get("energy", 250)
+
+    # Apply boost capped at 1000 max
+    user["energy"] = min(max_energy, current_energy + energy_to_restore)
+    
+    # Update timestamp so passive generation adjusts to the new value properly
+    user["energy_last_updated_at"] = datetime.utcnow().isoformat()
+
+    # Deduct 1 item from inventory backpack
+    user = remove_inventory_item(user, item_key)
+
+    save_user(user_id, user)
+    return True, f"⚡ Charged up! Core energy updated to {user['energy']}/{max_energy}."
+
+
+def use_energy(user_id: str, amount: int) -> tuple[bool, str, int]:
+    """
+    Spend energy on an action. NEVER refuses — players can always use energy,
+    even if it drives their balance to 0 or negative, so they can waste it
+    strategically or take a risk on a low tank.
+    Returns (success: bool, message: str, new_energy: int).
+    `success` is always True here; kept in the return signature so callers
+    that check `ok, msg = use_energy(...)` style still work without changes.
+    """
+    user = get_user(user_id)
+    if not user:
+        return False, "❌ User profile not found.", 0
+
+    # Sync passive regen first so the deduction starts from an accurate value
+    user = sync_player_passive_energy(user)
+
+    current_energy = user.get("energy", 0)
+    new_energy = current_energy - amount   # intentionally allowed to go negative
+
+    user["energy"] = new_energy
+    user["energy_last_updated_at"] = datetime.utcnow().isoformat()
+    save_user(user_id, user)
+
+    if new_energy < 0:
+        return True, f"⚡ Used {amount} energy. Core is now overdrawn: {new_energy}/1000.", new_energy
+    return True, f"⚡ Used {amount} energy. Remaining: {new_energy}/1000.", new_energy
+
+def use_resource_pack_from_backpack(user_id: str, item_key: str) -> tuple:
+    """
+    Apply a resource pack's contents (food or a base resource) to the
+    player's base, then consume exactly one unit from the backpack.
+    """
+    user = get_user(str(user_id))
+    if not user:
+        return False, "❌ User profile not found."
+
+    row = get_inventory_item(user, item_key)
+    if not row or row.get("category") != "resource_pack":
+        return False, "❌ You don't have this resource pack."
+
+    res_type = row.get("res_type")
+    res_amount = row.get("res_amount", 0)
+
+    base_res = user.get("base_resources", {})
+    if not isinstance(base_res, dict):
+        base_res = {"resources": {}, "food": 0, "current_streak": 0}
+
+    if res_type == "food":
+        base_res["food"] = base_res.get("food", 0) + res_amount
+    else:
+        resources = base_res.get("resources", {})
+        if not isinstance(resources, dict):
+            resources = {}
+        resources[res_type] = resources.get(res_type, 0) + res_amount
+        base_res["resources"] = resources
+
+    user["base_resources"] = base_res
+    user = remove_inventory_item(user, item_key)
+    save_user(user_id, user)
+
+    return True, f"📦 +{res_amount:,} {res_type.title()} added to your warehouse!"
+def start_operation(user_id: str, op_type: str, duration_seconds: int,
+                     target_id: str = None, target_name: str = None,
+                     extra: dict = None) -> dict:
+    """
+    op_type: 'attack_march' | 'scout_march' | 'scout_return' |
+             'battle_sim' | 'shield_disrupt'
+    Every timed thing in the game becomes one of these rows.
+    """
+    user = get_user(user_id)
+    if not user:
+        return {}
+    now = datetime.utcnow()
+    ops = user.get("active_operations", [])
+    if not isinstance(ops, list):
+        ops = []
+    op = {
+        "id": _next_id(ops),
+        "type": op_type,
+        "target_id": target_id,
+        "target_name": target_name,
+        "started_at": now.isoformat(),
+        "ends_at": (now + timedelta(seconds=duration_seconds)).isoformat(),
+        "extra": extra or {},
+    }
+    ops.append(op)
+    user["active_operations"] = ops
+    save_user(user_id, user)
+    return op
+
+
+def clear_operation(user_id: str, op_id: int):
+    user = get_user(user_id)
+    if not user:
+        return
+    ops = [o for o in user.get("active_operations", []) if o.get("id") != op_id]
+    user["active_operations"] = ops
+    save_user(user_id, user)
+
+def render_progress_bar(started_at: str, ends_at: str, width: int = 10) -> str:
+    try:
+        start = datetime.fromisoformat(started_at)
+        end = datetime.fromisoformat(ends_at)
+        now = datetime.utcnow()
+        total = (end - start).total_seconds()
+        elapsed = max(0, (now - start).total_seconds())
+        pct = 100 if total <= 0 else max(0, min(100, int((elapsed / total) * 100)))
+        filled = pct * width // 100
+        bar = "█" * filled + "░" * (width - filled)
+        remaining = max(0, (end - now).total_seconds())
+        m, s = divmod(int(remaining), 60)
+        return f"[{bar}] {pct}% — {m}m {s}s left"
+    except Exception:
+        return "[░░░░░░░░░░] --"
+    
+OP_LABELS = {
+    "attack_march":   "⚔️ Marching to attack {target}",
+    "scout_march":    "🕵️ Scout en route to {target}",
+    "scout_return":   "🐀 Scout returning home",
+    "battle_sim":     "💥 Battle underway at {target}",
+    "shield_disrupt": "🛡️💥 Shield disrupted",
+}
+
+def get_active_operations_display(user_id: str) -> str:
+    user = get_user(user_id)
+    if not user:
+        return "No active operations."
+    ops = user.get("active_operations", [])
+    now = datetime.utcnow()
+    lines = []
+    for op in ops:
+        try:
+            if now >= datetime.fromisoformat(op["ends_at"]):
+                continue  # expired — a separate resolver processes completion
+        except Exception:
+            continue
+        label = OP_LABELS.get(op["type"], op["type"]).format(target=op.get("target_name", "?"))
+        lines.append(f"{label}\n{render_progress_bar(op['started_at'], op['ends_at'])}")
+    return "\n\n".join(lines) if lines else "🟢 No active operations."
+MARCH_DURATION_SECONDS = 180          # 3 min flat for now — later: distance-based
+BATTLE_SIM_MIN, BATTLE_SIM_MAX = 15, 20
+SCOUT_RETURN_DURATION_SECONDS = 180   # separate leg, for future interception mechanic
+
+async def _shield_warning_or_none(user_id: str) -> str | None:
+    """Returns warning text if shielded, else None (safe to proceed silently)."""
+    user = get_user(user_id)
+    user = sync_shield_state(user)
+    if user.get("shield_status") != "ACTIVE":
+        return None
+    exp = datetime.fromisoformat(user["shield_expires_at"])
+    remaining = exp - datetime.utcnow()
+    h, rem = divmod(int(remaining.total_seconds()), 3600)
+    m, _ = divmod(rem, 60)
+    return f"⚠️ This will deactivate YOUR shield immediately.\nTime remaining: {h}h {m}m\n\nProceed anyway?"
+
+def apply_speedup_to_operation(user_id: str, operation_id: int, item_key: str) -> tuple:
+    user = get_user(user_id)
+    row = get_inventory_item(user, item_key)
+    if not row or row.get("category") != "speedup":
+        return False, "❌ Invalid speedup item."
+    minutes = row.get("reduces_timer_minutes", 5)
+    ops = user.get("active_operations", [])
+    op = next((o for o in ops if o.get("id") == operation_id), None)
+    if not op:
+        return False, "❌ Operation not found."
+    ends = datetime.fromisoformat(op["ends_at"]) - timedelta(minutes=minutes)
+    op["ends_at"] = max(datetime.utcnow(), ends).isoformat()
+    user["active_operations"] = ops
+    user = remove_inventory_item(user, item_key)
+    save_user(user_id, user)
+    return True, f"⏩ -{minutes}m applied!"

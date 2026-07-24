@@ -147,8 +147,8 @@ BUILDING_TYPES: Dict[str, dict] = {
     },
 
     "farm": {
-        "name":        "Farm",
-        "description": "Produces food to sustain troops. Each level adds 50 food/hour.",
+        "name":        "Hydroponic Bay",
+        "description": "A sterile indoor facility using nutrient-infused water and UV grow lights to rapidly produce engineered biomas. Each level adds 50 rations/hour.",
         "category":    "resources",
         "unlock_base_level": 1,
         "max_level":   10,

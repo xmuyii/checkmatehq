@@ -34,7 +34,7 @@ CALLBACK DATA FORMAT:
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from aiogram import Router, types, F
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -385,7 +385,7 @@ async def handle_private_sector(cb: types.CallbackQuery):
             [InlineKeyboardButton("⛏️ Iron Plot",    callback_data=f"ps:claim_plot:{sector_id}:{plot_id}:iron_plot")],
             [InlineKeyboardButton("🪨 Stone Plot",   callback_data=f"ps:claim_plot:{sector_id}:{plot_id}:stone_plot")],
             [InlineKeyboardButton("🏺 Relic Plot",   callback_data=f"ps:claim_plot:{sector_id}:{plot_id}:relic_plot")],
-            [InlineKeyboardButton("🌾 Farm Plot",    callback_data=f"ps:claim_plot:{sector_id}:{plot_id}:food_plot")],
+            [InlineKeyboardButton("🥫 Hydroponic Bay Plot",    callback_data=f"ps:claim_plot:{sector_id}:{plot_id}:food_plot")],
             [InlineKeyboardButton("⬅️ Back",         callback_data=f"ps:plot_detail:{sector_id}:{plot_id}")],
         ]
         try:

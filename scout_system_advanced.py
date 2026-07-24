@@ -11,7 +11,7 @@ Advanced scouting with:
 
 import random
 from datetime import datetime, timedelta
-from supabase_db import get_user, save_user
+from supabase_db import get_user, save_user, deactivate_shield
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  SCOUT TRACKING SYSTEM
@@ -30,8 +30,11 @@ def scout_player_advanced(scout_id: str, target_id: str, target_name: str) -> di
         'status': 'pending' | 'completed' | 'killed' | 'escaped'
     }
     """
+
+    
     scout_user = get_user(scout_id)
     target_user = get_user(target_id)
+    deactivate_shield(scout_id)  # Deactivate shield if active when sending scout
     
     if not scout_user or not target_user:
         return {

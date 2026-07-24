@@ -63,11 +63,11 @@ BASE_BUILDINGS = {
         "capacity_base": 1000,
     },
     "farm": {
-        "name": "🌾 Farm",
+        "name": "🥫 Hydroponic Bay",
         "level": 1,
         "max_level": 10,
         "cost": {"silver": 200, "xp": 30},
-        "effect": "Generate food. +5 food/hour per level.",
+        "effect": "Generate rations. +5 rations/hour per level.",
         "production_base": 5,
     },
     "wall": {

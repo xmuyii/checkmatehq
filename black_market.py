@@ -208,9 +208,10 @@ def create_listing(
         ), seller_user
 
     # Check item in inventory
-    inv    = seller_user.get("inventory", {}) or {}
-    item   = inv.get(item_key, {})
-    if not isinstance(item, dict) or item.get("qty", 0) < item_qty:
+    from supabase_db import get_inventory_item, remove_inventory_item
+    item_row = get_inventory_item(seller_user, item_key)
+    have_qty = int(item_row.get("qty", item_row.get("quantity", 0)) or 0) if item_row else 0
+    if have_qty < item_qty:
         return False, f"❌ Not enough {item_key} in inventory.", seller_user
 
     # Check listings cap
@@ -225,12 +226,8 @@ def create_listing(
         return False, "❌ You can only have 5 active listings at a time.", seller_user
 
     # Deduct from inventory (escrow)
-    item["qty"] -= item_qty
-    if item["qty"] <= 0:
-        del inv[item_key]
-    else:
-        inv[item_key] = item
-    seller_user["inventory"] = inv
+    for _ in range(item_qty):
+        seller_user = remove_inventory_item(seller_user, item_key)
 
     # Create listing
     listing_id = f"mkt_{int(datetime.utcnow().timestamp())}_{seller_id[-4:]}"
@@ -311,15 +308,13 @@ def purchase_listing(
         return False, "❌ Cannot buy your own listing.", buyer_user
 
     price  = target.get("price_gold", 0)
-    inv    = buyer_user.get("inventory", {}) or {}
-    gold   = inv.get("gold", {}).get("qty", 0) if isinstance(inv, dict) else 0
+    gold   = buyer_user.get("gold", 0) or 0
 
     if gold < price:
         return False, f"❌ Need {price} 🪙. You have {gold} 🪙.", buyer_user
 
     # Deduct gold from buyer
-    inv["gold"]["qty"] = gold - price
-    buyer_user["inventory"] = inv
+    buyer_user["gold"] = gold - price
 
     # Calculate fee
     fee        = int(price * MARKET_FEE_PCT)
@@ -327,29 +322,18 @@ def purchase_listing(
 
     # Pay seller
     try:
-        seller_id  = target["seller_id"]
-        r          = supabase.table(DB_TABLE).select(
-            "user_id, inventory"
-        ).eq("user_id", seller_id).execute()
-        if r.data:
-            from supabase_db import normalize_user, safe_json
-            seller = normalize_user(r.data[0])
-            s_inv  = seller.get("inventory", {}) or {}
-            if "gold" in s_inv and isinstance(s_inv["gold"], dict):
-                s_inv["gold"]["qty"] = s_inv["gold"].get("qty", 0) + seller_cut
-            else:
-                s_inv["gold"] = {"qty": seller_cut, "display": "Gold",
-                                 "emoji": "🪙", "category": "premium"}
-            seller["inventory"] = s_inv
+        from supabase_db import get_user, save_user
+        seller_id = target["seller_id"]
+        seller    = get_user(seller_id)
+        if seller:
+            seller["gold"] = (seller.get("gold", 0) or 0) + seller_cut
             seller["pending_notification"] = (
                 f"🏪 *Item Sold!*\n"
                 f"{target['item_emoji']} {target['item_name']} ×{target['item_qty']}\n"
                 f"Earned: {seller_cut} 🪙 (after {fee} 🪙 market fee)\n"
                 f"Buyer: @{buyer_user.get('username','?')}"
             )
-            supabase.table(DB_TABLE).update(seller).eq(
-                "user_id", seller_id
-            ).execute()
+            save_user(seller_id, seller)
     except Exception as e:
         print(f"[BLACK MARKET] Seller payment error: {e}")
 
@@ -360,16 +344,11 @@ def purchase_listing(
     item_emoji = target["item_emoji"]
     item_desc  = target.get("item_desc", "")
 
-    if item_key in inv and isinstance(inv[item_key], dict):
-        inv[item_key]["qty"] = inv[item_key].get("qty", 0) + item_qty
-    else:
-        inv[item_key] = {
-            "qty":      item_qty,
-            "display":  item_name,
-            "emoji":    item_emoji,
-            "category": target.get("category", "misc"),
-        }
-    buyer_user["inventory"] = inv
+    from supabase_db import add_inventory_item
+    buyer_user = add_inventory_item(
+        buyer_user, item_key, item_qty, item_name,
+        category=target.get("category", "misc"),
+    )
 
     # Apply recipe book effect immediately
     if target.get("category") == "recipe_book":
@@ -426,18 +405,12 @@ def cancel_listing(
     # Return item to inventory
     item_key  = target["item_key"]
     item_qty  = target["item_qty"]
-    inv       = seller_user.get("inventory", {}) or {}
 
-    if item_key in inv and isinstance(inv[item_key], dict):
-        inv[item_key]["qty"] = inv[item_key].get("qty", 0) + item_qty
-    else:
-        inv[item_key] = {
-            "qty":      item_qty,
-            "display":  target["item_name"],
-            "emoji":    target["item_emoji"],
-            "category": target.get("category", "misc"),
-        }
-    seller_user["inventory"] = inv
+    from supabase_db import add_inventory_item
+    seller_user = add_inventory_item(
+        seller_user, item_key, item_qty, target["item_name"],
+        category=target.get("category", "misc"),
+    )
 
     listings[idx]["status"] = "cancelled"
     _save_listings(listings)
@@ -460,9 +433,10 @@ def use_exclusive_item(
     Use a Black Market exclusive item.
     Returns (success, message, updated_user)
     """
-    inv  = user.get("inventory", {}) or {}
-    item = inv.get(item_key, {})
-    if not isinstance(item, dict) or item.get("qty", 0) < 1:
+    from supabase_db import get_inventory_item
+    item_row = get_inventory_item(user, item_key)
+    have_qty = int(item_row.get("qty", item_row.get("quantity", 0)) or 0) if item_row else 0
+    if have_qty < 1:
         return False, f"❌ No {item_key} in inventory.", user
 
     exclusive = EXCLUSIVE_ITEMS.get(item_key, {})
@@ -575,12 +549,8 @@ def use_exclusive_item(
         )
 
     # Consume item
-    item["qty"] -= 1
-    if item["qty"] <= 0:
-        del inv[item_key]
-    else:
-        inv[item_key] = item
-    user["inventory"] = inv
+    from supabase_db import remove_inventory_item
+    user = remove_inventory_item(user, item_key)
 
     return True, result_msg, user
 

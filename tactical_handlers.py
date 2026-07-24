@@ -786,7 +786,7 @@ async def handle_suit(cb: types.CallbackQuery):
             *[[InlineKeyboardButton(f"🧪 Equip {sk.replace('_',' ').title()}",
                                     callback_data=f"suit:equip:{sk}")]
               for sk in SUIT_KEYS
-              if user.get("inventory", {}).get(sk, {}).get("qty", 0) > 0],
+              if user.get("inventory", []).get(sk, {}).get("qty", 0) > 0],
             [InlineKeyboardButton("« Back", callback_data="player:inventory")],
         ])
         try:

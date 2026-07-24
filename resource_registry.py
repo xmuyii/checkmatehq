@@ -735,60 +735,46 @@ def apply_energy_regen(user: dict) -> dict:
 
 def migrate_inventory(user: dict) -> dict:
     """
-    One-time migration from old unclaimed_items list to stacked inventory dict.
-    Safe to call on every load — detects old format and converts, skips if already new.
+    DISABLED — DO NOT RESTORE THE OLD BODY OF THIS FUNCTION.
+
+    This used to convert unclaimed_items into a DICT-based inventory,
+    assuming that was the target schema. It was wrong: the real,
+    correct schema everywhere else in this codebase is a LIST of item
+    dicts (see get_inventory_item/add_inventory_item/remove_inventory_item
+    in supabase_db.py). Its own guard (`isinstance(inventory, dict)`)
+    could never pass against a correctly-shaped list, so it ran its full
+    body on every single call from on_user_load() — for every player, on
+    every interaction — silently replacing the real inventory list with a
+    garbled dict AND permanently deleting unclaimed_items to [] each time.
+
+    This was very likely the single largest cause of the recurring
+    "inventory turned into {}" reports. Left as a no-op so any leftover
+    import of this name doesn't crash, but it must never touch user data.
     """
-    # Already migrated or empty
-    if isinstance(user.get("inventory"), dict):
-        return user
-
-    old_items = user.get("unclaimed_items", [])
-    if not isinstance(old_items, list):
-        user["inventory"] = {}
-        return user
-
-    new_inventory: dict = {}
-
-    for item in old_items:
-        if not isinstance(item, dict):
-            continue
-        key = item.get("key", item.get("type", "unknown"))
-        amount = item.get("amount", item.get("qty", 1))
-
-        if key == "unknown" or not key:
-            continue
-
-        if key in new_inventory:
-            new_inventory[key]["qty"] += amount
-        else:
-            res = RESOURCES.get(key, {})
-            new_inventory[key] = {
-                "qty": amount,
-                "display": res.get("display_name", key.replace("_", " ").title()),
-                "emoji": res.get("emoji", "📦"),
-                "category": res.get("category", "misc"),
-            }
-
-    user["inventory"] = new_inventory
-    user["unclaimed_items"] = []   # Clear old list
     return user
 
 
 def format_inventory_display(user: dict) -> str:
     """Format the player's full inventory for display. Grouped by category."""
-    inventory = user.get("inventory", {})
+    inventory = user.get("inventory", []) or []
+    if not isinstance(inventory, list):
+        inventory = []
     if not inventory:
         return "🎒 *Backpack is empty*"
 
     # Group by category
     categories: dict = {}
-    for key, data in inventory.items():
-        if data.get("qty", 0) <= 0:
+    for item in inventory:
+        if not isinstance(item, dict):
             continue
-        cat = data.get("category", "misc")
+        qty = item.get("qty", item.get("quantity", 0))
+        if qty <= 0:
+            continue
+        key = item.get("item_key", item.get("type", "unknown"))
+        cat = item.get("category", "misc")
         if cat not in categories:
             categories[cat] = []
-        categories[cat].append((key, data))
+        categories[cat].append((key, item))
 
     category_labels = {
         "basic": "📦 Basic Resources",

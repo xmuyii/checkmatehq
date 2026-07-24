@@ -27,11 +27,20 @@ except Exception as e:
     DB_SOURCE = "JSON"
 
 # ── Config (Read from Environment Variables) ──────────────────────────────────
-from config import BOT_TOKEN, SUPABASE_URL as CONFIG_SUPABASE_URL, SUPABASE_KEY as CONFIG_SUPABASE_KEY
+from config import BOT_TOKEN, SUPABASE_URL as CONFIG_SUPABASE_URL, SUPABASE_KEY as CONFIG_SUPABASE_KEY, LOCAL_DEV, is_valid_telegram_token
 
-API_TOKEN    = os.environ.get('API_TOKEN', BOT_TOKEN)
-SUPABASE_URL = os.environ.get('SUPABASE_URL', CONFIG_SUPABASE_URL).rstrip('/')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', CONFIG_SUPABASE_KEY)
+
+def _get_first_env(*names, default=''):
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return default
+
+
+API_TOKEN    = _get_first_env('BOT_TOKEN', 'API_TOKEN', default=BOT_TOKEN)
+SUPABASE_URL = _get_first_env('SUPABASE_URL', default=CONFIG_SUPABASE_URL).rstrip('/')
+SUPABASE_KEY = _get_first_env('SUPABASE_KEY', default=CONFIG_SUPABASE_KEY)
 
 # Get CHECKMATE_HQ_GROUP_ID from environment (Telegram group IDs are negative)
 try:
@@ -40,7 +49,11 @@ try:
 except (ValueError, TypeError):
     CHECKMATE_HQ_GROUP_ID = None
 
-bot = Bot(token=API_TOKEN)
+if LOCAL_DEV or not is_valid_telegram_token(API_TOKEN):
+    print("[LOCAL MODE] Telegram bot disabled; using local-only startup for debugging.")
+    bot = None
+else:
+    bot = Bot(token=API_TOKEN)
 initiation_router = Router()
 
 # Track premium timers (not wired to payment yet)
@@ -373,7 +386,7 @@ async def backpack_choice_handler(callback: types.CallbackQuery, state: FSMConte
         sector_name = info.get("name", f"Sector {sector_id}") if info else f"Sector {sector_id}"
 
         await callback.message.edit_text(
-            "🃏 *GameMaster:* \"Trying to farm rewards again? *Adorably* transparent.\"\n\n"
+            "🃏 *GameMaster:* \"Trying to farm rewards again? Awwn you're so adorable.\"\n\n"
             "\"I've already seen all your tricks. You get NOTHING this time.\"\n\n"
             f"📍 You're already in: *#{sector_id} {sector_name.upper()}*\n"
             "🎒 Backpack: Normal (5 slots)\n\n"

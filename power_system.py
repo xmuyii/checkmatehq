@@ -102,20 +102,24 @@ def get_power_breakdown(user: dict) -> dict:
     building_power = sum(level * 50 for level in buildings.values())
     
     military = user.get('military', {})
-    military_power = (military.get('soldiers', 0) * 2) + (military.get('commanders', 0) * 500)
+    military_power = sum(count * 10 for count in military.values())
     
-    weapons = user.get('weapons', {})
+  
     weapon_power = 0
-    if isinstance(weapons, dict):
-        for weapon_id, data in weapons.items():
-            if isinstance(data, dict):
-                weapon_power += data.get('level', 0) * 30
-            else:
-                weapon_power += (data * 30) if isinstance(data, int) else 0
-    
-    traps = user.get('traps', {})
-    trap_power = sum(count * 10 for count in traps.values())
-    
+    weapons = _parse_dict(user.get('weapons', {}))  
+    for weapon_id, data in weapons.items():
+        if weapon_id in WEAPONS:
+            level = data.get('level', 0) if isinstance(data, dict) else 0
+            weapon_calc += level * 30  # Each weapon level = 30 power
+        else:
+            # If it's just a number (level)
+            weapon_calc += data * 30 if isinstance(data, int) else 0
+    weapon_power = weapon_calc
+    traps = _parse_dict(user.get('traps', {}))
+    for trap_id, count in traps.items():
+        if trap_id in TRAP_TYPES:
+            t_power += count * 10  # Each trap = 10 power
+    trap_power = t_power
     prestige_level = user.get('prestige_level', 0)
     prestige_power = prestige_level * 200
     

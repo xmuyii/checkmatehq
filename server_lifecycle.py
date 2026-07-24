@@ -19,14 +19,21 @@ MAINTENANCE SCREEN:
   instead of normal content.
 
 HOW TO WIRE INTO main.py:
-  
+  from server_lifecycle import (
+      on_startup, on_shutdown, check_maintenance_mode,
+      maintenance_response, SERVER_STATUS_KEY
+  )
 
   # In your main() function, before dp.start_polling:
+  asyncio.create_task(on_startup(bot, supabase, DB_TABLE))
 
   # Register shutdown:
+  dp.shutdown.register(lambda: on_shutdown(bot, supabase, DB_TABLE))
 
   # In cmd_start, at the very top before anything else:
-  
+  if await check_maintenance_mode(supabase):
+      await maintenance_response(message)
+      return
 """
 
 import asyncio
@@ -242,7 +249,20 @@ async def _set_server_status(supabase, status: str):
 SERVER_META_SQL = """
 -- Run this once in Supabase SQL Editor
 
+CREATE TABLE IF NOT EXISTS server_meta (
+    key        text PRIMARY KEY,
+    value      text NOT NULL DEFAULT 'online',
+    updated_at text
+);
 
+INSERT INTO server_meta (key, value)
+VALUES ('server_status', 'online')
+ON CONFLICT (key) DO NOTHING;
+
+-- Also add these columns to users table if not present:
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active          text DEFAULT NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notifications_seen   jsonb DEFAULT '{}'::jsonb;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs   jsonb DEFAULT '{}'::jsonb;
 """
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -251,6 +271,7 @@ SERVER_META_SQL = """
 
 MAIN_PY_PATCH = '''
 # ── PASTE 1: Add to imports at top of main.py ─────────────────────────
+from server_lifecycle import on_startup, on_shutdown, check_maintenance_mode, maintenance_response
 
 # ── PASTE 2: Add to cmd_start, at the very top of the private chat block ──
 # (after "if message.chat.type != 'private': return")

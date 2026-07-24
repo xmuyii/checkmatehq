@@ -103,8 +103,7 @@ def activate_hunter_career(user: dict) -> Tuple[bool, str, dict]:
     if is_bounty_hunter(user):
         return False, "✅ You are already a Bounty Hunter.", user
 
-    inv  = user.get("inventory", {}) or {}
-    gold = inv.get("gold", {}).get("qty", 0) if isinstance(inv, dict) else 0
+    gold = user.get("gold", 0) or 0
 
     if gold < CAREER_ACTIVATION_COST:
         return False, (
@@ -113,8 +112,7 @@ def activate_hunter_career(user: dict) -> Tuple[bool, str, dict]:
         ), user
 
     # Deduct gold
-    inv["gold"]["qty"] = gold - CAREER_ACTIVATION_COST
-    user["inventory"]  = inv
+    user["gold"] = gold - CAREER_ACTIVATION_COST
 
     # Activate career
     user["is_bounty_hunter"]    = True
@@ -220,15 +218,13 @@ def should_appear_on_board(user: dict) -> Tuple[bool, str]:
     if isinstance(dominance, dict) and dominance:
         pass  # Ruler status checked separately via sector_state
 
-    # Bitcoin Whale
-    inv = user.get("inventory", {})
-    if isinstance(inv, dict):
-        btc = inv.get("bitcoin", {})
-        if isinstance(btc, dict) and btc.get("qty", 0) >= BITCOIN_WHALE_THRESHOLD:
-            return True, "bitcoin_whale"
+    # Bitcoin Whale — bitcoin is a top-level field, never an inventory item
+    if (user.get("bitcoin", 0) or 0) >= BITCOIN_WHALE_THRESHOLD:
+        return True, "bitcoin_whale"
 
-    # Unshielded too long
-    shielded    = user.get("base_shielded", False)
+    # Unshielded too long — use the real shield system, not the dead base_shielded field
+    from supabase_db import is_shielded
+    shielded    = is_shielded(user)
     shield_exp  = user.get("shield_expires_at", "")
     if not shielded:
         return True, "unshielded"
@@ -262,16 +258,13 @@ def place_bounty(
     """
     reward_gold = max(BOUNTY_MIN_REWARD, min(BOUNTY_MAX_REWARD, reward_gold))
 
-    inv   = poster_user.get("inventory", {}) or {}
-    gold  = inv.get("gold", {}).get("qty", 0) if isinstance(inv, dict) else 0
+    gold  = poster_user.get("gold", 0) or 0
 
     if gold < reward_gold:
         return False, f"❌ Not enough gold. Have {gold} 🪙, need {reward_gold} 🪙.", poster_user
 
     # Deduct gold
-    if isinstance(inv, dict) and "gold" in inv:
-        inv["gold"]["qty"] = gold - reward_gold
-    poster_user["inventory"] = inv
+    poster_user["gold"] = gold - reward_gold
 
     # Determine rank from target's power
     try:
@@ -374,13 +367,7 @@ def claim_bounty(
     # Award gold
     reward     = bounty.get("reward_gold", 0)
     rank       = bounty.get("rank", "C")
-    inv        = hunter_user.get("inventory", {}) or {}
-    if "gold" in inv and isinstance(inv.get("gold"), dict):
-        inv["gold"]["qty"] = inv["gold"].get("qty", 0) + reward
-    else:
-        inv["gold"] = {"qty": reward, "display": "Gold",
-                       "emoji": "🪙", "category": "premium"}
-    hunter_user["inventory"] = inv
+    hunter_user["gold"] = (hunter_user.get("gold", 0) or 0) + reward
 
     # Award hunter XP
     hunter_user["hunter_kills"]    = hunter_user.get("hunter_kills", 0) + 1
@@ -439,8 +426,7 @@ def remove_self_from_board(
     Cannot remove if they are a Sector Ruler.
     """
     REMOVAL_COST = 500
-    inv  = user.get("inventory", {}) or {}
-    gold = inv.get("gold", {}).get("qty", 0) if isinstance(inv, dict) else 0
+    gold = user.get("gold", 0) or 0
 
     if gold < REMOVAL_COST:
         return False, (
@@ -448,8 +434,7 @@ def remove_self_from_board(
             f"You have {gold} 🪙."
         ), user
 
-    inv["gold"]["qty"] = gold - REMOVAL_COST
-    user["inventory"]  = inv
+    user["gold"] = gold - REMOVAL_COST
 
     # Expire all active bounties on this player
     try:
@@ -562,8 +547,7 @@ def format_bounty_board(
                 home_str = f"  🏠 {hi.get('emoji','')} {hi.get('name', f'S{home_sid}')}"
 
             if "bitcoin_whale" in reason:
-                inv  = p.get("inventory", {})
-                btc  = inv.get("bitcoin", {}).get("qty", 0) if isinstance(inv, dict) else 0
+                btc  = p.get("bitcoin", 0) or 0
                 tag  = f"₿ WHALE ({btc:.4f} BTC)"
                 lines.append(f"  💰 @{name} — {tag}{home_str}")
             elif "unshielded" in reason:

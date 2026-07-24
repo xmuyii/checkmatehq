@@ -449,25 +449,23 @@ def can_afford_recipe(user: dict, recipe_key: str) -> Tuple[bool, str]:
 
     base_res  = user.get("base_resources", {}) or {}
     resources = base_res.get("resources", {}) or {}
-    inv       = user.get("inventory", {}) or {}
     missing   = []
 
     for ingredient, amount in recipe.get("ingredients", {}).items():
-        # Check base resources first, then inventory
+        # Ingredients are always base resources (already-applied), not
+        # backpack items. If a player has an unused resource pack in their
+        # inventory, they need to "use" it first — base_resources is the
+        # single source of truth for craftable ingredients.
         have = resources.get(ingredient, 0)
         if have < amount:
-            inv_item = inv.get(ingredient, {})
-            inv_have = inv_item.get("qty", 0) if isinstance(inv_item, dict) else 0
-            total    = have + inv_have
-            if total < amount:
-                missing.append(f"{amount - total} more {ingredient}")
+            missing.append(f"{amount - have} more {ingredient}")
 
-    # Check gold cost
+    # Check gold cost — gold is a top-level field, never an inventory item
     gold_cost = recipe.get("craft_cost_gold", 0)
     if gold_cost > 0:
-        inv_gold = inv.get("gold", {}).get("qty", 0) if isinstance(inv, dict) else 0
-        if inv_gold < gold_cost:
-            missing.append(f"{gold_cost - inv_gold} more gold 🪙")
+        have_gold = user.get("gold", 0) or 0
+        if have_gold < gold_cost:
+            missing.append(f"{gold_cost - have_gold} more gold 🪙")
 
     if missing:
         return False, "Need: " + ", ".join(missing)
@@ -566,10 +564,16 @@ def check_and_complete_crafts(user: dict) -> Tuple[dict, List[str]]:
             continue
 
         if now >= done_at:
-            # Complete — add to inventory
+            # Complete — add to backpack via the shared, correct helper
             output_key = entry["output_key"]
             output_qty = entry["output_qty"]
-            user       = _add_to_inventory(user, output_key, output_qty)
+            recipe_for_output = RECIPES.get(entry["recipe_key"], {})
+            from supabase_db import add_inventory_item
+            user = add_inventory_item(
+                user, output_key, output_qty,
+                recipe_for_output.get("name", output_key.replace("_", " ").title()),
+                category=recipe_for_output.get("category", "consumable"),
+            )
             completed.append(entry["recipe_name"])
 
             # Mark server-unique as active
@@ -596,8 +600,10 @@ def apply_speedup_to_craft(
     if reduction == 0:
         return False, "❌ Not a valid speedup item.", user
 
-    inv = user.get("inventory", {}) or {}
-    if speedup_item_key not in inv or inv[speedup_item_key].get("qty", 0) < 1:
+    from supabase_db import get_inventory_item, remove_inventory_item
+    row = get_inventory_item(user, speedup_item_key)
+    have_qty = int(row.get("qty", row.get("quantity", 0)) or 0) if row else 0
+    if have_qty < 1:
         return False, f"❌ No {speedup_item_key} in inventory.", user
 
     queue = user.get("craft_queue", []) or []
@@ -612,11 +618,8 @@ def apply_speedup_to_craft(
                 queue[i]["done_at"] = new_done.isoformat()
                 user["craft_queue"] = queue
 
-                # Consume speedup
-                inv[speedup_item_key]["qty"] -= 1
-                if inv[speedup_item_key]["qty"] <= 0:
-                    del inv[speedup_item_key]
-                user["inventory"] = inv
+                # Consume speedup from the real backpack list
+                user = remove_inventory_item(user, speedup_item_key)
 
                 remaining = max(0, (new_done - datetime.utcnow()).total_seconds())
                 return True, f"⏩ Craft sped up! Completes in {_format_secs(int(remaining))}.", user
@@ -746,7 +749,6 @@ def format_recipe_detail(recipe_key: str, user: dict) -> str:
 
     base_res  = user.get("base_resources", {}) or {}
     resources = base_res.get("resources", {}) or {}
-    inv       = user.get("inventory", {}) or {}
 
     lines = [
         f"{recipe['emoji']} *{recipe['name']}*",
@@ -760,15 +762,13 @@ def format_recipe_detail(recipe_key: str, user: dict) -> str:
 
     lines.append("\n*Ingredients:*")
     for ing, amount in recipe.get("ingredients", {}).items():
-        have_res = resources.get(ing, 0)
-        have_inv = inv.get(ing, {}).get("qty", 0) if isinstance(inv.get(ing), dict) else 0
-        have     = have_res + have_inv
-        icon     = "✅" if have >= amount else "❌"
+        have = resources.get(ing, 0)
+        icon = "✅" if have >= amount else "❌"
         lines.append(f"  {icon} {ing}: {have}/{amount}")
 
     gold_cost = recipe.get("craft_cost_gold", 0)
     if gold_cost > 0:
-        have_gold = inv.get("gold", {}).get("qty", 0) if isinstance(inv, dict) else 0
+        have_gold = user.get("gold", 0) or 0
         icon      = "✅" if have_gold >= gold_cost else "❌"
         lines.append(f"  {icon} Gold: {have_gold}/{gold_cost} 🪙")
 
@@ -896,50 +896,20 @@ def kb_recipe_detail(recipe_key: str, user: dict) -> InlineKeyboardMarkup:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _deduct_ingredients(user: dict, recipe: dict) -> dict:
-    """Remove ingredients from user resources/inventory."""
+    """Remove ingredients (base resources) and gold cost (top-level field)."""
     base_res  = user.get("base_resources", {}) or {}
     resources = base_res.get("resources", {}) or {}
-    inv       = user.get("inventory", {}) or {}
 
     for ingredient, amount in recipe.get("ingredients", {}).items():
-        # Deduct from base_resources first
-        from_base = min(resources.get(ingredient, 0), amount)
-        resources[ingredient] = resources.get(ingredient, 0) - from_base
-        remaining = amount - from_base
-
-        # Then from inventory
-        if remaining > 0 and isinstance(inv.get(ingredient), dict):
-            inv_qty = inv[ingredient].get("qty", 0)
-            take    = min(inv_qty, remaining)
-            inv[ingredient]["qty"] = inv_qty - take
-
-    # Gold cost
-    gold_cost = recipe.get("craft_cost_gold", 0)
-    if gold_cost > 0 and isinstance(inv.get("gold"), dict):
-        inv["gold"]["qty"] = max(0, inv["gold"].get("qty", 0) - gold_cost)
+        resources[ingredient] = max(0, resources.get(ingredient, 0) - amount)
 
     base_res["resources"]  = resources
     user["base_resources"] = base_res
-    user["inventory"]      = inv
-    return user
 
+    gold_cost = recipe.get("craft_cost_gold", 0)
+    if gold_cost > 0:
+        user["gold"] = max(0, (user.get("gold", 0) or 0) - gold_cost)
 
-def _add_to_inventory(user: dict, item_key: str, qty: int) -> dict:
-    """Add a crafted item to player inventory."""
-    from resource_registry import RESOURCES, get_display_name, get_emoji
-    inv  = user.get("inventory", {}) or {}
-    res  = RESOURCES.get(item_key, {})
-
-    if item_key in inv and isinstance(inv[item_key], dict):
-        inv[item_key]["qty"] = inv[item_key].get("qty", 0) + qty
-    else:
-        inv[item_key] = {
-            "qty":      qty,
-            "display":  res.get("display_name", get_display_name(item_key)),
-            "emoji":    res.get("emoji", get_emoji(item_key)),
-            "category": res.get("category", "misc"),
-        }
-    user["inventory"] = inv
     return user
 
 

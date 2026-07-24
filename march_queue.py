@@ -218,8 +218,10 @@ def apply_speedup_to_march(
         return False, f"❌ Unknown speedup item: {speedup_item_key}", user
 
     # Check player has item
-    inv = user.get("inventory", {})
-    if speedup_item_key not in inv or inv[speedup_item_key].get("qty", 0) < 1:
+    from supabase_db import get_inventory_item
+    speedup_row = get_inventory_item(user, speedup_item_key)
+    have_qty = int(speedup_row.get("qty", speedup_row.get("quantity", 0)) or 0) if speedup_row else 0
+    if have_qty < 1:
         return False, f"❌ You don't have any {speedup_item_key}.", user
 
     reduction = SPEEDUP_REDUCTION.get(speedup_item_key, 0)
@@ -666,13 +668,10 @@ def _return_troops(user: dict, troops: dict) -> dict:
 
 
 def _consume_inventory_item(user: dict, item_key: str, qty: int = 1) -> dict:
-    """Remove one or more of an item from stacked inventory."""
-    inv = user.get("inventory", {})
-    if item_key in inv:
-        inv[item_key]["qty"] = max(0, inv[item_key].get("qty", 0) - qty)
-        if inv[item_key]["qty"] == 0:
-            del inv[item_key]
-    user["inventory"] = inv
+    """Remove one or more of an item from the real list-based inventory."""
+    from supabase_db import remove_inventory_item
+    for _ in range(qty):
+        user = remove_inventory_item(user, item_key)
     return user
 
 

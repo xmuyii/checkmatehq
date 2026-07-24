@@ -10,6 +10,7 @@ Set ENVIRONMENT environment variable to 'prod' or 'test' before running.
 """
 
 import os
+import re
 from dotenv import load_dotenv
 GAME_TOPICS = {
     "trivia": 36623,      # Topic ID for trivia
@@ -23,13 +24,30 @@ load_dotenv()
 # Determine environment (default to prod for safety)
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'prod').lower()
 
+
+def _get_first_env(*names, default=''):
+    for name in names:
+        value = os.getenv(name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return default
+
+
+def is_valid_telegram_token(token: str) -> bool:
+    if not token:
+        return False
+    return bool(re.fullmatch(r"\d+:[A-Za-z0-9_-]{35,}", token.strip()))
+
+
+LOCAL_DEV = os.getenv('LOCAL_DEV', '0').lower() in {'1', 'true', 'yes', 'on'}
+
 # ============================================================================
 # PRODUCTION CONFIG
 # ============================================================================
 if ENVIRONMENT == 'prod':
-    BOT_TOKEN = os.getenv('API_TOKEN', 'your_bot_token_here').strip()
-    SUPABASE_URL = os.getenv('SUPABASE_URL', 'https://your-project.supabase.co').strip()
-    SUPABASE_KEY = os.getenv('SUPABASE_KEY', 'your_supabase_anon_key_here').strip()
+    BOT_TOKEN = _get_first_env('BOT_TOKEN', 'API_TOKEN', default='your_bot_token_here')
+    SUPABASE_URL = _get_first_env('SUPABASE_URL', default='https://your-project.supabase.co')
+    SUPABASE_KEY = _get_first_env('SUPABASE_KEY', default='your_supabase_anon_key_here')
     DB_TABLE = 'players'  # Production table
     ENV_NAME = 'PRODUCTION'
 

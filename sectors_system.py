@@ -307,4 +307,4 @@ if __name__ == "__main__":
     test_resources = {"wood": 10, "bronze": 5, "iron": 8}
     print(f"Original: {test_resources}")
     print(f"Sector 3 (x4 Iron): {apply_sector_buffs(test_resources, 3)}")
-    print(f"Sector 6 (x2 Relics, -90% Food): {apply_sector_buffs({'relics': 2, 'food': 20}, 6)}")
+    print(f"Sector 6 (x2 Relics, -90% Rations): {apply_sector_buffs({'relics': 2, 'food': 20}, 6)}")
