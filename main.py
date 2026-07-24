@@ -1032,8 +1032,8 @@ async def game_loop(chat_id: int, topic_id: int = None):
                 
                 # Inline button so players can view leaderboard right after the round
                 _round_kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="🏆 Weekly Board",  callback_data="lb_overall_weekly"),
-                    InlineKeyboardButton(text="🃏 Fusion Board",  callback_data="lb_fusion_weekly"),
+                    InlineKeyboardButton(text="🪩 Spellcaster's Alltime Board",  callback_data="lb_overall_weekly"),
+                    InlineKeyboardButton(text="🪄 Spellcaster's Weekly Board",  callback_data="lb_fusion_weekly"),
                 ]])
                 await bot.send_message(chat_id, result, parse_mode="Markdown",
                                        message_thread_id=FUSION_TOPIC_ID,
@@ -1502,7 +1502,7 @@ async def cmd_weekly(message: types.Message):
     text = await _render_leaderboard("overall", "weekly")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🃏 Fusion Weekly",  callback_data="lb_fusion_weekly"),
+            InlineKeyboardButton(text="🪄 Spellcaster's Weekly",  callback_data="lb_fusion_weekly"),
             InlineKeyboardButton(text="🧠 Trivia Weekly",  callback_data="lb_trivia_weekly"),
         ],
         [
@@ -5706,11 +5706,11 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
         f"<b>🤖 ZERO DOMINUS COMMAND</b>\n"
         f"<pre>"
         f"👤 {username:<13} Lv {level:<8} ⚡ Power: {total_power:,}\n"
-        f"📍 Sector {sector} ({base_name})\n"
-        f"🌀 Teleports: {teleport_charges}\n"
-        f"⚔️ Forces: {total_troops} Troops\n"
-        f"{shield_icon} Shield: {shield_label}{shield_time}\n"
-        f"{extra_lines}"
+        f"├─ 📍 Sector {sector} ({base_name})\n"
+        f"├─ 🌀 Teleports: {teleport_charges}\n"
+        f"├─ ⚔️ Forces: {total_troops} Troops\n"
+        f"├─ {shield_icon} Shield: {shield_label}{shield_time}\n"
+        f"└─{extra_lines}"
         f"\n"
         f"💰 ECONOMIC CORES\n"
         f"├─ 🪙 Gold: {gold:<11}\n"
@@ -5778,35 +5778,21 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
             InlineKeyboardButton(text="🏰 My Base",     callback_data="menu_base"),
         ],
         [
-            InlineKeyboardButton(text="🎖️ Train",       callback_data="train_menu"),
-            InlineKeyboardButton(text="🏗️ Build",       callback_data="build_menu"),
-        ],
-        [
-            InlineKeyboardButton(text="🎒 Items",       callback_data="menu_inventory"),
-            InlineKeyboardButton(text="🧬 Research",    callback_data="menu_research"),
-        ],
-        [
-            InlineKeyboardButton(text="⚔️ Power",       callback_data="menu_battle"),
             InlineKeyboardButton(text="👥 Alliance",    callback_data="menu_guild"),
-        ],
-        [
             InlineKeyboardButton(text="🌍 Sectors",     callback_data="menu_map"),
-            InlineKeyboardButton(text="🎯 Objectives",  callback_data="menu_objective"),
         ],
         [
-            InlineKeyboardButton(text="🏆 Leaderboard", callback_data="menu_leaderboards"),
+            InlineKeyboardButton(text="🎯 Objectives",  callback_data="menu_objective"),
             InlineKeyboardButton(text="⚙️ Account",     callback_data="menu_account"),
         ],
         [
-            InlineKeyboardButton(text="🎮 Fusion Game", callback_data="menu_fusion_info"),
-            InlineKeyboardButton(text="🧠 Trivia",      callback_data="menu_trivia_info"),
+            InlineKeyboardButton(text="🕯 Sector 1", callback_data="menu_fusion_info"),
+            InlineKeyboardButton(text="🪬 Sector 2",      callback_data="menu_trivia_info"),
         ],
         [
-            InlineKeyboardButton(text="🌀 Claim Daily Teleports", callback_data="claim_daily_teleports")
+            InlineKeyboardButton(text="🌀 Claim 🌀", callback_data="claim_daily_teleports"),
+            InlineKeyboardButton(text="🎁 Claim 🎁", callback_data="claim_free_gift"),
         ],
-        [
-            InlineKeyboardButton(text="🎁 Claim Gift", callback_data="claim_free_gift")
-        ]
     ])
 
     if edit:
@@ -5957,8 +5943,8 @@ async def cb_menu_leaderboards(callback: types.CallbackQuery):
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🃏 Fusion Weekly",   callback_data="lb_fusion_weekly"),
-            InlineKeyboardButton(text="🃏 Fusion All-Time",  callback_data="lb_fusion_alltime"),
+            InlineKeyboardButton(text="🪄 Spellcaster's Weekly",   callback_data="lb_fusion_weekly"),
+            InlineKeyboardButton(text="🪩 Spellcaster's All-Time",  callback_data="lb_fusion_alltime"),
         ],
         [
             InlineKeyboardButton(text="🧠 Trivia Weekly",   callback_data="lb_trivia_weekly"),
@@ -6453,24 +6439,32 @@ async def cb_menu_fusion_info(callback: types.CallbackQuery):
     from wiring_hooks import on_user_action
     u_id = str(callback.from_user.id)
     on_user_action(u_id, supabase)
-    fusion_link  = "https://https://t.me/checkmateHQ/36621" 
+    fusion_link  = "https://t.me/checkmateHQ/36621" 
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🃏 Go to Fusion Topic", url=fusion_link)],
+        [InlineKeyboardButton(text="🃏 Teleport to Sector 1 \n 🕯 Spellcaster's Hollow 🕯", url=fusion_link)],
         [
-            InlineKeyboardButton(text="🏆 Fusion Weekly",   callback_data="lb_fusion_weekly"),
-            InlineKeyboardButton(text="📊 Fusion All-Time", callback_data="lb_fusion_alltime"),
+            
+            InlineKeyboardButton(text="🏆 Leaderboard", callback_data="menu_leaderboards"),
+            InlineKeyboardButton(text="🪄 Spellcaster's Weekly",   callback_data="lb_fusion_weekly"),
+            InlineKeyboardButton(text="🪩 Spellcaster's All-Time", callback_data="lb_fusion_alltime"),
         ],
         [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
     ])
     await callback.message.edit_text(
-        "🃏 <b>FUSION WORD GAME</b>\n━━━━━━━━━━━━━━━━━\n"
-        "📖 <b>How to play:</b>\n"
-        "Two 6-letter words are shown. Use their letters to form new words!\n\n"
-        "📏 <b>Scoring:</b>\n"
-        "• 3 letters = 1 pt  • 4 = 2 pts  • 5 = 3 pts\n"
-        "• 6 = 4 pts  • 7 = 5 pts  • 8+ = 6 pts\n\n"
-        "🔥 <b>Streak bonus:</b> 3+ correct in a row = food bonus\n"
+        "📍 <b>Sector 1</b>\n━━━━━━━━━━━━━━━━━\n"
+        "🌀 <b>🕯 Spellcaster's Hollow 🕯</b>\n"
+        "Welcome to Spellcaster's Hollow! Here two 6-letter words are shown.\n Use their letters to form new words!\n\n"
+        "Every correct word mines resources.\n"
+        "Sector buffs, alliance buffs and player stats affect resource yield.\n"
+        "📏 <b>Resource Generation:</b>\n"
+        "  3 letters = 1 pt, 0 resources, +(streak)ration\n"
+        "  4 letters = 2 pts, 1 wood 🪵, +(streak)ration\n"
+        "  5 letters = 3 pts, 1 bronze 🧱, +(streak)ration\n"
+        "  6 letters = 4 pts, 1 iron ⛓️, +(streak)ration\\n"
+        "  7 letters = 5 pts, 1 diamond 💎, +(streak)ration\n"
+        "  8 letters+ = 6 pts, 1 relic 🏺, +(streak)ration\n"
+        "🔥 <b>Streak bonus:</b> Cast 3+ spells correctly in a row = ration bonus\n"
         "🎁 <b>Crate drops:</b> React to claim mid-round crates!\n\n"
         "<i>Type /fusion in the Fusion Topic to start a game.</i>",
         parse_mode="HTML", reply_markup=kb
@@ -6805,11 +6799,13 @@ async def cb_menu_base(callback: types.CallbackQuery):
     rows = []
 
     # Action buttons first
-    rows.append([
-        InlineKeyboardButton(text="🏗️ Build New",     callback_data="build_menu"),
-        InlineKeyboardButton(text="🎖️ Train Troops",  callback_data="train_menu"),
+    rows.append([ 
+        InlineKeyboardButton(text="🏗️ Construction",     callback_data="build_menu"),
+        InlineKeyboardButton(text="🏹 Training Grounds",  callback_data="train_menu"),
     ])
     rows.append([
+        
+        InlineKeyboardButton(text="🎒 Items",       callback_data="menu_inventory"),
         InlineKeyboardButton(text="🔱 Traps",         callback_data="show_trap_list"),
         InlineKeyboardButton(text="🧬 Research",      callback_data="menu_research"),
     ])
@@ -7148,6 +7144,8 @@ async def cb_menu_profile(callback: types.CallbackQuery):
             InlineKeyboardButton(text="⚡ Restore Energy",  callback_data="add_energy"),
         ],
         [
+            
+            InlineKeyboardButton(text="⚔️ Power",       callback_data="menu_battle"),
             InlineKeyboardButton(text="🧬 Skill Upgrades",  callback_data="credits_daily"),
             InlineKeyboardButton(text="🌅 Daily Login",     callback_data="credits_daily"),
         ],

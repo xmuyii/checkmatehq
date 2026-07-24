@@ -259,6 +259,44 @@ def save_user(user_id, data: dict):
     
     supabase.table(DB_TABLE).update(d).eq('user_id', str(user_id)).execute()
 
+def save_weekly_winners():
+    """Fetches current weekly leaderboard top 3 and snapshots them to last_week_winners."""
+    try:
+        current_week = _current_week_key()
+        
+        # 1. Get top 10 players from weekly leaderboard (excluding bots)
+        res = supabase.table('leaderboard_weekly') \
+            .select('user_id, username, points, is_bot') \
+            .eq('week_key', current_week) \
+            .order('points', desc=True) \
+            .limit(10) \
+            .execute()
+        
+        top_players = [p for p in (res.data or []) if not p.get('is_bot', False)][:10]
+
+        if not top_players:
+            print("[RESET] No real players found to save for last_week_winners.")
+            return
+
+        # 2. Clear old entries from last_week_winners (so it only holds the latest batch)
+        supabase.table('last_week_winners').delete().neq('id', '').execute()
+
+        # 3. Format & Insert new records
+        records_to_insert = []
+        for rank, p in enumerate(top_players, start=1):
+            records_to_insert.append({
+                'rank': rank,
+                'username': p.get('username', 'Unknown'),
+                'points': p.get('points', 0),
+                'week_key': current_week
+            })
+
+        insert_res = supabase.table('last_week_winners').insert(records_to_insert).execute()
+        print(f"[RESET] Successfully saved {len(records_to_insert)} winners to last_week_winners!")
+
+    except Exception as e:
+        print(f"[ERROR] Failed to save weekly winners: {e}")
+
 
 def register_user(user_id, username: str):
     """Create a fresh account. Returns True on success, False on failure."""
