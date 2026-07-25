@@ -8616,9 +8616,48 @@ async def cmd_alliance(message: types.Message):
         from alliance_system import join_alliance
         success, msg = join_alliance(u_id, alliance_id)
         await message.answer(msg, parse_mode="Markdown")
-    
+
+    elif action == "list":
+        from alliance_system import list_alliances, format_alliance_browse_list
+        alliances = list_alliances(limit=15)
+        text = format_alliance_browse_list(alliances)
+        buttons = [
+            [InlineKeyboardButton(text=f"Join {a.get('name','?')}", callback_data=f"alliance_join:{a.get('alliance_id')}")]
+            for a in alliances if len(a.get("members", []) or []) < a.get("max_size", 50)
+        ][:10]  # cap at 10 buttons to stay well under Telegram's keyboard limits
+        markup = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+        await message.answer(text, parse_mode="Markdown", reply_markup=markup)
+
+    elif action == "search":
+        if len(args) < 3:
+            await message.answer("Usage: `!alliance search <name>`", parse_mode="Markdown")
+            return
+        query = " ".join(args[2:])
+        from alliance_system import search_alliances, format_alliance_browse_list
+        alliances = search_alliances(query, limit=10)
+        text = format_alliance_browse_list(alliances)
+        buttons = [
+            [InlineKeyboardButton(text=f"Join {a.get('name','?')}", callback_data=f"alliance_join:{a.get('alliance_id')}")]
+            for a in alliances if len(a.get("members", []) or []) < a.get("max_size", 50)
+        ][:10]
+        markup = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+        await message.answer(text, parse_mode="Markdown", reply_markup=markup)
+
     else:
-        await message.answer("❌ Unknown action. Use: create or join", parse_mode="Markdown")
+        await message.answer(
+            "❌ Unknown action. Use: `create`, `join`, `list`, or `search`",
+            parse_mode="Markdown"
+        )
+
+
+@dp.callback_query(lambda q: q.data.startswith("alliance_join:"))
+async def cb_alliance_join(callback: types.CallbackQuery):
+    """One-tap join from the !alliance list / !alliance search results."""
+    u_id = str(callback.from_user.id)
+    alliance_id = callback.data.split(":", 1)[1]
+    from alliance_system import join_alliance
+    success, msg = join_alliance(u_id, alliance_id)
+    await callback.answer(msg, show_alert=True)
 
 
 @dp.message(_cmd("mine"))

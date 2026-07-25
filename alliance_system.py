@@ -63,6 +63,66 @@ def find_alliance_by_name(name: str) -> Optional[dict]:
         return None
 
 
+def list_alliances(limit: int = 15) -> List[dict]:
+    """
+    Browse existing alliances, largest/most active first. This is the
+    missing discovery step — join_alliance() requires an alliance_id,
+    but nothing previously let a player find one without being told it
+    by another player directly.
+    """
+    try:
+        r = (
+            supabase.table(ALLIANCE_TABLE)
+            .select("alliance_id, name, members, max_size, alliance_points")
+            .order("alliance_points", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return r.data or []
+    except Exception as e:
+        print(f"[ALLIANCE ERROR] list_alliances: {e}")
+        return []
+
+
+def search_alliances(query: str, limit: int = 10) -> List[dict]:
+    """Partial, case-insensitive name search — unlike find_alliance_by_name,
+    which only ever returns a single exact match."""
+    if not query or len(query.strip()) < 2:
+        return []
+    try:
+        r = (
+            supabase.table(ALLIANCE_TABLE)
+            .select("alliance_id, name, members, max_size, alliance_points")
+            .ilike("name", f"%{query.strip()}%")
+            .limit(limit)
+            .execute()
+        )
+        return r.data or []
+    except Exception as e:
+        print(f"[ALLIANCE ERROR] search_alliances: {e}")
+        return []
+
+
+def format_alliance_browse_list(alliances: List[dict]) -> str:
+    """Render a list_alliances()/search_alliances() result as display text."""
+    if not alliances:
+        return "🔍 No alliances found."
+    lines = ["🏰 *ALLIANCES*", "━━━━━━━━━━━━━━━━━"]
+    for a in alliances:
+        members = a.get("members", []) or []
+        count    = len(members)
+        cap      = a.get("max_size", MAX_ALLIANCE_SIZE)
+        pts      = a.get("alliance_points", 0)
+        full_tag = " (FULL)" if count >= cap else ""
+        lines.append(
+            f"*{a.get('name','?')}*{full_tag}\n"
+            f"  👥 {count}/{cap} members · 🏆 {pts:,} pts\n"
+            f"  ID: `{a.get('alliance_id','?')}`"
+        )
+    lines.append("\nUse `!alliance join <id>` to join one, or tap below 👇")
+    return "\n".join(lines)
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  CORE ACTIONS
 # ═══════════════════════════════════════════════════════════════════════════
