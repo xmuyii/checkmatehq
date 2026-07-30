@@ -3238,6 +3238,8 @@ async def handle_teleport_callbacks(callback: types.CallbackQuery):
     data    = callback.data.split(":")
     action  = data[1] if len(data) > 1 else ""
     from wiring_hooks import on_user_action
+    from supabase_db import get_sector_state, save_sector_state
+    from sector_report import log_sector_event
     on_user_action(user_id, supabase)
 
     if action == "menu":
@@ -5625,7 +5627,7 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
     gold        = user.get("gold", 0)
     credits     = user.get("credits", 0)
     bitcoin     = user.get("bitcoin", 0)
-    sector      = user.get("sector", user.get("home_sector", "—"))
+    sector      = user.get("sector", 1)
     base_name   = (user.get("base_name") or "Base")[:16]
     shield_raw  = user.get("shield_status") or "UNPROTECTED"
     military    = user.get("military", {}) or {}
@@ -5703,21 +5705,23 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
     # ── Beautiful Monospaced Columns ──
     # Using HTML <pre> ensures monospaced alignments across all Telegram clients (iOS, Android, PC)
     hud = (
-        f"<b>🤖 ZERO DOMINUS COMMAND</b>\n"
+        f"<b>[📡 COMMAND CENTER]</b>\n"
         f"<pre>"
-        f"👤 {username:<13} Lv {level:<8} ⚡ Power: {total_power:,}\n"
-        f"├─ 📍 Sector {sector} ({base_name})\n"
+        f"👤 {username:<13}" 
+        f"├─ 🎖 Lv {level:<8} ⚡ Power Level: {total_power:,}\n"
+        f"├─ 📍Base Headquaters Location: Sector {sector} ({base_name})\n"
+        f"├─ 📍Commander Location: Sector {sector} ({base_name})\n"
         f"├─ 🌀 Teleports: {teleport_charges}\n"
         f"├─ ⚔️ Forces: {total_troops} Troops\n"
         f"├─ {shield_icon} Shield: {shield_label}{shield_time}\n"
         f"└─{extra_lines}"
         f"\n"
-        f"💰 ECONOMIC CORES\n"
+        f"💰 BANK\n"
         f"├─ 🪙 Gold: {gold:<11}\n"
         f"├─ 💳 Credits: {credits:,}\n"
         f"└─ ₿ BTC:  {bitcoin:,}\n"
         f"\n"
-        f"📦 WAREHOUSE DEPOT\n"
+        f"📦 WAREHOUSE\n"
         f"├─ 🪵 Wood:   {wood:<11} 🧱 Bronze: {bronze}\n"
         f"├─ ⛓️ Iron:   {iron:<11} 🪨 Stone:  {stone}\n"
         f"├─ 🏺 Relics: {relics:<11} 🥫 Rations:   {food}\n"
@@ -5779,7 +5783,7 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
         ],
         [
             InlineKeyboardButton(text="👥 Alliance",    callback_data="menu_guild"),
-            InlineKeyboardButton(text="🌍 Sectors",     callback_data="menu_map"),
+            InlineKeyboardButton(text="🌍 Sectors",     callback_data=f"sec_map:{sector}"),
         ],
         [
             InlineKeyboardButton(text="🎯 Objectives",  callback_data="menu_objective"),
@@ -6723,7 +6727,7 @@ async def cb_menu_base(callback: types.CallbackQuery):
     user = check_and_complete_buildings(user)
     save_user(u_id, user)
 
-    base_name  = user.get("base_name", "My Base") or "My Base"
+    base_name  = user.get("base_name", "Nameless Base") or "Nameless Base"
     base_hq_level = user.get("base_hq_level", 1) or 1
     base_res   = user.get("base_resources", {}) or {}
     res        = base_res.get("resources", {}) or {}
@@ -6811,7 +6815,7 @@ async def cb_menu_base(callback: types.CallbackQuery):
     ])
     rows.append([
         InlineKeyboardButton(text="🗺️ Sectors/Map",  callback_data="menu_map"),
-        InlineKeyboardButton(text="🛡️ Defense",      callback_data="base_defense"),
+        InlineKeyboardButton(text=f"🛡️ Inside [{base_name}]",      callback_data="base:main"),
     ])
 
     # Completed buildings as interactive buttons
@@ -7395,44 +7399,196 @@ async def cb_menu_account(callback: types.CallbackQuery):
         await callback.answer()
     except Exception as e:
         print(f"[WARN] Failed to answer callback early: {e}")
+from aiogram import Router, F, types
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from supabase_db import get_sector_state, save_sector_state
 
-@dp.callback_query(lambda q: q.data == "menu_map")
-async def cb_menu_map(callback: types.CallbackQuery):
-    """Show sectors/map."""
+import sector_nodes as sn
+from wiring_hooks import on_user_action
+
+router = Router()
+
+# ── 1. SECTOR MAP & NAVIGATION ──────────────────────────────────────────────
+@router.callback_query(F.data.startswith("sec_map:"))
+async def cb_sector_map(callback: types.CallbackQuery):
+    """Displays the interactive grid of nodes for a given sector."""
+    # Answer immediately to clear the UI loading indicator
+    await callback.answer()
+
     u_id = str(callback.from_user.id)
-    user = get_user(u_id)
-    from wiring_hooks import on_user_action
     on_user_action(u_id, supabase)
-    
+
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("User record not found.", show_alert=True)
+        return
+
+    # Parse target sector ID from callback data e.g. "sec_map:1"
+    _, sector_id_str = callback.data.split(":")
+    sector_id = int(sector_id_str)
+
+    # Fetch sector state from DB
+    sector_state = get_sector_state(sector_id)
+
+    # Generate Node Grid Keyboard
+    builder = InlineKeyboardBuilder()
+    nodes = sn.SECTOR_NODES.get(sector_id, {})
+    occupancy = sector_state.get("occupancy", {})
+
+    # Build node grid (3 per row)
+    for node_key, node in sorted(nodes.items()):
+        node_type = sn.NODE_TYPES.get(node.get("type"), {})
+        emoji = node_type.get("emoji", "📍")
+
+        # Determine occupancy marker
+        occ_key = f"{sector_id}:{node_key}"
+        occupant = occupancy.get(occ_key)
+
+        if occupant:
+            status = "🟡" if str(occupant.get("player_id")) == u_id else "🔴"
+        else:
+            status = "⚪"
+
+        btn_text = f"{node_key}: {emoji} {status}"
+        builder.button(text=btn_text, callback_data=f"node_inspect:{sector_id}:{node_key}")
+
+    builder.adjust(3)  # Grid layout: 3 nodes per row
+
+    # Navigation & Sector Actions Row
+    builder.row(
+        types.InlineKeyboardButton(text="⬅️ Prev Sector", callback_data=f"sec_map:{max(1, sector_id - 1)}"),
+        types.InlineKeyboardButton(text="🔄 Refresh", callback_data=f"sec_map:{sector_id}"),
+        types.InlineKeyboardButton(text="Next Sector ➡️", callback_data=f"sec_map:{sector_id + 1}")
+    )
+    builder.row(types.InlineKeyboardButton(text="⬅️ Main Menu", callback_data="menu_map"))
+
+    caption = sn.format_sector_map(
+        sector_id=sector_id,
+        sector_state=sector_state,
+        player_id=u_id
+    )
+
+    try:
+        await callback.message.edit_text(
+            text=caption,
+            parse_mode="Markdown",
+            reply_markup=builder.as_markup()
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            raise e
+
+
+# ── 2. NODE INSPECTOR ───────────────────────────────────────────────────────
+@router.callback_query(F.data.startswith("node_inspect:"))
+async def cb_node_inspect(callback: types.CallbackQuery):
+    """Shows details and contextual actions for a specific node."""
+    await callback.answer()
+
+    u_id = str(callback.from_user.id)
+    on_user_action(u_id, supabase)
+
+    user = get_user(u_id)
     if not user:
         await callback.answer("User not found", show_alert=True)
         return
-    
-    current_sector = user.get("sector", 1)
-    
-    markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 Explore", callback_data="map_explore")],
-        [InlineKeyboardButton(text="⚔️ Attack", callback_data="map_attack")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_back")],
-    ])
-    
-    await callback.message.edit_text(
-        f"🗺️ *MAP* 🗺️\n\n"
-        f"━━━━━━━━━━━━━━━━━\n"
-        f"**Current Sector:** {current_sector}\n\n"
-        f"*Actions:*\n"
-        f"🔍 Scout enemies\n"
-        f"⚔️ Plan raids\n"
-        f"💰 Find merchants\n"
-        f"━━━━━━━━━━━━━━━━━",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-    try:
-        await callback.answer()
-    except Exception as e:
-        print(f"[WARN] Failed to answer callback early: {e}")
 
+    # Parse e.g. "node_inspect:1:A"
+    _, sector_id_str, node_key = callback.data.split(":")
+    sector_id = int(sector_id_str)
+
+    sector_state = get_sector_state(sector_id)
+    node_def = sn.get_node(sector_id, node_key)
+    occupant = sn.get_node_occupant(sector_state, sector_id, node_key)
+
+    is_me = occupant and str(occupant.get("player_id")) == u_id
+    is_vacant = occupant is None
+
+    # Contextual Action Keyboard
+    builder = InlineKeyboardBuilder()
+
+    if is_me:
+        builder.button(text="📥 Collect Yield", callback_data=f"node_act:collect:{sector_id}:{node_key}")
+        builder.button(text="🚪 Abandon Node", callback_data=f"node_act:leave:{sector_id}:{node_key}")
+    elif is_vacant:
+        builder.button(text="⚔️ March & Occupy", callback_data=f"node_act:occupy:{sector_id}:{node_key}")
+    else:
+        builder.button(text="🔥 March & Attack", callback_data=f"node_act:attack:{sector_id}:{node_key}")
+
+    builder.button(text="⬅️ Back to Sector Map", callback_data=f"sec_map:{sector_id}")
+    builder.adjust(1)  # Stacked layout for node actions
+
+    # Format Node Inspection Text
+    node_type_info = sn.NODE_TYPES.get(node_def.get("type"), {})
+    emoji = node_type_info.get("emoji", "📍")
+
+    text = (
+        f"📍 *NODE {node_key}* — {node_def.get('name', 'Unknown')}\n"
+        f"━━━━━━━━━━━━━━━━━\n"
+        f"**Type:** {emoji} {node_def.get('type', 'Standard')}\n"
+        f"**Description:** _{node_def.get('description', 'No details available.')}_\n\n"
+    )
+
+    if occupant:
+        text += f"**Occupant:** @{occupant.get('player_name', 'Unknown')}\n"
+        if is_me:
+            text += f"**Pending Yield:** `{int(occupant.get('pending_resources', 0))}`\n"
+    else:
+        text += "**Status:** ⚪ Vacant\n"
+
+    text += "━━━━━━━━━━━━━━━━━"
+
+    try:
+        await callback.message.edit_text(
+            text=text,
+            parse_mode="Markdown",
+            reply_markup=builder.as_markup()
+        )
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            raise e
+
+
+# ── 3. NODE ACTION DISPATCHER ───────────────────────────────────────────────
+@router.callback_query(F.data.startswith("node_act:"))
+async def cb_node_action(callback: types.CallbackQuery):
+    """Executes collection, occupancy, or combat actions on a node."""
+    await callback.answer()
+
+    u_id = str(callback.from_user.id)
+    on_user_action(u_id, supabase)
+
+    user = get_user(u_id)
+    if not user:
+        await callback.answer("User not found", show_alert=True)
+        return
+
+    # Parse e.g. "node_act:collect:1:A" or "node_act:occupy:1:B"
+    _, action, sector_id_str, node_key = callback.data.split(":")
+    sector_id = int(sector_id_str)
+
+    if action == "collect":
+        sector_state = get_sector_state(sector_id)
+        sector_state, user, msg = sn.collect_node_resources(
+            sector_state, sector_id, node_key, u_id, user
+        )
+        save_sector_state(sector_id, sector_state)
+        save_user(u_id, user)
+        await callback.answer(msg, show_alert=True)
+
+    elif action in ["occupy", "attack"]:
+        # Troop deployment or dispatch trigger
+        troops = user.get("army", {"infantry": 10})
+        success, msg, user = sn.start_march_to_node(
+            user, sector_id, node_key, troops, action=action
+        )
+        if success:
+            save_user(u_id, user)
+        await callback.answer(msg, show_alert=True)
+
+    # Return to updated sector map view
+    await cb_sector_map(callback)
 
 @dp.callback_query(lambda q: q.data == "menu_inventory")
 async def cb_menu_inventory(callback: types.CallbackQuery):

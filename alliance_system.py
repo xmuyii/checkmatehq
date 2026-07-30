@@ -323,8 +323,8 @@ def format_alliance_status(player_id: str) -> str:
     alliance_id = player.get("alliance_id")
     if not alliance_id:
         return ("❌ You're not in an alliance\n\n"
-                "Use `!alliance create <name>` to create one\n"
-                "Or `!alliance join <name>` to join")
+                "Create an alliance below\n"
+                "Or join an existing one")
 
     alliance = get_alliance_info(alliance_id)
     if not alliance:
