@@ -42,7 +42,7 @@ def calculate_travel_time(from_sector: int, to_sector: int, speed_per_unit: int 
 
 # ── 1. SECTOR MAP & NAVIGATION HANDLER ──────────────────────────────────────
 @router.callback_query(F.data.startswith("sec_map:"))
-async def cb_sector_map(callback: types.CallbackQuery, supabase, get_user, get_sector_state):
+async def cb_sector_map(callback: types.CallbackQuery):
     """Displays the interactive grid of nodes for a given sector."""
     await callback.answer()
 
@@ -117,7 +117,7 @@ async def cb_sector_map(callback: types.CallbackQuery, supabase, get_user, get_s
 
 # ── 2. NODE INSPECTION & CROSS-SECTOR MOVEMENT HANDLER ────────────────────────
 @router.callback_query(F.data.startswith("node_inspect:"))
-async def cb_node_inspect(callback: types.CallbackQuery, supabase, get_user, get_sector_state):
+async def cb_node_inspect(callback: types.CallbackQuery):
     """Inspects a node & prompts cross-sector march vs instant teleport options."""
     await callback.answer()
 
@@ -213,7 +213,7 @@ async def cb_node_inspect(callback: types.CallbackQuery, supabase, get_user, get
 
 # ── 3. EXECUTE MOVEMENT (MARCH VS TELEPORT) HANDLER ──────────────────────────
 @router.callback_query(F.data.startswith("move_start:"))
-async def cb_move_start(callback: types.CallbackQuery, supabase, get_user, save_user, get_sector_state, save_sector_state):
+async def cb_move_start(callback: types.CallbackQuery):
     """Executes the chosen movement mode (instant teleport vs timed march)."""
     await callback.answer()
 
@@ -241,7 +241,7 @@ async def cb_move_start(callback: types.CallbackQuery, supabase, get_user, save_
             save_user(u_id, user)
 
             await callback.answer("⚡ Teleported instantly!", show_alert=True)
-            await cb_node_inspect(callback, supabase, get_user, get_sector_state)
+            await cb_node_inspect(callback)
 
         # MODE B: NORMAL MARCH
         elif mode == "march":
