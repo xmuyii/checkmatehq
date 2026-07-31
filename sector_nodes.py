@@ -27,7 +27,7 @@ NODE TYPES:
   pvp_node         — Outpost — no resources, grants sector vision + dominance bonus
   base_plot        — Permanent player base location
 """
-
+from aiogram import Router
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple, List
 import json
