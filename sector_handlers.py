@@ -8,7 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import sector_nodes as sn
 from wiring_hooks import on_user_action
-
+from supabase_db import get_user, save_user, get_sector_state, save_sector_state, supabase
 # ── ROUTER DEFINITION ────────────────────────────────────────────────────────
 router = Router()
 
