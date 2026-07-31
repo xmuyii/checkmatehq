@@ -459,6 +459,8 @@ bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher()
 dp.include_router(initiation_router)
 dp.include_router(base_router)
+from sector_handlers import router as sector_router
+dp.include_router(sector_router)
 from store_system    import store_router
 from main_p5_patch   import p5_router
 from main_p6_patch   import p6_router
@@ -5707,10 +5709,10 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
     hud = (
         f"<b>[📡 COMMAND CENTER]</b>\n"
         f"<pre>"
-        f"👤 {username:<13}" 
+        f"👤 {username:<13}\n" 
         f"├─ 🎖 Lv {level:<8} ⚡ Power Level: {total_power:,}\n"
         f"├─ 📍Base Headquaters Location: Sector {sector} ({base_name})\n"
-        f"├─ 📍Commander Location: Sector {sector} ({base_name})\n"
+        f"├─ 📍Commander Location: Sector {sector}\n"
         f"├─ 🌀 Teleports: {teleport_charges}\n"
         f"├─ ⚔️ Forces: {total_troops} Troops\n"
         f"├─ {shield_icon} Shield: {shield_label}{shield_time}\n"

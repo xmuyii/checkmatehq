@@ -34,6 +34,9 @@ import json
 
 from resource_registry import RESOURCES, is_unlocked, get_display_name, get_emoji
 
+# 1. Define the router instance for sector mechanics
+router = Router()
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  NODE TYPE DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════════
