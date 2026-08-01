@@ -81,7 +81,7 @@ async def cb_sector_map(callback: types.CallbackQuery):
             else:
                 status = "⚪"
 
-            btn_text = f"{node_key}: {emoji} {status}"
+            btn_text = f"{node_key}: {status}"
             builder.button(text=btn_text, callback_data=f"node_inspect:{sector_id}:{node_key}")
 
         builder.adjust(3)
@@ -116,9 +116,18 @@ async def cb_sector_map(callback: types.CallbackQuery):
 
 
 # ── 2. NODE INSPECTION & CROSS-SECTOR MOVEMENT HANDLER ────────────────────────
+from private_sector import (
+    get_private_sector, 
+    is_resident, 
+    format_private_sector_map, 
+    format_outsider_view,
+    kb_private_sector_resident,
+    kb_private_sector_outsider
+)
+ 
 @router.callback_query(F.data.startswith("node_inspect:"))
 async def cb_node_inspect(callback: types.CallbackQuery):
-    """Inspects a node & prompts cross-sector march vs instant teleport options."""
+    """Inspects a node & handles Private Sector hub vs Standard Nodes."""
     await callback.answer()
 
     try:
@@ -132,7 +141,23 @@ async def cb_node_inspect(callback: types.CallbackQuery):
 
         _, target_sector_str, node_key = callback.data.split(":")
         target_sector = int(target_sector_str)
-        commander_sector = user.get("sector", 1)
+        commander_sector = user.get("commander_location", 1)
+
+        # 🏰 --- PRIVATE SECTOR NODE INTERACTION ---
+        if node_key == "G":  # Node G is reserved for Private Sector hubs
+            sector_state = get_sector_state(target_sector) or {}
+            private_sector = get_private_sector(sector_state)
+
+            if is_resident(private_sector, u_id):
+                text = format_private_sector_map(private_sector, viewer_id=u_id)
+                kb = kb_private_sector_resident(target_sector, u_id, private_sector)
+            else:
+                text = format_outsider_view(private_sector)
+                kb = kb_private_sector_outsider(target_sector, private_sector)
+
+            await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
+            return
+        # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
         # Check if already in transit
         in_transit_until = user.get("travel_arrival")
@@ -144,13 +169,24 @@ async def cb_node_inspect(callback: types.CallbackQuery):
                 await callback.answer(f"⏳ Commander is already traveling! {remaining}s remaining.", show_alert=True)
                 return
 
+        # ── SAFE INVENTORY EXTRACTION (Handles list OR dict) ──
+        inventory_data = user.get("inventory", {})
+        if isinstance(inventory_data, dict):
+            teleport_scrolls = inventory_data.get(TELEPORT_ITEM_ID, 0)
+        elif isinstance(inventory_data, list):
+            teleport_scrolls = sum(
+                1 for item in inventory_data 
+                if (isinstance(item, dict) and item.get("id") == TELEPORT_ITEM_ID) or item == TELEPORT_ITEM_ID
+            )
+        else:
+            teleport_scrolls = 0
+
         builder = InlineKeyboardBuilder()
 
         # Target is in a different sector -> Offer March / Teleport
         if commander_sector != target_sector:
             travel_seconds = calculate_travel_time(commander_sector, target_sector)
             dist = round(calculate_distance(commander_sector, target_sector), 1)
-            teleport_scrolls = user.get("inventory", {}).get(TELEPORT_ITEM_ID, 0)
 
             caption = (
                 f"🌐 *CROSS-SECTOR MOVEMENT* 🌐\n\n"
@@ -194,11 +230,13 @@ async def cb_node_inspect(callback: types.CallbackQuery):
             builder.button(text="⬅️ Back to Map", callback_data=f"sec_map:{target_sector}")
             builder.adjust(1)
 
+            desc = node_def.get('description', 'No details available.').replace('_', ' ').replace('*', '')
+
             caption = (
                 f"📍 *NODE {node_key}* (Sector {target_sector})\n"
                 f"━━━━━━━━━━━━━━━━━\n"
                 f"**Type:** {node_def.get('type', 'Standard')}\n"
-                f"_{node_def.get('description', '')}_\n\n"
+                f"*{desc}*\n\n"
                 f"**Status:** {'🟡 Occupied by you' if is_me else ('⚪ Vacant' if is_vacant else '🔴 Enemy Occupied')}\n"
                 f"━━━━━━━━━━━━━━━━━"
             )
@@ -209,8 +247,6 @@ async def cb_node_inspect(callback: types.CallbackQuery):
             raise e
     except Exception as e:
         logging.error(f"Error executing cb_node_inspect: {e}", exc_info=True)
-
-
 # ── 3. EXECUTE MOVEMENT (MARCH VS TELEPORT) HANDLER ──────────────────────────
 @router.callback_query(F.data.startswith("move_start:"))
 async def cb_move_start(callback: types.CallbackQuery):

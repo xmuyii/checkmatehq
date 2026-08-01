@@ -121,6 +121,16 @@ NODE_TYPES: Dict[str, dict] = {
         "permanent": True,
         "immune_to_hazards": True,   # Base itself never takes hazard damage
     },
+    "private_hub": {
+            "resource": None,
+            "base_yield_per_minute": 0,
+            "capacity": 0,
+            "research_required": None,
+            "description": "Access point for private sector residents. "
+                           "Requires a Base Siege operation to capture.",
+            "emoji": "🏰",
+            "permanent": True,
+        },
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -163,15 +173,15 @@ SECTOR_NODES: Dict[int, dict] = {
             "type": "base_plot",
             "lore": "A stable plateau with defensible edges. Room for a permanent base.",
         },
-        "G": {
-            "name": "Badlands Base Beta",
-            "type": "base_plot",
-            "lore": "A second plateau on the western edge. Less visible from the canyon.",
-        },
         "H": {
             "name": "Badlands Base Gamma",
             "type": "base_plot",
             "lore": "Northern position. Harsh conditions but good sightlines.",
+        },
+        "G": {
+            "name": "Inner Yards",
+            "type": "private_hub",
+            "lore": "Village. Hidden from the rest of the valley. Only residents can enter.",
         },
     },
 
@@ -208,10 +218,10 @@ SECTOR_NODES: Dict[int, dict] = {
             "lore": "A heat-resistant plateau. The red dust stains everything permanently.",
         },
         "G": {
-            "name": "Crimson Base Beta",
-            "type": "base_plot",
-            "lore": "Sheltered by a basalt ridge. Slightly cooler than the open wastes.",
-        },
+            "name": "Inner Yards",
+            "type": "private_hub",
+            "lore": "Village. Hidden from the rest of the valley. Only residents can enter.",
+        },  
     },
 
     # ── SECTOR 3: Obsidian Peaks ──────────────────────────────────────────
@@ -247,16 +257,16 @@ SECTOR_NODES: Dict[int, dict] = {
             "type": "pvp_node",
             "lore": "The highest point in Obsidian Peaks. Whoever stands here commands the sector.",
         },
-        "G": {
-            "name": "Peak Base Alpha",
-            "type": "base_plot",
-            "lore": "A lava-cooled platform with natural stone walls. Fortifiable.",
-        },
         "H": {
             "name": "Peak Base Beta",
             "type": "base_plot",
             "lore": "Hidden behind an obsidian spire. Hard to find, harder to attack.",
         },
+        "G": {
+            "name": "Inner Yards",
+            "type": "private_hub",
+            "lore": "Village. Hidden from the rest of the valley. Only residents can enter.",
+        },  
     },
 
     # ── SECTOR 4: Shattered Valley ────────────────────────────────────────
@@ -292,9 +302,9 @@ SECTOR_NODES: Dict[int, dict] = {
             "lore": "A stable ground pocket amid the shattered terrain.",
         },
         "G": {
-            "name": "Valley Base Beta",
-            "type": "base_plot",
-            "lore": "Elevated position above the valley floor. Flood-proof.",
+            "name": "Inner Yards",
+            "type": "private_hub",
+            "lore": "Village. Hidden from the rest of the valley. Only residents can enter.",
         },
     },
 
@@ -332,9 +342,9 @@ SECTOR_NODES: Dict[int, dict] = {
             "lore": "A geothermally warmed cavity. Livable despite the surrounding freeze.",
         },
         "G": {
-            "name": "Abyss Base Beta",
-            "type": "base_plot",
-            "lore": "Ice-walled naturally. Defensible but bitterly cold.",
+            "name": "Inner Yards",
+            "type": "private_hub",
+            "lore": "Village. Hidden from the rest of the valley. Only residents can enter.",
         },
     },
 
@@ -370,6 +380,11 @@ SECTOR_NODES: Dict[int, dict] = {
             "name": "Gorge Base Alpha",
             "type": "base_plot",
             "lore": "Built on cooled basalt. Structurally sound but surrounded by active lava channels.",
+        },
+        "G": {
+            "name": "Inner Yards",
+            "type": "private_hub",
+            "lore": "Village. Hidden from the rest of the valley. Only residents can enter.",
         },
     },
 
@@ -407,9 +422,9 @@ SECTOR_NODES: Dict[int, dict] = {
             "lore": "Built on raised ground above the waterline. The only dry land in the marshes.",
         },
         "G": {
-            "name": "Marsh Base Beta",
-            "type": "base_plot",
-            "lore": "A floating platform anchored to the marsh floor. Unusual but defensible.",
+            "name": "Inner Yards",
+            "type": "private_hub",
+            "lore": "Village. Hidden from the rest of the valley. Only residents can enter.",
         },
     },
 
@@ -446,14 +461,9 @@ SECTOR_NODES: Dict[int, dict] = {
             "lore": "Hidden within the dense canopy. Hard to spot from outside the tree line.",
         },
         "G": {
-            "name": "Forest Base Beta",
-            "type": "base_plot",
-            "lore": "Ground-level clearing. Exposed but spacious.",
-        },
-        "H": {
-            "name": "Forest Base Gamma",
-            "type": "base_plot",
-            "lore": "Northern edge. Borders both Sector 7 and Sector 9.",
+            "name": "Inner Yards",
+            "type": "private_hub",
+            "lore": "Village. Hidden from the rest of the valley. Only residents can enter.",
         },
     },
 
@@ -487,6 +497,11 @@ SECTOR_NODES: Dict[int, dict] = {
             "name": "Void Base Alpha",
             "type": "base_plot",
             "lore": "The only stable ground in Void Canyon. Base structure is immune to void effects. Field troops are not.",
+        },
+        "G": {
+            "name": "Inner Yards",
+            "type": "private_hub",
+            "lore": "Village. Hidden from the rest of the valley. Only residents can enter.",
         },
     },
 
@@ -524,10 +539,10 @@ SECTOR_NODES: Dict[int, dict] = {
             "type": "base_plot",
             "lore": "A cold storage facility repurposed as a base. Digital and physical security.",
         },
-        "G": {
-            "name": "Crypto Base Beta",
-            "type": "base_plot",
-            "lore": "Decentralized — no single owner recorded. That's the point.",
+       "G": {
+            "name": "Inner Yards",
+            "type": "private_hub",
+            "lore": "Village. Hidden from the rest of the valley. Only residents can enter.",
         },
     },
 }
@@ -1018,7 +1033,6 @@ def format_sector_map(
         else:
             lines.append(
                 f"  [{node_key}] {node_emoji} {node_name:<26}{suit_indicator}"
-                f"  ⚪ VACANT"
             )
 
     # Roaming players

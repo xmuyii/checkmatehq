@@ -474,6 +474,7 @@ CATEGORIES = {
 # ═══════════════════════════════════════════════════════════════════════════
 #  PURCHASE LOGIC
 # ═══════════════════════════════════════════════════════════════════════════
+from item_factory import create_item_from_store_data
 
 def purchase_item(user: dict, item_key: str) -> Tuple[bool, str, dict]:
     """
@@ -485,13 +486,16 @@ def purchase_item(user: dict, item_key: str) -> Tuple[bool, str, dict]:
     from supabase_db import add_inventory_item
 
     items_catalog = get_live_store_items()
+    raw_item_data = items_catalog.get(item_key)
     item = items_catalog.get(item_key)
-    if not item:
+    if not raw_item_data:
         return False, "❌ Item not found.", user
 
-    price    = item["price"]
-    currency = item["currency"]
-    qty      = item.get("qty", 1)
+    item_obj: Item = create_item_from_store_data(item_key, raw_item_data)
+
+    price    = item_obj.attributes.get("price", 0)
+    currency = item_obj.attributes.get("currency", "credits")
+    qty      = raw_item_data.get("qty", 1)
 
     # Helper balance accessors
     def _get_gold(u):
@@ -521,7 +525,7 @@ def purchase_item(user: dict, item_key: str) -> Tuple[bool, str, dict]:
         user["credits"] = balance - price
 
     # ── Apply Item Routing ──
-    effect_key = item.get("effect_key", "")
+    effect_key = item_obj.attributes.get("effect_key", "")
     effect_msg = ""
 
     # 1. Teleport Charges (Kept as a direct account stat top-up to save backpack space)
@@ -591,9 +595,16 @@ def purchase_item(user: dict, item_key: str) -> Tuple[bool, str, dict]:
         effect_msg = f"📬 {qty}× {item['name']} sent to your unclaimed rewards — use /claims to open."
     # 7. Safe Structural Fallback for General Consumables
     else:
-        user = add_inventory_item(user, item_key, qty, item["name"], category=item.get("category", "consumable"))
-        effect_msg = f"📦 Added: {item['name']} ×{qty} into inventory backpack"
-
+        # Save serialized OOP Item payload into the inventory
+        user = add_inventory_item(
+            user=user, 
+            item_key=item_obj.item_id, 
+            qty=qty, 
+            name=item_obj.name, 
+            category=item_obj.category.value, # Uses Enum value ('utility', 'defend', etc.)
+            item_data=item_obj.to_dict()       # Attaches complete OOP dictionary payload
+        )
+        effect_msg = f"📦 {qty}× {item_obj.name} added into inventory."
     # ── Final Message Compilation ──
     curr_symbol = {"gold": "🪙", "bitcoin": "₿", "credits": "💳"}[currency]
     new_bal     = _get_gold(user) if currency == "gold" else user.get(currency, 0)
@@ -601,7 +612,7 @@ def purchase_item(user: dict, item_key: str) -> Tuple[bool, str, dict]:
     return True, (
         f"✅ *Purchase Complete!*\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"{item['name']}\n"
+        f"{item_obj.name}\n"
         f"Cost: {price} {curr_symbol}\n"
         f"Balance: {new_bal} {curr_symbol}\n\n"
         f"{effect_msg}"

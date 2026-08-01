@@ -325,7 +325,7 @@ def register_user(user_id, username: str):
             'last_level': 1,
             "teleport_charges": 0,
             "home_sector":  None, # Set when player chooses base plot
-            "commander_location": {"sector_id": 1},  # Start in Sector 1
+            "commander_location": 1,  # Start in Sector 1
             "shield_expires_at": None,
             "active_suit":  None,
             "energy_last_regen": None,
@@ -339,7 +339,7 @@ def register_user(user_id, username: str):
             'inventory': [],
             'unclaimed_items': [],
             "researches":   {},
-            'sector': None,
+            'sector': 1,
             'completed_tutorial': False,
             'base_name': random_base_name,
             'base_hq_level': 1,
@@ -888,6 +888,12 @@ def set_sector(user_id, sector_id):
     user = get_user(str(user_id))
     if user:
         user['sector'] = sector_id
+        save_user(str(user_id), user)
+
+def set_commander_location(user_id, sector_id):
+    user = get_user(str(user_id))
+    if user:
+        user['commander_location'] = sector_id
         save_user(str(user_id), user)
 
 
@@ -1544,7 +1550,7 @@ def normalize_user(user: dict) -> dict:
         user[field] = val if isinstance(val, list) else (list(val.values()) if isinstance(val, dict) else [])
 
     if not user.get("commander_location"):
-        user["commander_location"] = {"sector_id": 1}
+        user["commander_location"] = 1
 
     base_res = user.get("base_resources", {})
     if not isinstance(base_res, dict):

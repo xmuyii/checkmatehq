@@ -5630,6 +5630,7 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
     credits     = user.get("credits", 0)
     bitcoin     = user.get("bitcoin", 0)
     sector      = user.get("sector", 1)
+    commander_location = user.get("commander_location", "Unknown")
     base_name   = (user.get("base_name") or "Base")[:16]
     shield_raw  = user.get("shield_status") or "UNPROTECTED"
     military    = user.get("military", {}) or {}
@@ -5712,7 +5713,7 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
         f"👤 {username:<13}\n" 
         f"├─ 🎖 Lv {level:<8} ⚡ Power Level: {total_power:,}\n"
         f"├─ 📍Base Headquaters Location: Sector {sector} ({base_name})\n"
-        f"├─ 📍Commander Location: Sector {sector}\n"
+        f"├─ 📍Commander Location: Sector {commander_location}\n"
         f"├─ 🌀 Teleports: {teleport_charges}\n"
         f"├─ ⚔️ Forces: {total_troops} Troops\n"
         f"├─ {shield_icon} Shield: {shield_label}{shield_time}\n"
@@ -5788,6 +5789,9 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
             InlineKeyboardButton(text="🌍 Sectors",     callback_data=f"sec_map:{sector}"),
         ],
         [
+            InlineKeyboardButton(text="🎯 Inventory",  callback_data="user_backpack"),
+        ],
+        [
             InlineKeyboardButton(text="🎯 Objectives",  callback_data="menu_objective"),
             InlineKeyboardButton(text="⚙️ Account",     callback_data="menu_account"),
         ],
@@ -5808,6 +5812,195 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
             await message.answer(hud, parse_mode="HTML", reply_markup=kb)
     else:
         await message.answer(hud, parse_mode="HTML", reply_markup=kb)
+
+import logging
+from aiogram import Router, F, types
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.exceptions import TelegramBadRequest
+
+# Imports from your inventory module
+from inventory.registry import ITEM_REGISTRY, WEAPONS
+from inventory.warehouse import Warehouse
+from inventory.equipment import EquipmentManager
+from inventory.player_bag import PlayerBag
+
+router = Router()
+
+@router.callback_query(F.data == "user_backpack")
+@router.callback_query(F.data.startswith("user_backpack:"))
+async def cb_backpack(callback: types.CallbackQuery):
+    """Displays active carrying inventory and loadout using existing models."""
+    await callback.answer()
+
+    try:
+        u_id = str(callback.from_user.id)
+        user = get_user(u_id)
+        if not user:
+            await callback.answer("User record not found.", show_alert=True)
+            return
+
+        # Load your actual system instances directly from user data
+        player_bag = PlayerBag.from_dict(user.get("inventory", {}))
+        equipment = EquipmentManager.from_dict(user.get("equipment", {}))
+        combat_stats = equipment.get_active_combat_stats()
+
+        # ── 1. HEADER ──
+        caption = "🎒 *CARRIED INVENTORY*\n"
+        # Uses your existing PlayerBag methods directly
+        caption += f"📦 *Storage Capacity:* `{player_bag.used_slots}/{player_bag.capacity}` slots\n"
+        caption += "━━━━━━━━━━━━━━━━━\n\n"
+
+        # Equipped Weapons / Loadout
+        caption += "⚔️ *Equipped Weapons:*\n"
+        if not combat_stats["active_weapons"]:
+            caption += "  └ _None_\n"
+        else:
+            for w in combat_stats["active_weapons"]:
+                status = "✅ Ready" if w["is_ready"] else f"⏳ Cooldown ({w['cooldown_remaining']})"
+                caption += f"  ├ *{w['name']}*: {status}\n"
+
+        caption += "\n📦 *Carried Items:*\n"
+        items = player_bag.get_items()  # Using your built-in item fetching method
+
+        if not items:
+            caption += "  _Your inventory is empty._\n"
+        else:
+            for item in items:
+                caption += f"  • *{item['name']}* (x`{item['qty']}`)\n"
+
+        caption += "\n━━━━━━━━━━━━━━━━━"
+
+        # ── 2. INLINE KEYBOARD ──
+        builder = InlineKeyboardBuilder()
+
+        # Item Action Buttons using your REGISTRY data
+        for item in items:
+            item_id = item["item_id"]
+
+            if item.get("category") in ("speedup", "consumable", "xp_point", "crates", "buff"):
+                builder.button(
+                    text=f"⚡ Use {item['name']}",
+                    callback_data=f"item_use:{item_id}"
+                )
+            elif item.get("category") in ("weapon", "shield", "protection") or item_id in WEAPONS:
+                builder.button(
+                    text=f"⚔️ Equip {item['name']}",
+                    callback_data=f"item_equip:{item_id}"
+                )
+
+        # Unequip Weapons/Gear Actions
+        for w in combat_stats["active_weapons"]:
+            builder.button(
+                text=f"❌ Unequip {w['name']}",
+                callback_data=f"item_unequip:{w['id']}"
+            )
+
+        builder.adjust(1)
+
+        # ── NAVIGATION & WAREHOUSE BUTTON ──
+        nav_builder = InlineKeyboardBuilder()
+        
+        # Simple button to open the 10-slot Warehouse
+        nav_builder.button(text="🏭 Warehouse", callback_data="view_warehouse")
+        nav_builder.button(text="🔄 Refresh", callback_data="user_backpack")
+        nav_builder.button(text="⬅️ Main Menu", callback_data="menu_map")
+        
+        nav_builder.adjust(1, 2)
+
+        builder.attach(nav_builder)
+
+        await callback.message.edit_text(
+            text=caption,
+            parse_mode="Markdown",
+            reply_markup=builder.as_markup()
+        )
+
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e):
+            raise e
+    except Exception as e:
+        logging.error(f"Error executing cb_backpack: {e}", exc_info=True)
+
+from aiogram import Router, types, F
+from inventory.item import Item
+
+@router.callback_query(F.data.startswith("item_use:"))
+async def cb_use_item(callback: types.CallbackQuery):
+    await callback.answer()
+    item_id = callback.data.split(":")[1]  # e.g., "speedup_15m"
+
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+
+    # 1. Fetch raw item dict from user's stored inventory
+    raw_item_data = user.get("inventory", {}).get("items", {}).get(item_id)
+
+    if not raw_item_data:
+        await callback.answer("Item not found in your inventory!", show_alert=True)
+        return
+
+    # 2. Reconstruct raw dict back into an Item object instance
+    item_instance = Item.from_dict(raw_item_data)
+
+    # 3. Now you have full access to item methods & attributes!
+    print(f"Using item: {item_instance.name}") 
+    print(f"Category Enum: {item_instance.category}")
+    
+    # Check item attributes safely
+    if item_instance.attributes.get("effect_key") == "speedup":
+        minutes = item_instance.attributes.get("reduces_timer_minutes", 0)
+        # Apply timer reduction logic...
+        await callback.message.answer(f"⚡ Applied {minutes}m speedup!")
+        
+    elif item_instance.attributes.get("effect_key") == "energy_restore":
+        energy_amount = item_instance.attributes.get("energy", 100)
+        # Apply energy restore logic...
+        await callback.message.answer(f"🔋 Restored {energy_amount} energy!")
+# ------------------------------------------------------------------
+# Dedicated Base Warehouse Handler (Your 10-Slot Warehouse class)
+# ------------------------------------------------------------------
+@router.callback_query(F.data == "view_warehouse")
+async def cb_view_warehouse(callback: types.CallbackQuery):
+    """Displays player's 10-slot Base Warehouse storage."""
+    await callback.answer()
+    
+    u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    
+    # Loads using your exact Warehouse class
+    warehouse = Warehouse.from_dict(user.get("warehouse", {}))
+
+    caption = "🏭 *BASE WAREHOUSE STORAGE*\n"
+    caption += f"📦 *Capacity:* `{warehouse.used_slots}/{warehouse.capacity}` slots\n"
+    caption += "━━━━━━━━━━━━━━━━━\n\n"
+
+    summary = warehouse.get_summary()
+    if not summary:
+        caption += "  _Warehouse is empty._\n"
+    else:
+        for item in summary:
+            caption += f"  • *{item['name']}* (x`{item['qty']}`)\n"
+
+    caption += "\n━━━━━━━━━━━━━━━━━"
+
+    builder = InlineKeyboardBuilder()
+    
+    for item in summary:
+        builder.button(
+            text=f"📥 Withdraw {item['name']}",
+            callback_data=f"wh_withdraw:{item['item_id']}"
+        )
+    
+    builder.adjust(1)
+    builder.row(
+        types.InlineKeyboardButton(text="🎒 Back to Inventory", callback_data="user_backpack")
+    )
+
+    await callback.message.edit_text(
+        text=caption,
+        parse_mode="Markdown",
+        reply_markup=builder.as_markup()
+    )
 
 @dp.message(_cmd("start"))
 async def cmd_start(message: types.Message):
@@ -7404,7 +7597,7 @@ async def cb_menu_account(callback: types.CallbackQuery):
 from aiogram import Router, F, types
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from supabase_db import get_sector_state, save_sector_state
+from supabase_db import get_sector_state, save_sector_state, set_commander_location
 
 import sector_nodes as sn
 from wiring_hooks import on_user_action
@@ -9388,7 +9581,7 @@ async def cb_teleport_to(callback: types.CallbackQuery):
     all_sectors = load_sectors()
     info  = all_sectors.get(sector_id, {})
     sname = info.get('name', f'Sector {sector_id}') if isinstance(info, dict) else str(info)
-    set_sector(u_id, sector_id)
+    set_commander_location(u_id, sector_id)
     for it in get_inventory_item(u_id):
         if it.get('type','').lower() == 'teleport':
             remove_inventory_item(u_id, it.get('id')); break
