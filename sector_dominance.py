@@ -402,50 +402,50 @@ def kb_sector_dashboard(sector_id: int, user: dict, sector_state: dict) -> Inlin
 
     # Row 1 — Navigation
     buttons.append([
-        InlineKeyboardButton("🗺️ Sector Map",     callback_data=f"sector:map:{sector_id}"),
-        InlineKeyboardButton("📡 Sector Chat",    callback_data=f"sector:chat:{sector_id}"),
+        InlineKeyboardButton(text="🗺️ Sector Map",     callback_data=f"sector:map:{sector_id}"),
+        InlineKeyboardButton(text="📡 Sector Chat",    callback_data=f"sector:chat:{sector_id}"),
     ])
 
     # Row 2 — Node actions
     if current_node and current_node.get("sector_id") == sector_id:
         buttons.append([
-            InlineKeyboardButton("📦 Collect",   callback_data=f"node:collect:{sector_id}"),
-            InlineKeyboardButton("🏠 Leave Node",callback_data=f"node:leave:{sector_id}"),
+            InlineKeyboardButton(text="📦 Collect",   callback_data=f"node:collect:{sector_id}"),
+            InlineKeyboardButton(text="🏠 Leave Node",callback_data=f"node:leave:{sector_id}"),
         ])
     else:
         buttons.append([
-            InlineKeyboardButton("⛏️ Occupy Node", callback_data=f"sector:occupy_menu:{sector_id}"),
-            InlineKeyboardButton("⚔️ Attack Node",  callback_data=f"sector:attack_menu:{sector_id}"),
+            InlineKeyboardButton(text="⛏️ Occupy Node", callback_data=f"sector:occupy_menu:{sector_id}"),
+            InlineKeyboardButton(text="⚔️ Attack Node",  callback_data=f"sector:attack_menu:{sector_id}"),
         ])
 
     # Row 3 — Travel
     buttons.append([
-        InlineKeyboardButton("🌀 Teleport",       callback_data="teleport:menu"),
-        InlineKeyboardButton("🏠 View Base",      callback_data="base:view"),
+        InlineKeyboardButton(text="🌀 Teleport",       callback_data="teleport:menu"),
+        InlineKeyboardButton(text="🏠 View Base",      callback_data="base:view"),
     ])
 
     # Row 4 — Intelligence
     buttons.append([
-        InlineKeyboardButton("🔭 Scout",          callback_data=f"sector:scout_menu:{sector_id}"),
-        InlineKeyboardButton("🔄 Phase Info",     callback_data=f"sector:phase:{sector_id}"),
+        InlineKeyboardButton(text="🔭 Scout",          callback_data=f"sector:scout_menu:{sector_id}"),
+        InlineKeyboardButton(text="🔄 Phase Info",     callback_data=f"sector:phase:{sector_id}"),
     ])
 
     # Row 5 — Ruler actions (only if ruler)
     if is_ruler:
         buttons.append([
-            InlineKeyboardButton("👑 Ruler Panel",   callback_data=f"ruler:panel:{sector_id}"),
-            InlineKeyboardButton("📜 Banish",        callback_data=f"ruler:banish_menu:{sector_id}"),
+            InlineKeyboardButton(text="👑 Ruler Panel",   callback_data=f"ruler:panel:{sector_id}"),
+            InlineKeyboardButton(text="📜 Banish",        callback_data=f"ruler:banish_menu:{sector_id}"),
         ])
 
     # Row 6 — Pretender button (if not ruler and dominance researched)
     from research_tree import is_feature_unlocked
     if not is_ruler and is_feature_unlocked(user, "dominance_score_tracking"):
         buttons.append([
-            InlineKeyboardButton("⚔️ Challenge Ruler", callback_data=f"dominance:pretender:{sector_id}"),
+            InlineKeyboardButton(text="⚔️ Challenge Ruler", callback_data=f"dominance:pretender:{sector_id}"),
         ])
 
     buttons.append([
-        InlineKeyboardButton("« Back to Base", callback_data="base:dashboard"),
+        InlineKeyboardButton(text="« Back to Base", callback_data="base:dashboard"),
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -490,7 +490,7 @@ def kb_occupy_node_menu(sector_id: int, sector_state: dict, user: dict) -> Inlin
 
         buttons.append([InlineKeyboardButton(label, callback_data=cb)])
 
-    buttons.append([InlineKeyboardButton("« Back", callback_data=f"sector:dashboard:{sector_id}")])
+    buttons.append([InlineKeyboardButton(text="« Back", callback_data=f"sector:dashboard:{sector_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -502,21 +502,21 @@ def kb_ruler_panel(sector_id: int, sector_state: dict) -> InlineKeyboardMarkup:
 
     buttons = [
         [
-            InlineKeyboardButton("📊 Cycle Scores",  callback_data=f"ruler:scores:{sector_id}"),
-            InlineKeyboardButton("👁️ Full Vision",   callback_data=f"ruler:vision:{sector_id}"),
+            InlineKeyboardButton(text="📊 Cycle Scores",  callback_data=f"ruler:scores:{sector_id}"),
+            InlineKeyboardButton(text="👁️ Full Vision",   callback_data=f"ruler:vision:{sector_id}"),
         ],
         [
-            InlineKeyboardButton(visa_label,          callback_data=f"ruler:visa_toggle:{sector_id}"),
-            InlineKeyboardButton("📋 Visa Queue",     callback_data=f"ruler:visa_queue:{sector_id}"),
+            InlineKeyboardButton(text=visa_label,          callback_data=f"ruler:visa_toggle:{sector_id}"),
+            InlineKeyboardButton(text="📋 Visa Queue",     callback_data=f"ruler:visa_queue:{sector_id}"),
         ],
         [
-            InlineKeyboardButton("🚫 Reserve Node",  callback_data=f"ruler:reserve:{sector_id}"),
-            InlineKeyboardButton("💰 Tax Pool",      callback_data=f"ruler:tax:{sector_id}"),
+            InlineKeyboardButton(text="🚫 Reserve Node",  callback_data=f"ruler:reserve:{sector_id}"),
+            InlineKeyboardButton(text="💰 Tax Pool",      callback_data=f"ruler:tax:{sector_id}"),
         ],
         [
-            InlineKeyboardButton("📜 Banish Player", callback_data=f"ruler:banish_menu:{sector_id}"),
+            InlineKeyboardButton(text="📜 Banish Player", callback_data=f"ruler:banish_menu:{sector_id}"),
         ],
-        [InlineKeyboardButton("« Sector", callback_data=f"sector:dashboard:{sector_id}")],
+        [InlineKeyboardButton(text="« Sector", callback_data=f"sector:dashboard:{sector_id}")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -525,10 +525,10 @@ def kb_pretender_confirm(sector_id: int) -> InlineKeyboardMarkup:
     """Confirm pretender declaration — make sure player knows it's public."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton("⚔️ Yes — Declare Publicly", callback_data=f"dominance:pretender_confirm:{sector_id}"),
+            InlineKeyboardButton(text="⚔️ Yes — Declare Publicly", callback_data=f"dominance:pretender_confirm:{sector_id}"),
         ],
         [
-            InlineKeyboardButton("✗ Cancel", callback_data=f"sector:dashboard:{sector_id}"),
+            InlineKeyboardButton(text="✗ Cancel", callback_data=f"sector:dashboard:{sector_id}"),
         ],
     ])
 
@@ -548,7 +548,7 @@ def kb_teleport_sector_list(user: dict, alliance: dict = None) -> InlineKeyboard
     if status["can_claim"]:
         buttons.append([
             InlineKeyboardButton(
-                f"📬 Claim {status['free_amount']} Free Teleports",
+              text=f"📬 Claim {status['free_amount']} Free Teleports",
                 callback_data="teleport:claim"
             )
         ])
@@ -580,8 +580,8 @@ def kb_teleport_sector_list(user: dict, alliance: dict = None) -> InlineKeyboard
         buttons.append(row)
 
     buttons.append([
-        InlineKeyboardButton("🔢 Buy Charges", callback_data="teleport:buy_menu"),
-        InlineKeyboardButton("« Back",         callback_data="base:dashboard"),
+        InlineKeyboardButton(text="🔢 Buy Charges", callback_data="teleport:buy_menu"),
+        InlineKeyboardButton(text="« Back",         callback_data="base:dashboard"),
     ])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -590,10 +590,10 @@ def kb_phase_info(sector_id: int) -> InlineKeyboardMarkup:
     """Phase info with full cycle view option."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton("🔄 Full Cycle", callback_data=f"sector:cycle_view:{sector_id}"),
-            InlineKeyboardButton("⏰ Set Warning", callback_data=f"sector:set_warning:{sector_id}"),
+            InlineKeyboardButton(text="🔄 Full Cycle", callback_data=f"sector:cycle_view:{sector_id}"),
+            InlineKeyboardButton(text="⏰ Set Warning", callback_data=f"sector:set_warning:{sector_id}"),
         ],
-        [InlineKeyboardButton("« Back", callback_data=f"sector:dashboard:{sector_id}")],
+        [InlineKeyboardButton(text="« Back", callback_data=f"sector:dashboard:{sector_id}")],
     ])
 
 
