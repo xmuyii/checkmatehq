@@ -5817,7 +5817,6 @@ from inventory.player_bag import PlayerBag
 router = Router()
 
 @router.callback_query(F.data == "user_backpack")
-@router.callback_query(F.data.startswith("user_backpack:"))
 async def cb_backpack(callback: types.CallbackQuery):
     """Displays active carrying inventory and loadout using existing models."""
     await callback.answer()
