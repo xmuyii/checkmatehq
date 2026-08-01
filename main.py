@@ -692,16 +692,6 @@ def detect_word_pattern(word: str) -> str:
     
     return 'standard'
 
-def can_spell(word: str, pool: str) -> bool:
-    """Check if word can be spelled with letters in pool. O(n) instead of O(n²)."""
-    from collections import Counter
-    pool_count = Counter(pool)
-    word_count = Counter(word)
-    for char, needed in word_count.items():
-        if pool_count.get(char, 0) < needed:
-            return False
-    return True
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  INITIALIZE DICTIONARY ON MODULE LOAD
@@ -9000,47 +8990,47 @@ async def cmd_teleport(message: types.Message):
     
     # Parse sector number from command (optional)
     parts = message.text.strip().split()
-    sector_id = None
+    commander_location = None
     if len(parts) > 1:
         try:
-            sector_id = int(parts[1])
-            if sector_id < 1 or sector_id > 9:
+            commander_location = int(parts[1])
+            if commander_location < 1 or commander_location > 9:
                 await message.answer("❌ Sector must be between 1-9", parse_mode="Markdown"); return
         except (ValueError, IndexError):
             pass
     
     # If no sector specified, use random
-    if not sector_id:
-        sector_id = random.randint(1, 9)
+    if not commander_location:
+        commander_location = random.randint(1, 9)
     
     # Import sector system
     from sector_info import get_sector_info, format_sector_display
     
     # Get sector info
-    sector = get_sector_info(sector_id)
+    sector = get_sector_info(commander_location)
     if not sector:
         await message.answer("❌ Sector not found", parse_mode="Markdown"); return
     
     # Update user's current sector
-    user['sector'] = sector_id
+    user['commander_location'] = commander_location
     save_user(u_id, user)
     
     # Send detailed sector information
-    detailed_info = format_sector_display(sector_id, divider)
+    detailed_info = format_sector_display(commander_location, divider)
     await message.answer(detailed_info, parse_mode="HTML")
     # Send confirmation
-    confirmation = f"\n🌀 *TELEPORTED TO SECTOR {sector_id}*\n\n🃏 *GameMaster:* \"Welcome to {sector['name']}. May fortune favor the bold.\"\n"
+    confirmation = f"\n🌀 *TELEPORTED TO SECTOR {commander_location}*\n\n🃏 *GameMaster:* \"Welcome to {sector['name']}. May fortune favor the bold.\"\n"
     await message.answer(confirmation, parse_mode="Markdown")
     
     # ═══════════════════════════════════════════════════════════════════════════
     #  CHECK FOR RANDOM BANDIT ENCOUNTER
     # ═══════════════════════════════════════════════════════════════════════════
     player_level = user.get('level', 1)
-    should_attack, reason = should_trigger_bandit_attack(player_level, sector_id)
+    should_attack, reason = should_trigger_bandit_attack(player_level, commander_location)
     
     if should_attack:
         # Generate encounter
-        encounter = generate_bandit_encounter(sector_id, player_level)
+        encounter = generate_bandit_encounter(commander_location, player_level)
         
         # Store encounter for later battle handling
         user['current_encounter'] = encounter
@@ -9067,7 +9057,7 @@ async def cmd_teleport(message: types.Message):
         )
     
     # Announce to group
-    announcement = f"📍 {message.from_user.first_name} teleported to Sector {sector_id} ({sector['name']})! {sector['emoji']}"
+    announcement = f"📍 {message.from_user.first_name} teleported to Sector {commander_location} ({sector['name']})! {sector['emoji']}"
     try:
         await bot.send_message(CHECKMATE_HQ_GROUP_ID, announcement)
     except:
