@@ -9013,6 +9013,7 @@ async def cmd_teleport(message: types.Message):
     
     # 🎯 Keep home base safe, only update commander field position
     user['commander_location'] = target_sector
+    set_commander_location(u_id, target_sector)
     save_user(u_id, user)
 
     # Directly force update to Supabase to bypass any missing keys in save_user()
