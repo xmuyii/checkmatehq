@@ -3249,7 +3249,7 @@ async def handle_teleport_callbacks(callback: types.CallbackQuery):
         sector_id = int(data[2])
         # execute_teleport needs sector_state — load it
         sector_state = get_sector_state(
-            user.get("commander_location", {}).get("sector_id", 1)
+            user.get("commander_location", 1) .get("sector_id", 1)
         )
         ok, msg, user, sector_state = execute_teleport(
             user, sector_id, {}, sector_state,
@@ -3262,12 +3262,12 @@ async def handle_teleport_callbacks(callback: types.CallbackQuery):
 
     await callback.answer()
 
-
+from alliance_system import get_alliance_info
 @dp.callback_query(lambda c: c.data and c.data.startswith("war:"))
 async def handle_war_callbacks(callback: types.CallbackQuery):
     user_id  = str(callback.from_user.id)
     user     = get_user(user_id)
-    alliance = get_alliance(user.get("alliance_id"))   # your existing function
+    alliance = get_alliance_info(user.get("alliance_id"))   # your existing function
     data     = callback.data.split(":")
     action   = data[1] if len(data) > 1 else ""
     from wiring_hooks import on_user_action
@@ -5620,7 +5620,7 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
     credits     = user.get("credits", 0)
     bitcoin     = user.get("bitcoin", 0)
     sector      = user.get("sector", 1)
-    commander_location = user.get("commander_location", "Unknown")
+    commander_location = user.get("commander_location", 1)
     base_name   = (user.get("base_name") or "Base")[:16]
     shield_raw  = user.get("shield_status") or "UNPROTECTED"
     military    = user.get("military", {}) or {}
@@ -8974,72 +8974,78 @@ async def cmd_map(message: types.Message):
     
     await message.answer(txt, parse_mode="Markdown")
 
-
 @dp.message(_cmd("teleport"))
 async def cmd_teleport(message: types.Message):
-    """Teleport to a sector with detailed information about buffs, perks, hazards, and drops."""
+    """Teleport commander to a target sector without moving their home base."""
     if message.chat.type != "private":
-        await message.answer("🃏 *GameMaster:* \"Teleport in *private*.\"", parse_mode="Markdown"); return
+        await message.answer("🃏 *GameMaster:* \"Teleport in *private*.\"", parse_mode="Markdown")
+        return
     
     u_id = str(message.from_user.id)
     user = get_user(u_id)
     on_user_action(u_id, supabase)
-    if not user:
-        await message.answer("❌ Account not found.", parse_mode="Markdown"); return
     
-    # Parse sector number from command (optional)
+    if not user:
+        await message.answer("❌ Account not found.", parse_mode="Markdown")
+        return
+    
+    # Parse target sector
     parts = message.text.strip().split()
-    commander_location = None
+    target_sector = None
     if len(parts) > 1:
         try:
-            commander_location = int(parts[1])
-            if commander_location < 1 or commander_location > 9:
-                await message.answer("❌ Sector must be between 1-9", parse_mode="Markdown"); return
+            target_sector = int(parts[1])
+            if target_sector < 1 or target_sector > 9:
+                await message.answer("❌ Sector must be between 1-9", parse_mode="Markdown")
+                return
         except (ValueError, IndexError):
             pass
     
-    # If no sector specified, use random
-    if not commander_location:
-        commander_location = random.randint(1, 9)
+    if not target_sector:
+        target_sector = random.randint(1, 9)
     
-    # Import sector system
     from sector_info import get_sector_info, format_sector_display
     
-    # Get sector info
-    sector = get_sector_info(commander_location)
+    sector = get_sector_info(target_sector)
     if not sector:
-        await message.answer("❌ Sector not found", parse_mode="Markdown"); return
+        await message.answer("❌ Sector not found", parse_mode="Markdown")
+        return
     
-    # Update user's current sector
-    user['commander_location'] = commander_location
+    # 🎯 Keep home base safe, only update commander field position
+    user['commander_location'] = target_sector
     save_user(u_id, user)
-    
-    # Send detailed sector information
-    detailed_info = format_sector_display(commander_location, divider)
+
+    # Directly force update to Supabase to bypass any missing keys in save_user()
+    try:
+        supabase.table("users").update({"commander_location": target_sector}).eq("user_id", u_id).execute()
+    except Exception as e:
+        logging.error(f"Failed to update commander_location in Supabase: {e}")
+
+    # Display sector info & confirm
+    detailed_info = format_sector_display(target_sector, divider)
     await message.answer(detailed_info, parse_mode="HTML")
-    # Send confirmation
-    confirmation = f"\n🌀 *TELEPORTED TO SECTOR {commander_location}*\n\n🃏 *GameMaster:* \"Welcome to {sector['name']}. May fortune favor the bold.\"\n"
-    await message.answer(confirmation, parse_mode="Markdown")
     
+    confirmation = (
+        f"🌀 *COMMANDER DEPLOYED TO SECTOR {target_sector}*\n"
+        f"🏠 *Home Base:* Sector {user.get('sector', 1)}\n\n"
+        f"🃏 *GameMaster:* \"Welcome to {sector['name']}. May fortune favor the bold.\""
+    )
+    await message.answer(confirmation, parse_mode="Markdown")
+
     # ═══════════════════════════════════════════════════════════════════════════
-    #  CHECK FOR RANDOM BANDIT ENCOUNTER
+    # CHECK FOR RANDOM BANDIT ENCOUNTER AT COMMANDER'S CURRENT LOCATION
     # ═══════════════════════════════════════════════════════════════════════════
     player_level = user.get('level', 1)
-    should_attack, reason = should_trigger_bandit_attack(player_level, commander_location)
+    should_attack, reason = should_trigger_bandit_attack(player_level, target_sector)
     
     if should_attack:
-        # Generate encounter
-        encounter = generate_bandit_encounter(commander_location, player_level)
-        
-        # Store encounter for later battle handling
+        encounter = generate_bandit_encounter(target_sector, player_level)
         user['current_encounter'] = encounter
         save_user(u_id, user)
         
-        # Send narrative + call to action
         encounter_msg = format_bandit_encounter(encounter)
         await message.answer(encounter_msg, parse_mode="Markdown")
         
-        # Send defensive action buttons
         defend_kb = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="🛡️ DEFEND!", callback_data=f"defend_bandit_{u_id}"),
@@ -9048,20 +9054,12 @@ async def cmd_teleport(message: types.Message):
         ])
         
         await message.answer(
-            f"⚠️ *WHAT WILL YOU DO?*\n\n"
-            f"🛡️ *DEFEND* - Activate your shields, troops, and items to fight\n"
-            f"💨 *FLEE* - Abandon this sector (lose some resources)",
+            "⚠️ *WHAT WILL YOU DO?*\n\n"
+            "🛡️ *DEFEND* - Activate shields and engage in combat\n"
+            "💨 *FLEE* - Fall back to Home Base",
             reply_markup=defend_kb,
             parse_mode="Markdown"
         )
-    
-    # Announce to group
-    announcement = f"📍 {message.from_user.first_name} teleported to Sector {commander_location} ({sector['name']})! {sector['emoji']}"
-    try:
-        await bot.send_message(CHECKMATE_HQ_GROUP_ID, announcement)
-    except:
-        pass
-
 
 async def _show_mining_progress(message: types.Message, u_id: str):
     """Display current mining progress."""
