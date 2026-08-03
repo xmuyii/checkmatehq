@@ -703,35 +703,50 @@ load_dictionary()
 # ═══════════════════════════════════════════════════════════════════════════
 #  GAME LOOP  — tick-based, no asyncio.Event complexity
 # ═══════════════════════════════════════════════════════════════════════════
+import os
+import json
+import random
+import time
+import asyncio
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 ROUND_SECS = 180
 BREAK_SECS = 15
 
+def esc_md(text: str) -> str:
+    """Escapes Telegram Markdown special characters to prevent API parsing crashes."""
+    if not text:
+        return ""
+    for char in ["_", "*", "`", "["]:
+        text = str(text).replace(char, f"\\{char}")
+    return text
+
+
 async def game_loop(chat_id: int, topic_id: int = None):
-    """Run Spellcaster's Hollow game. If topic_id is None, uses FUSION_TOPIC_ID."""
+    """Run Spellcaster's Hollow game. Uses topic_id or defaults to FUSION_TOPIC_ID."""
     if topic_id is None:
         topic_id = FUSION_TOPIC_ID
-    
+
     eng = get_engine(chat_id)
-    eng.running      = True
+    eng.running = True
     eng.empty_rounds = 0
     eng.active_topic = topic_id
-    # Track which week we last showed last-week winners so it only shows once per week
     _winners_shown_week = ""
 
     try:
         while eng.running:
             try:
-                eng.scores     = {}
+                # ─── 1. RESET ROUND STATE ─────────────────────────────
+                eng.scores = {}
                 eng.used_words = []
-                eng.msg_count  = 0
+                eng.msg_count = 0
                 eng.force_stop = False
-                eng.active     = True
-                eng.dashboard_msgs   = {}
+                eng.active = True
+                eng.dashboard_msgs = {}
                 eng.dm_dashboard_msgs = {}
                 eng.player_sessions = {}
-                eng.opted_in        = set()
-                eng.dashboard_update_pending = {}  # Track pending dashboard updates for debouncing
+                eng.opted_in = set()
+                eng.dashboard_update_pending = {}
 
                 eng.word1, eng.word2 = await fetch_words()
                 eng.letters = (eng.word1 + eng.word2).lower()
@@ -743,14 +758,14 @@ async def game_loop(chat_id: int, topic_id: int = None):
                 crate_note = ""
                 if random.random() < 0.2:
                     eng.crates_dropping = random.randint(1, 2)
-                    eng.crate_claimers  = []
+                    eng.crate_claimers = []
                     crate_note = f"\n🎁 *BONUS:* {eng.crates_dropping} incoming!"
                 else:
                     eng.crates_dropping = 0
 
                 possible_words_count = compute_possible_words(eng.letters)
 
-                # Show last week winners — only once per week (first round after reset)
+                # ─── 2. WEEKLY WINNERS BANNER ────────────────────────
                 winners_text = ""
                 try:
                     from supabase_db import _current_week_key
@@ -768,14 +783,11 @@ async def game_loop(chat_id: int, topic_id: int = None):
                                 with open(path, 'r', encoding='utf-8') as _wf:
                                     _winners_raw = json.load(_wf)
                                 last_winners = [w for w in _winners_raw if not w.get('is_bot', False)]
-                                print(f"[GAME LOOP] Loaded {len(last_winners)} last-week winners (filtered bots) from {path}")
                                 break
                         else:
-                            print(f"[GAME LOOP] No last_week_winners.json found in: {paths_to_try}")
                             try:
-                                _lb = get_alltime_leaderboard(limit=10)
+                                _lb = await asyncio.to_thread(get_alltime_leaderboard, limit=10)
                                 last_winners = [{'username': p['username'], 'points': p['points']} for p in _lb if not p.get('is_bot', False)][:3]
-                                print(f"[GAME LOOP] Using alltime top-3 as last-week fallback (filtered bots): {[p['username'] for p in last_winners]}")
                             except Exception:
                                 last_winners = []
 
@@ -783,14 +795,13 @@ async def game_loop(chat_id: int, topic_id: int = None):
                             winners_text = "🏆 *LAST WEEK'S TOP PLAYERS* 🏆\n"
                             for i, p in enumerate(last_winners[:3]):
                                 medal = ["🥇", "🥈", "🥉"][i]
-                                winners_text += f"{medal} {p.get('username', 'Unknown')} — {p.get('points', 0):,} pts\n"
+                                winners_text += f"{medal} {esc_md(p.get('username', 'Unknown'))} — {p.get('points', 0):,} pts\n"
                             winners_text += f"{divider()}\n"
-                        _winners_shown_week = _this_week  # Mark shown for this week either way
-                    # else: already shown this week, winners_text stays ""
+                        _winners_shown_week = _this_week
                 except Exception as e:
                     print(f"[ERROR] Loading last week winners: {e}")
 
-                # Send new round sticker to fusion topic
+                # ─── 3. ROUND ANNOUNCEMENT ───────────────────────────
                 try:
                     await bot.send_sticker(chat_id, STICKER_NEW_ROUND, message_thread_id=eng.active_topic)
                 except Exception:
@@ -799,36 +810,37 @@ async def game_loop(chat_id: int, topic_id: int = None):
                 await bot.send_message(
                     chat_id,
                     f"{winners_text}"
-                    f"🃏 *Welcome to *Spellcaster's Hollow*. How many words can you spell?\n"
-                    f"🃏 Take these random spells and from their letters, form new spells: *{eng.word1}* + *{eng.word2}*.\n"
+                    f"🃏 *Welcome to Spellcaster's Hollow.* How many words can you spell?\n"
+                    f"🃏 Take these random spells and from their letters, form new spells: *{esc_md(eng.word1)}* + *{esc_md(eng.word2)}*.\n"
                     f"🃏 There are {possible_words_count} possible spells you can cast.\n"
                     f"{crate_note}\n\n⏱️ *The Spellcasting Begins* — Go hard.",
                     parse_mode="Markdown",
-                    message_thread_id=FUSION_TOPIC_ID
+                    message_thread_id=eng.active_topic
                 )
 
+                # ─── 4. MAIN GAME TICK LOOP ───────────────────────────
                 crate_dropped = False
                 elapsed = 0
                 while elapsed < ROUND_SECS:
                     await asyncio.sleep(1)
                     if eng.force_stop:
                         break
-                    # Board Freeze — don't advance elapsed while frozen
-                    if eng.freeze_until > time.time():
-                        continue   # tick passes but elapsed doesn't increment
-                    elapsed += 1
-                        
-                    # Repetition every 4 inputs is handled in on_group_message, but we can also just remind them if inactive
                     
-                    if eng.crates_dropping > 0 and elapsed == 50 and not crate_dropped:
+                    # Board Freeze check
+                    if eng.freeze_until > time.time():
+                        continue   # Tick passes but timer is paused
+                    elapsed += 1
+
+                    # Crate Drop Trigger (Robust threshold check)
+                    if eng.crates_dropping > 0 and elapsed >= 50 and not crate_dropped:
                         crate_dropped = True
-                        # 50% chance for monkey trap decoy
                         is_monkey_trap = random.random() < 0.50
-                        # Send crate sticker to fusion topic
+                        
                         try:
                             await bot.send_sticker(chat_id, STICKER_CRATE_DROP, message_thread_id=eng.active_topic)
                         except Exception:
                             pass
+
                         crate_label = "🐵 *CRATE DROP!*" if is_monkey_trap else "⚡ *CRATE DROP!*"
                         m = await bot.send_message(
                             chat_id,
@@ -836,43 +848,38 @@ async def game_loop(chat_id: int, topic_id: int = None):
                             parse_mode="Markdown",
                             message_thread_id=eng.active_topic
                         )
-                        eng.crate_msg_id   = m.message_id
+                        eng.crate_msg_id = m.message_id
                         eng.crate_claimers = []
                         eng.decoy_claimers = []
-                        if not hasattr(eng, 'current_crate_is_trap'):
-                            eng.current_crate_is_trap = is_monkey_trap
+                        eng.current_crate_is_trap = is_monkey_trap
                         eng.is_current_crate_decoy = is_monkey_trap
-                        
+
+                    # Mid-Round Extra Letters Injection (At 120s / 60s remaining)
                     if elapsed == 120:
                         eng.extra_letters = "".join(random.sample("abcdefghijklmnopqrstuvwxyz", 2))
                         eng.letters += eng.extra_letters
                         new_possible_count = compute_possible_words(eng.letters)
-                        
+
                         await bot.send_message(
                             chat_id,
-                            f"🃏 *THE SPELLS ARE:* \n\n\n`{eng.word1}` + `{eng.word2}`\n\n", parse_mode="Markdown",
-                            message_thread_id=eng.active_topic)
+                            f"🃏 *THE SPELLS ARE:*\n\n`{esc_md(eng.word1)}` + `{esc_md(eng.word2)}`\n\n",
+                            parse_mode="Markdown",
+                            message_thread_id=eng.active_topic
+                        )
 
-                        # After sending word pair, wait a bit then send extra letters
                         await asyncio.sleep(0.1)
                         await bot.send_message(
                             chat_id,
-                            f"🃏 Add these new letters to create more spells!.\n `{eng.extra_letters[0]}` `{eng.extra_letters[1]}`\n\n"
+                            f"🃏 Add these new letters to create more spells!\n`{eng.extra_letters[0]}` `{eng.extra_letters[1]}`\n\n"
                             f"🃏 There are now {new_possible_count} possible spells\n\n"
                             f"🃏 The round will end in 60 seconds.",
                             parse_mode="Markdown",
-                            message_thread_id=FUSION_TOPIC_ID
+                            message_thread_id=eng.active_topic
                         )
 
                 eng.active = False
 
-                # ═══════════════════════════════════════════════════════════
-                # END-OF-ROUND BATCH DB FLUSH
-                # All XP, points, resources, food, rare drops that accumulated
-                # in-memory during the round are now written to the DB in one
-                # pass per player. This is why we never write per-word above —
-                # every DB write is deferred to here for maximum speed.
-                # ═══════════════════════════════════════════════════════════
+                # ─── 5. END-OF-ROUND DB FLUSH ─────────────────────────
                 async def _flush_round_to_db():
                     for uid, session in eng.player_sessions.items():
                         try:
@@ -885,15 +892,15 @@ async def game_loop(chat_id: int, topic_id: int = None):
                             if pts_earned <= 0 and xp_earned <= 0:
                                 continue
 
-                            # 1. XP + weekly/alltime points via award_word_score (bulk)
-                            award_word_score(
+                            # Offload blocking DB writes to thread pool
+                            await asyncio.to_thread(
+                                award_word_score,
                                 uid, pts_earned, xp_earned, 0,
                                 res_earned, db_nm,
                                 game_type="fusion", user_obj=None
                             )
 
-                            # 2. Base resources — read → accumulate → write once
-                            fresh = get_user(uid)
+                            fresh = await asyncio.to_thread(get_user, uid)
                             if fresh:
                                 base_res = fresh.get('base_resources', {}) or {}
                                 if not isinstance(base_res, dict):
@@ -907,19 +914,18 @@ async def game_loop(chat_id: int, topic_id: int = None):
                                 base_res['resources'] = res_store
                                 fresh['base_resources'] = base_res
 
-                                # 3. Rare drops accumulated during the round
                                 rare_drops = session.get('rare_drops', [])
                                 for rd in rare_drops:
-                                    add_unclaimed_item(uid, rd, 1)
+                                    await asyncio.to_thread(add_unclaimed_item, uid, rd, 1)
 
-                                save_user(uid, fresh)
+                                await asyncio.to_thread(save_user, uid, fresh)
 
                         except Exception as _e:
                             print(f"[ROUND FLUSH] {uid}: {_e}")
 
                 await _flush_round_to_db()
 
-                # Close out any open DM dashboards with a final "Round over" state
+                # Close out DM dashboards
                 for uid, (dm_cid, dm_mid) in list(eng.dm_dashboard_msgs.items()):
                     try:
                         session = eng.player_sessions.get(uid, {})
@@ -937,6 +943,7 @@ async def game_loop(chat_id: int, topic_id: int = None):
                     except Exception:
                         pass
 
+                # ─── 6. LEADERBOARD & REWARDS ────────────────────────
                 ss = sorted(eng.scores.values(), key=lambda x: x['pts'], reverse=True)
 
                 if not ss:
@@ -951,156 +958,161 @@ async def game_loop(chat_id: int, topic_id: int = None):
                         f"`{'-'*36}`\n"
                     )
 
-                    # Crate bonus notification + decoy trap warning
+                    # Crate bonus processing
                     if eng.crates_dropping > 0 and eng.crate_claimers:
                         try:
                             for cl in eng.crate_claimers:
-                                add_unclaimed_item(str(cl['user_id']), "super_crate", 1)
+                                await asyncio.to_thread(add_unclaimed_item, str(cl['user_id']), "super_crate", 1)
                             result += f"🎁 *{len(eng.crate_claimers)} LUCKY PLAYERS CLAIMED MID-ROUND CRATES!*\n\n"
-                            
-                            # If any decoys were claimed, show warning in group AND send DMs
+
                             if eng.decoy_claimers:
-                                decoy_names = ", ".join([d.get('username', f"Player {d['user_id']}") for d in eng.decoy_claimers])
+                                decoy_names = ", ".join([esc_md(d.get('username', f"Player {d['user_id']}")) for d in eng.decoy_claimers])
                                 result += f"⚠️ *MONKEY TRAP!* {decoy_names} grabbed DECOY! 💣\n\n"
-                                
-                                # Send individual DM notifications to decoy victims
+
                                 for decoy_victim in eng.decoy_claimers:
                                     try:
                                         await bot.send_message(
                                             decoy_victim['user_id'],
                                             f"💣 *MONKEY TRAP!*\n\nYou picked a decoy crate during that round!\n\n"
-                                            f"🃏 *GameMaster:* \"Better luck next time, be more alert.\"",
+                                            f"🃏 *GameMaster:* Better luck next time, be more alert.",
                                             parse_mode="Markdown"
                                         )
                                     except Exception as e:
                                         print(f"[ERROR] Sending decoy DM to {decoy_victim.get('username')}: {e}")
                         except Exception as e:
                             print(f"[ERROR] Crate handling: {e}")
-                    
-                    # Scores with medals + shield column + credit awards + XP scaling
+
+                    # Render Ranks & Award Top-Rank Rewards
                     for i, p in enumerate(ss):
-                        medal      = medals[i] if i < 3 else f"  {i+1}."
-                        p_name     = (p['name'] or "Player")[:13]
-                        shield_i   = "⚠️"
+                        medal = medals[i] if i < 3 else f"  {i+1}."
+                        p_name = esc_md((p['name'] or "Player")[:13])
+                        shield_i = "⚠️"
                         try:
-                            _u = get_user(p.get('user_id', ''))
-                            on_user_action(p['user_id'], supabase)
+                            _u = await asyncio.to_thread(get_user, p.get('user_id', ''))
+                            await asyncio.to_thread(on_user_action, p['user_id'], supabase)
                             if _u:
                                 _st = _u.get("shield_status") or ""
                                 shield_i = "🛡️" if "ACTIVE" in _st else ("💥" if "DISRUPTED" in _st else "⚠️")
                         except Exception:
                             pass
-                        rank       = i + 1
-                        cr_reward  = {1:50,2:45,3:30,4:20,5:10}.get(rank, 5 if rank <= 10 else 0)
-                        # 🔥 NEW: Calculate scaled XP based on their match performance
-                        # Formula: Baseline 100 XP for participating + 10% of their round points score
-                        xp_earned  = 100 + int(p['pts'] * 0.10)
-                        cr_str     = f" (+{cr_reward}💳)" if cr_reward else ""
+
+                        rank = i + 1
+                        cr_reward = {1: 50, 2: 45, 3: 30, 4: 20, 5: 10}.get(rank, 5 if rank <= 10 else 0)
+                        cr_str = f" (+{cr_reward}💳)" if cr_reward else ""
                         result += f"{medal} {p_name}  {shield_i}  *{p['pts']:,} pts*{cr_str}\n"
+
+                        # Award Super Crate once to Top 3
                         if i < 3:
                             try:
-                                add_unclaimed_item(p['user_id'], "super_crate", 1)
+                                await asyncio.to_thread(add_unclaimed_item, p['user_id'], "super_crate", 1)
                             except Exception as e:
                                 print(f"[ERROR] Adding crate for {p['name']}: {e}")
+
                         # Award credits to top 10
                         if cr_reward > 0:
                             try:
-                                add_credits(p['user_id'], cr_reward, f"rank#{rank} fusion round")
+                                await asyncio.to_thread(add_credits, p['user_id'], cr_reward, f"rank#{rank} fusion round")
                             except Exception:
                                 pass
-                        # 🔥 NEW: Permanently add the calculated XP to the user's database profile
-                        try:
-                            add_xp(p['user_id'], xp_earned)
-                        except Exception as e:
-                            print(f"[ERROR] Failed to add match XP to user {p['user_id']}: {e}")
-                        if i < 3:
-                            try:
-                                add_unclaimed_item(p['user_id'], "super_crate", 1)
-                            except Exception as e:
-                                print(f"[ERROR] Adding crate for {p['name']}: {e}")
-                    result += f"\n💳 Credits have been awarded to top 10!"
-                    
-                    result += f"\n{divider()}\n`!weekly` | `!alltime` for full stats"
-                
-                # Inline button so players can view leaderboard right after the round
-                _round_kb = InlineKeyboardMarkup(inline_keyboard=[[
-                    InlineKeyboardButton(text="🪩 Spellcaster's Alltime Board",  callback_data="lb_overall_weekly"),
-                    InlineKeyboardButton(text="🪄 Spellcaster's Weekly Board",  callback_data="lb_fusion_weekly"),
-                ]])
-                await bot.send_message(chat_id, result, parse_mode="Markdown",
-                                       message_thread_id=FUSION_TOPIC_ID,
-                                       reply_markup=_round_kb)
 
-                # Level-up announcements
+                    result += f"\n💳 Credits have been awarded to top 10!"
+                    result += f"\n{divider()}\n`!weekly` | `!alltime` for full stats"
+
+                _round_kb = InlineKeyboardMarkup(inline_keyboard=[[
+                    InlineKeyboardButton(text="[ 🪩 Spellcaster's Legends ]", callback_data="lb_overall_weekly"),
+                    InlineKeyboardButton(text="[ 🪄 Spellcaster's New World ]", callback_data="lb_fusion_weekly"),
+                ]])
+                await bot.send_message(
+                    chat_id, result, parse_mode="Markdown",
+                    message_thread_id=eng.active_topic,
+                    reply_markup=_round_kb
+                )
+
+                # ─── 7. LEVEL-UP ANNOUNCEMENTS ────────────────────────
                 try:
                     for uid, sd in eng.scores.items():
                         if sd.get("leveled_up"):
-                            user = get_user(uid)
-                            on_user_action(uid, supabase)
+                            user = await asyncio.to_thread(get_user, uid)
+                            await asyncio.to_thread(on_user_action, uid, supabase)
                             if user:
                                 lvl = user.get('level', 1)
                                 from referral_system import check_referral_activation
-                                check_referral_activation(uid)
+                                await asyncio.to_thread(check_referral_activation, uid)
+
+                                s_name = esc_md(sd['name'])
                                 msg = (
                                     f"{divider()}\n"
                                     f"🎊 *LEVEL UP!* 🎊\n"
                                     f"{divider()}\n\n"
-                                    f"*{sd['name']}* has reached *LEVEL {lvl}*!\n\n"
-                                    f"🃏 *GameMaster:* \"Congratulations. You've achieved the bare minimum. Collect your participation trophy. Use `!claims` in DM.\n\n"
-                                    f"✨ *Bonus items awaiting.*\""
+                                    f"*{s_name}* has reached *LEVEL {lvl}*!\n\n"
+                                    f"🃏 *GameMaster:* Congratulations. You've achieved the bare minimum. Collect your participation trophy. Use `!claims` in DM.\n\n"
+                                    f"✨ *Bonus items awaiting.*"
                                 )
-                                add_unclaimed_item(uid, "super_crate", 1)
+                                await asyncio.to_thread(add_unclaimed_item, uid, "super_crate", 1)
                                 k = "xp_multiplier" if random.random() < 0.5 else "bitcoin_multiplier"
-                                add_unclaimed_item(uid, k, 1, xp_reward=0, multiplier_value=2)
+                                await asyncio.to_thread(add_unclaimed_item, uid, k, 1, xp_reward=0, multiplier_value=2)
+
                                 if lvl % 5 == 0:
-                                    iname, idesc = award_powerful_locked_item(uid)
-                                    msg += f"\n\n{divider()}\n⚡ *MILESTONE!* Unlocked: *{iname}*\n_{idesc}_\n{divider()}"
-                                await bot.send_message(chat_id, msg, parse_mode="Markdown",
-                                                          message_thread_id=FUSION_TOPIC_ID)
+                                    iname, idesc = await asyncio.to_thread(award_powerful_locked_item, uid)
+                                    msg += f"\n\n{divider()}\n⚡ *MILESTONE!* Unlocked: *{esc_md(iname)}*\n_{esc_md(idesc)}_\n{divider()}"
+
+                                await bot.send_message(
+                                    chat_id, msg, parse_mode="Markdown",
+                                    message_thread_id=eng.active_topic
+                                )
                 except Exception as e:
                     print(f"[ERROR] Level-up announcements: {e}")
 
+                # ─── 8. IDLE CHECK & REPEAT PERIODICS ─────────────────
                 if eng.empty_rounds >= 3:
                     eng.running = False
                     await bot.send_message(
                         chat_id,
                         f"{divider()}\n"
-                        f"🃏 *GameMaster:* \"*Three* empty rounds? Are you all *asleep*?! Pathetic.\n\n"
+                        f"🃏 *T#E F$EQ#EN#Y I# D#W#:* \n\n Type (/fusion) to cast spells and lead this new age\n\n"
                         f"{divider()}",
                         parse_mode="Markdown",
-                        message_thread_id=FUSION_TOPIC_ID
+                        message_thread_id=eng.active_topic
                     )
                     break
 
                 eng.games_played += 1
                 if eng.games_played >= eng.games_until_help:
-                    await bot.send_message(chat_id, _help_text(), parse_mode="Markdown",
-                                              message_thread_id=FUSION_TOPIC_ID)
+                    await bot.send_message(
+                        chat_id, _help_text(), parse_mode="Markdown",
+                        message_thread_id=eng.active_topic
+                    )
                     eng.games_until_help = eng.games_played + random.randint(3, 7)
 
                 if eng.games_played % 5 == 0:
                     try:
-                        lb = get_weekly_leaderboard()
+                        lb = await asyncio.to_thread(get_weekly_leaderboard)
                         if lb:
-                            t = "🏆 *WEEKLY TOP 10*\n━━━━━━━━━━━━━━━\n"
+                            t = "🏆 *TOP 10 LEADERS OF THE NEW WORLD*\n━━━━━━━━━━━━━━━\n"
                             for i, p in enumerate(lb[:10], 1):
-                                medal = ["🥇","🥈","🥉"][i-1] if i<=3 else f"{i}."
-                                t += f"{medal} {p['username']} — {p['points']:,} pts\n"
-                            await bot.send_message(chat_id, t, parse_mode="Markdown",
-                                                    message_thread_id=eng.active_topic)
+                                medal = ["🥇", "🥈", "🥉"][i-1] if i <= 3 else f"{i}."
+                                t += f"{medal} {esc_md(p['username'])} — {p['points']:,} pts\n"
+                            await bot.send_message(
+                                chat_id, t, parse_mode="Markdown",
+                                message_thread_id=eng.active_topic
+                            )
                     except Exception as e:
                         print(f"[ERROR] Weekly leaderboard display: {e}")
 
                 await asyncio.sleep(BREAK_SECS)
-                
+
             except Exception as e:
                 print(f"[ERROR] Round failed in chat {chat_id}: {e}")
                 import traceback
                 traceback.print_exc()
                 try:
-                    await bot.send_message(chat_id, f"❌ *ERROR:* {e}\n\nType `!fusion` to restart the game.", parse_mode="Markdown",
-                                              message_thread_id=FUSION_TOPIC_ID)
-                except:
+                    await bot.send_message(
+                        chat_id,
+                        f"❌ *ERROR:* {esc_md(str(e))}\n\nType `/fusion` to restart the game.",
+                        parse_mode="Markdown",
+                        message_thread_id=eng.active_topic
+                    )
+                except Exception:
                     pass
                 eng.running = False
                 break
@@ -1108,42 +1120,20 @@ async def game_loop(chat_id: int, topic_id: int = None):
     except asyncio.CancelledError:
         pass
     finally:
-        eng.active  = False
+        eng.active = False
         eng.running = False
-
 # ═══════════════════════════════════════════════════════════════════════════
 #  TEXT HELPERS
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _help_text() -> str:
     return (
-        "🃏 *GameMaster:* \"Oh great, another lost soul needing hand-holding. How *delightful*.\"\n\n"
-        "*QUICK START*\n"
-        "`!tutorial` — Complete game walkthrough (DM only)\n"
-        "`!fusion` — Start a word game round (group only)\n"
-        "`!help` — This message\n\n"
-        "*PLAYER COMMANDS* _(DM only)_\n"
-        "`!profile` — Your stats, base, resources, shield status\n"
-        "`!base` — Full base details, military, traps\n"
-        "`!inventory` — Your items & crates\n"
-        "`!claims` — Unclaimed rewards\n"
-        "`!autoclaim` — Claim all rewards at once\n"
-        "`!mystats` — Show your personal stats card (Bitcoin, Gold, Level)\n"
-        "`!vault` — Vault management (deposit/withdraw Bitcoin & Gold safely)\n"
-        "`!changename [Name]` — Change your username\n"
-        "`!setup_base [Name]` — Create your first base\n"
-        "`!changebasename [Name]` — Rename your base (1-time)\n"
-        "`!lab` — Research lab: upgrade your army\n"
-        "*GAME COMMANDS* _(group or DM)_\n"
-        "`!score` — Your weekly rank + 5 players above/below you\n"
-        "`!weekly` — Weekly leaderboard\n"
-        "`!alltime` — All-time leaderboard\n"
-        "`!words` — Show current spells\n"
-        "`!forcerestart` — End the round\n\n"
-        "*🌌 IMMERSIVE EXPERIENCE* _(DM only)_\n"
-        "`!obelisk` — Enter the Obelisk: gateway to consciousness\n"
-        "`!sectors` — Explore all 9 sectors and their consciousness\n\n"
-        "*INVITE FRIENDS*\n"
+        "🃏*QUICK START*\n"
+        "`/tutorial` — Complete game walkthrough (DM only)\n"
+        "`/fusion` — Start a word game round (group only)\n"
+        "`/help` — This message\n\n"
+        "*PLAYER COMMANDS*\n _(DM only)_\n"
+        "`/Start` — Open the [ COMMAND CENTER ]\n"
         "Enjoy the game? Invite others! https://t.me/checkmateHQ"
     )
 
@@ -1245,7 +1235,7 @@ async def cmd_trivia(message: types.Message):
 @dp.message(_cmd("fusion"))
 async def cmd_fusion(message: types.Message):
     if message.chat.type not in ("group","supergroup"):
-        await message.answer("🃏 *GameMaster:* \"This is a GROUP game.\""); return
+        await message.answer("🃏 \"This is a GROUP game.\""); return
     
     eng = get_engine(message.chat.id)
     if eng.running:
@@ -1493,8 +1483,8 @@ async def cmd_weekly(message: types.Message):
     text = await _render_leaderboard("overall", "weekly")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🪄 Spellcaster's Weekly",  callback_data="lb_fusion_weekly"),
-            InlineKeyboardButton(text="🧠 Trivia Weekly",  callback_data="lb_trivia_weekly"),
+            InlineKeyboardButton(text="[ 🪄 Spellcaster's New World Leaders ]",  callback_data="lb_fusion_weekly"),
+            InlineKeyboardButton(text="[ 🧠 Trivia Weekly ]",  callback_data="lb_trivia_weekly"),
         ],
         [
             InlineKeyboardButton(text="🏆 All-Time",       callback_data="lb_overall_alltime"),
@@ -1552,12 +1542,12 @@ async def cmd_alltime(message: types.Message):
     text = await _render_leaderboard("overall", "alltime")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🃏 Spellcaster's  All-Time", callback_data="lb_fusion_alltime"),
-            InlineKeyboardButton(text="🧠 Trivia All-Time", callback_data="lb_trivia_alltime"),
+            InlineKeyboardButton(text="[ 🃏 Spellcaster's Legends ]", callback_data="lb_fusion_alltime"),
+            InlineKeyboardButton(text="[ 🧠 Trivia All-Time ]", callback_data="lb_trivia_alltime"),
         ],
         [
-            InlineKeyboardButton(text="🏆 Weekly",          callback_data="lb_overall_weekly"),
-            InlineKeyboardButton(text="🔄 Refresh",         callback_data="lb_overall_alltime"),
+            InlineKeyboardButton(text="[ 🏆 Weekly ]",          callback_data="lb_overall_weekly"),
+            InlineKeyboardButton(text="[ 🔄 Refresh ]",         callback_data="lb_overall_alltime"),
         ],
     ])
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
@@ -1613,10 +1603,10 @@ async def cmd_weekly_fusion(message: types.Message):
         lb = get_game_weekly_leaderboard(game_type="fusion", limit=10)
         print(f"[CMD_WEEKLY_FUSION] Called by {user.get('username')} - got {len(lb)} players")
         
-        text = "🃏 *WEEKLY FUSION LEADERBOARD*\n━━━━━━━━━━━━━━━\n"
+        text = "🃏 *SpellCasters of the New Era*\n━━━━━━━━━━━━━━━\n"
         
         if not lb:
-            text += "No fusion scores yet this week."
+            text += "No spells have been cast yet this week."
         else:
             for i, p in enumerate(lb, 1):
                 medal = ["🥇", "🥈", "🥉"][i-1] if i <= 3 else f"{i}."
@@ -1630,7 +1620,7 @@ async def cmd_weekly_fusion(message: types.Message):
         print(f"[ERROR] cmd_weekly_fusion: {e}")
         import traceback
         traceback.print_exc()
-        await message.answer("❌ Error retrieving fusion leaderboard. Try again.", parse_mode="Markdown")
+        await message.answer("❌ Error retrieving the Spell Casters of the New Era. Try again.", parse_mode="Markdown")
 
 
 @dp.message(_cmd("alltime_trivia"))
@@ -1668,9 +1658,9 @@ async def cmd_alltime_fusion(message: types.Message):
     
     try:
         lb = get_game_alltime_leaderboard(game_type="fusion", limit=10)
-        text = "🃏 *ALL-TIME FUSION LEADERBOARD*\n━━━━━━━━━━━━━━━\n"
+        text = "🃏 *SPELL CASTING LEGENDS*\n━━━━━━━━━━━━━━━\n"
         if not lb:
-            text += "No fusion records yet."
+            text += "No spells yet."
         else:
             for i, p in enumerate(lb, 1):
                 medal = ["🥇","🥈","🥉"][i-1] if i<=3 else f"{i}."
@@ -5770,27 +5760,27 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
     # ── Keyboard ──────────────────────────────────────────────────────────
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="👤 Commander",   callback_data="menu_profile"),
-            InlineKeyboardButton(text="🏰 My Base",     callback_data="menu_base"),
+            InlineKeyboardButton(text="[ 👤 Commander ]",   callback_data="menu_profile"),
+            InlineKeyboardButton(text="[ 🏰 My Base ]",     callback_data="menu_base"),
         ],
         [
-            InlineKeyboardButton(text="👥 Alliance",    callback_data="menu_guild"),
-            InlineKeyboardButton(text="🌍 Sectors",     callback_data=f"sec_map:{sector}"),
+            InlineKeyboardButton(text="[ 👥 Alliance ]",    callback_data="menu_guild"),
+            InlineKeyboardButton(text="[ 🌍 Sectors ]",     callback_data=f"sec_map:{sector}"),
         ],
         [
-            InlineKeyboardButton(text="🎯 Inventory",  callback_data="user_backpack"),
+            InlineKeyboardButton(text="[ 🎯 Inventory ]",  callback_data="user_backpack"),
         ],
         [
-            InlineKeyboardButton(text="🎯 Objectives",  callback_data="menu_objective"),
-            InlineKeyboardButton(text="⚙️ Account",     callback_data="menu_account"),
+            InlineKeyboardButton(text="[ 🎯 Objectives ]",  callback_data="menu_objective"),
+            InlineKeyboardButton(text="[⚙️ Account ]",     callback_data="menu_account"),
         ],
         [
-            InlineKeyboardButton(text="🕯 Sector 1", callback_data="menu_fusion_info"),
-            InlineKeyboardButton(text="🪬 Sector 2",      callback_data="menu_trivia_info"),
+            InlineKeyboardButton(text="[ 🕯 Sector 1 ]", callback_data="menu_fusion_info"),
+            InlineKeyboardButton(text="[ 🪬 Sector 2 ]",      callback_data="menu_trivia_info"),
         ],
         [
-            InlineKeyboardButton(text="🌀 Claim 🌀", callback_data="claim_daily_teleports"),
-            InlineKeyboardButton(text="🎁 Claim 🎁", callback_data="claim_free_gift"),
+            InlineKeyboardButton(text="[ 🌀 Claim 🌀 ]", callback_data="claim_daily_teleports"),
+            InlineKeyboardButton(text="[ 🎁 Claim 🎁 ]", callback_data="claim_free_gift"),
         ],
     ])
 
@@ -6653,7 +6643,7 @@ async def cb_menu_fusion_info(callback: types.CallbackQuery):
         "  8 letters+ = 6 pts, 1 relic 🏺, +(streak)ration\n"
         "🔥 <b>Streak bonus:</b> Cast 3+ spells correctly in a row = ration bonus\n"
         "🎁 <b>Crate drops:</b> React to claim mid-round crates!\n\n"
-        "<i>Type /fusion in the Fusion Topic to start a game.</i>",
+        "<i>Type /fusion in SpellCasters Hollow to start a game.</i>",
         parse_mode="HTML", reply_markup=kb
     )
 
@@ -6761,7 +6751,7 @@ async def cb_battle_items_inline(callback: types.CallbackQuery):
 
 @dp.message(lambda message: message.text == "[🎮 GAME]")
 async def game_module(message: types.Message):
-    await message.answer("🕹️ Loading Fusion Engine... Use /fusion in the group!")
+    await message.answer("🕹️ Loading... Use /fusion in Spellcaster's Hollow!")
 
 @dp.message(lambda message: message.text == "[🛍️ SHOP]")
 async def shop_button_handler(message: types.Message):
@@ -6838,13 +6828,13 @@ async def cb_start_tutorial(callback: types.CallbackQuery):
     ])
     
     await callback.message.answer(
-        "🃏 *GameMaster:* \"Good choice. Listen carefully.\"\n\n"
+        "🃏\"Quiok Tip!\"\n\n"
         "_The 64 is divided into sectors. Each sector holds power, resources, and secrets._\n\n"
         "*Three games define your destiny:*\n"
-        "• **FUSION** — Master the art of words\n"
-        "• **CHESS** — Outthink your opponents\n"
-        "• **RAIDS** — Steal from rivals\n\n"
-        "_Type `!fusion` in the group when ready to play._",
+        "**FUSION** — Master the art of spell casting\n"
+        "**CHESS** — Outthink your opponents\n"
+        "**RAIDS** — Steal from rivals\n\n"
+        "_Type `/fusion` in the group when ready to play._",
         parse_mode="Markdown",
         reply_markup=markup
     )
@@ -6868,13 +6858,10 @@ async def cb_tutorial_start(callback: types.CallbackQuery):
     u_id = str(callback.from_user.id)
     on_user_action(u_id, supabase)
     await callback.message.edit_text(
-        "🎊 *Welcome to The 64!* 🎊\n\n"
-        "_You're now officially registered._\n\n"
-        "**Next steps:**\n"
-        "1. Join the main group and type `!fusion`\n"
-        "2. Build your base with `/base`\n"
-        "3. Train troops with `/train`\n"
-        "4. Attack rivals with `/attack`\n\n"
+        "🎊 *Welcome to Zero Dominus. You are now in another realm, with 64 different frequencies!* 🎊\n\n"
+        "_You've been officially registered._\n\n"
+        "**Here's what to do next:**\n"
+        "1. Join sector 1 and type `/fusion`\n\n\n"
         "_Good luck, warrior._",
         parse_mode="Markdown"
     )
@@ -10467,7 +10454,7 @@ FREEZE_COSTS = {
 async def cmd_board_freeze(message: types.Message):
     """Show the Board Freeze shop inline keyboard."""
     if message.chat.type in ("group", "supergroup"):
-        # Must be used in the Fusion topic
+        # Must be used in the Spellcaster's Hollow topic
         if message.message_thread_id != FUSION_TOPIC_ID:
             await message.reply("❄️ Use /freeze inside spellcaster's hollow to freeze the round timer.", quote=True)
             return
