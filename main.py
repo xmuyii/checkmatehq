@@ -708,7 +708,7 @@ ROUND_SECS = 180
 BREAK_SECS = 15
 
 async def game_loop(chat_id: int, topic_id: int = None):
-    """Run fusion game. If topic_id is None, uses FUSION_TOPIC_ID."""
+    """Run Spellcaster's Hollow game. If topic_id is None, uses FUSION_TOPIC_ID."""
     if topic_id is None:
         topic_id = FUSION_TOPIC_ID
     
@@ -799,10 +799,10 @@ async def game_loop(chat_id: int, topic_id: int = None):
                 await bot.send_message(
                     chat_id,
                     f"{winners_text}"
-                    f"🃏 *The GameMaster:* Topic is *FUSION*.\n"
-                    f"🃏 You are to use the letters from these words to make new words: *{eng.word1}* + *{eng.word2}*.\n"
-                    f"🃏 There are {possible_words_count} possible words.\n"
-                    f"{crate_note}\n\n⏱️ *Game on* — Go hard.",
+                    f"🃏 *Welcome to *Spellcaster's Hollow*. How many words can you spell?\n"
+                    f"🃏 Take these random spells and from their letters, form new spells: *{eng.word1}* + *{eng.word2}*.\n"
+                    f"🃏 There are {possible_words_count} possible spells you can cast.\n"
+                    f"{crate_note}\n\n⏱️ *The Spellcasting Begins* — Go hard.",
                     parse_mode="Markdown",
                     message_thread_id=FUSION_TOPIC_ID
                 )
@@ -850,15 +850,15 @@ async def game_loop(chat_id: int, topic_id: int = None):
                         
                         await bot.send_message(
                             chat_id,
-                            f"🃏 *The GameMaster:* *THE WORDS ARE:* \n\n\n`{eng.word1}` + `{eng.word2}`\n\n", parse_mode="Markdown",
+                            f"🃏 *THE SPELLS ARE:* \n\n\n`{eng.word1}` + `{eng.word2}`\n\n", parse_mode="Markdown",
                             message_thread_id=eng.active_topic)
 
                         # After sending word pair, wait a bit then send extra letters
                         await asyncio.sleep(0.1)
                         await bot.send_message(
                             chat_id,
-                            f"🃏 *The GameMaster:* You can add these extra letters as well \n `{eng.extra_letters[0]}` `{eng.extra_letters[1]}`\n\n"
-                            f"🃏 There are now {new_possible_count} possible words\n\n"
+                            f"🃏 Add these new letters to create more spells!.\n `{eng.extra_letters[0]}` `{eng.extra_letters[1]}`\n\n"
+                            f"🃏 There are now {new_possible_count} possible spells\n\n"
                             f"🃏 The round will end in 60 seconds.",
                             parse_mode="Markdown",
                             message_thread_id=FUSION_TOPIC_ID
@@ -1138,8 +1138,7 @@ def _help_text() -> str:
         "`!score` — Your weekly rank + 5 players above/below you\n"
         "`!weekly` — Weekly leaderboard\n"
         "`!alltime` — All-time leaderboard\n"
-        "`!fusion` — Start new game round (group only)\n"
-        "`!words` — Show current word pair\n"
+        "`!words` — Show current spells\n"
         "`!forcerestart` — End the round\n\n"
         "*🌌 IMMERSIVE EXPERIENCE* _(DM only)_\n"
         "`!obelisk` — Enter the Obelisk: gateway to consciousness\n"
@@ -1250,13 +1249,13 @@ async def cmd_fusion(message: types.Message):
     
     eng = get_engine(message.chat.id)
     if eng.running:
-        await message.reply("🃏 *GameMaster:* \"Fusion is already running!\""); return
+        await message.reply("🃏  \"The spells are already being casted!\""); return
 
     # Use the current topic if in a topic, otherwise use default FUSION_TOPIC_ID
     active_topic = message.message_thread_id if message.message_thread_id else FUSION_TOPIC_ID
     asyncio.create_task(game_loop(message.chat.id, active_topic))
     
-    await message.answer(f"🃏 *Fusion is starting!*", parse_mode="Markdown")
+    await message.answer(f"🃏 *Spellcasting is starting!*", parse_mode="Markdown")
 
 
 @dp.message(_cmd("forcerestart"))
@@ -1268,25 +1267,25 @@ async def cmd_forcerestart(message: types.Message):
         await message.answer("🃏 *GameMaster:* \"No round is running", parse_mode="Markdown"); return
     eng.force_stop = True
     eng.active = False
-    await message.answer("🃏 *GameMaster:* \"FINE. Terminating round because apparently you can't handle it. Fresh words incoming. Try not to mess this up.\"", parse_mode="Markdown")
+    await message.answer("🃏 *GameMaster:* \"FINE. Terminating round because apparently you can't handle it. Fresh spells incoming. Try not to mess this up.\"", parse_mode="Markdown")
 
 
 @dp.message(_cmd("stopfusion"))
 async def cmd_stopfusion(message: types.Message):
     """Stop the currently running fusion game immediately."""
     if message.chat.type not in ("group","supergroup"):
-        await message.answer("🃏 *GameMaster:* \"This command is for GROUPS only.\"", parse_mode="Markdown")
+        await message.answer("🃏 \"This command is for GROUPS only.\"", parse_mode="Markdown")
         return
     eng = get_engine(message.chat.id)
     if not eng.running:
-        await message.answer("🃏 *GameMaster:* \"No fusion game is currently running.\"", parse_mode="Markdown")
+        await message.answer("🃏  \"No spells are currently being cast.\"", parse_mode="Markdown")
         return
     eng.force_stop = True
     eng.active = False
     eng.running = False
     await message.answer(
-        f"🛑 *FUSION GAME STOPPED*\n{divider()}\n"
-        f"🃏 *GameMaster:* \"The fusion round has been terminated by an admin.\"\n"
+        f"🛑 *SPELLCASTING STOPPED*\n{divider()}\n"
+        f"🃏 \"The spellcasting round has been terminated by an admin.\"\n"
         f"{divider()}",
         parse_mode="Markdown"
     )
@@ -1409,7 +1408,7 @@ async def cmd_credits(message: types.Message):
         f"🥇 Rank #1 → +50  🥈 #2 → +45  🥉 #3 → +30\n"
         f"  4th → +20  5th → +10  6-10th → +5\n\n"
         f"<b>Cost to play:</b>\n"
-        f"🃏 Fusion round entry → {CREDITS_TO_PLAY} credits\n\n"
+        f"🃏 Spellcaster's Hollow round entry → {CREDITS_TO_PLAY} credits\n\n"
         f"<b>Buy credits:</b>\n"
         f"1000 credits = ⭐️ 50 telegram stars\n"
         f"Contact admin to purchase.",
@@ -1442,7 +1441,7 @@ async def cb_credits_info(callback: types.CallbackQuery):
 
         f"💳 <b>CREDITS</b>\n"
         f"━━━━━━━━━━━━━━━━━\n"
-        f"Used to enter Fusion &amp; Trivia rounds. Earn them free by playing,"
+        f"Used to cast spells at the Spellcaster's Hollow &amp; Trivia rounds. Purchase items. Earn them by playing,"
         f" or top up instantly with Telegram Stars.\n\n"
         f"<pre>"
         f"📊 ACTIVE EARNINGS\n"
@@ -1453,7 +1452,7 @@ async def cb_credits_info(callback: types.CallbackQuery):
         f"3rd : +30 💳  | 4th : +20 💳\n"
         f"5th : +10 💳  | 6-10: +5  💳\n"
         f"</pre>\n"
-        f"• Random gift boxes from Fusion matches\n\n"
+        f"• Random gift boxes from Spellcaster's Hollow matches\n\n"
         f"⭐ <b>Buy with Telegram Stars</b>\n"
         f"Instant — credited the moment payment completes.\n"
         f"Rate: 1 ⭐ = 30 Credits\n\n",
@@ -1553,7 +1552,7 @@ async def cmd_alltime(message: types.Message):
     text = await _render_leaderboard("overall", "alltime")
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="🃏 Fusion All-Time", callback_data="lb_fusion_alltime"),
+            InlineKeyboardButton(text="🃏 Spellcaster's  All-Time", callback_data="lb_fusion_alltime"),
             InlineKeyboardButton(text="🧠 Trivia All-Time", callback_data="lb_trivia_alltime"),
         ],
         [
@@ -5892,7 +5891,7 @@ async def cb_backpack(callback: types.CallbackQuery):
         # Simple button to open the 10-slot Warehouse
         nav_builder.button(text="🏭 Warehouse", callback_data="view_warehouse")
         nav_builder.button(text="🔄 Refresh", callback_data="user_backpack")
-        nav_builder.button(text="⬅️ Main Menu", callback_data="menu_map")
+        nav_builder.button(text="⬅️ Main Menu", callback_data=f"sec_map:{sector}")
         
         nav_builder.adjust(1, 2)
 
@@ -6998,7 +6997,7 @@ async def cb_menu_base(callback: types.CallbackQuery):
         InlineKeyboardButton(text="🧬 Research",      callback_data="menu_research"),
     ])
     rows.append([
-        InlineKeyboardButton(text="🗺️ Sectors/Map",  callback_data="menu_map"),
+        InlineKeyboardButton(text="🗺️ Sectors/Map",  callback_data=f"sec_map:{sector}"),
         InlineKeyboardButton(text=f"🛡️ Inside [{base_name}]",      callback_data="base:main"),
     ])
 
@@ -8137,7 +8136,7 @@ async def cb_map_explore(callback: types.CallbackQuery):
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔍 Scout Sector 1", callback_data="scout_sector_1")],
         [InlineKeyboardButton(text="🔍 Scout Sector 2", callback_data="scout_sector_2")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_map")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data=f"sec_map:{sector}")],
     ])
     
     await callback.message.edit_text(
@@ -8154,11 +8153,12 @@ async def cb_map_explore(callback: types.CallbackQuery):
 async def cb_map_attack(callback: types.CallbackQuery):
     """Attack options."""
     u_id = str(callback.from_user.id)
+    sector = "achievements", []
     on_user_action(u_id, supabase)
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚔️ Raid Nearby", callback_data="attack_raid")],
         [InlineKeyboardButton(text="🎯 Target Player", callback_data="attack_player")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="menu_map")],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data=f"sec_map:{sector}")],
     ])
     
     await callback.message.edit_text(
@@ -10451,10 +10451,10 @@ def build_player_dashboard(player_name: str, session: dict, user_id: str = None,
 # ═══════════════════════════════════════════════════════════════════════════
 
 FREEZE_DURATIONS = {
-    "freeze_30":  30,
-    "freeze_60":  60,
-    "freeze_120": 120,
-    "freeze_180": 180,
+    "freeze_30":  3,
+    "freeze_60":  6,
+    "freeze_120": 12,
+    "freeze_180": 18,
 }
 FREEZE_COSTS = {
     "freeze_30":  200,
@@ -10469,7 +10469,7 @@ async def cmd_board_freeze(message: types.Message):
     if message.chat.type in ("group", "supergroup"):
         # Must be used in the Fusion topic
         if message.message_thread_id != FUSION_TOPIC_ID:
-            await message.reply("❄️ Use /freeze inside the Fusion topic!")
+            await message.reply("❄️ Use /freeze inside spellcaster's hollow to freeze the round timer.", quote=True)
             return
         eng = get_engine(message.chat.id)
         if not eng.active:
@@ -10519,12 +10519,12 @@ async def cmd_board_freeze(message: types.Message):
         # In DM — show info
         await message.answer(
             "❄️ *BOARD FREEZE ITEM*\n\n"
-            "Use /freeze inside the Fusion topic during an active round.\n\n"
+            "Use /freeze inside Spellcaster's Hollow during an active round.\n\n"
             "*Durations & Costs:*\n"
-            "• +30 seconds — 200 Bitcoin\n"
-            "• +60 seconds — 350 Bitcoin\n"
-            "• +2 minutes — 600 Bitcoin\n"
-            "• +3 minutes — 900 Bitcoin\n\n"
+            "• +3 seconds — 200 Bitcoin\n"
+            "• +6 seconds — 350 Bitcoin\n"
+            "• +12 seconds — 600 Bitcoin\n"
+            "• +18 seconds — 900 Bitcoin\n\n"
             "_Freezes the round timer so you can keep finding words._",
             parse_mode="Markdown"
         )
@@ -10596,7 +10596,7 @@ async def cb_freeze_buy(callback: types.CallbackQuery):
 
         buyer_name = _safe_name(user.get("username", "Someone"))
 
-        # Announce in Fusion topic
+        # Announce in Spellcaster's Hollow topic
         await bot.send_message(
             chat_id,
             f"❄️ *BOARD FREEZE!* ❄️\n"
@@ -10624,7 +10624,7 @@ async def cb_freeze_buy(callback: types.CallbackQuery):
 
 @dp.message(F.chat.type.in_({"group", "supergroup"}))
 async def on_group_message(message: types.Message):
-    """Catch-all handler for word guesses during active fusion and trivia rounds."""
+    """Catch-all handler for word guesses during active Spellcaster's Hollow and trivia rounds."""
     try:
         if not message.text:
             return
@@ -10723,7 +10723,7 @@ async def on_group_message(message: types.Message):
             return
 
         # ─────────────────────────────────────────────────────────────────
-        # FUSION TOPIC — only process words in the fusion thread
+        # Spellcaster's Hollow TOPIC — only process words in the sector 1 thread
         # ─────────────────────────────────────────────────────────────────
         if current_topic == FUSION_TOPIC_ID:
             eng = get_engine(message.chat.id)
@@ -10768,17 +10768,17 @@ async def on_group_message(message: types.Message):
                 if cr_bal < CREDITS_TO_PLAY:
                     await message.reply(
                         f"💳 <b>Not enough credits!</b>\n"
-                        f"You need <b>{CREDITS_TO_PLAY} credits</b> to play Fusion.\n"
+                        f"You need <b>{CREDITS_TO_PLAY} credits</b> to cast spells in Spellcaster's Hollow.\n"
                         f"Your balance: <b>{cr_bal}</b>\n\n"
-                        f"• /daily — claim 50 free daily credits\n"
-                        f"• Appear on the scoreboard to earn more\n"
-                        f"• Purchase credits: 1000 credits = ₦1000",
+                        f"Come online daily and claim 50 free daily credits\n"
+                        f"Appear on the scoreboard to earn more\n"
+                        f"Purchase credits with Telegram Stars! 1 star = 1000 credits\n",
                         parse_mode="HTML"
                     )
                     return
                 # Deduct credits (non-blocking background task)
                 async def _deduct_entry_credits():
-                    spend_credits(u_id, CREDITS_TO_PLAY, "fusion round entry")
+                    spend_credits(u_id, CREDITS_TO_PLAY, "Spell casting in Spellcaster's Hollow, goodluck!")
                 asyncio.create_task(_deduct_entry_credits())
 
             if guess in eng.used_words:
@@ -10888,12 +10888,12 @@ async def on_group_message(message: types.Message):
             eng.scores[u_id]['pts'] += pts
 
             # ── STEP 1: INSTANT group feedback — only this line goes to the group ──
-            word_len_label = {3:'short',4:'solid',5:'nice',6:'great',7:'superb',8:'elite'}.get(word_len,'monster')
+            word_len_label = {3:'Lol why are you here',4:'Not bad keep going',5:'Keep it up!',6:'great',7:'superb',8:'god mode'}.get(word_len,'monster')
             res_emoji_map  = {'wood':'🪵','bronze':'🧱','iron':'⛓️','stone':'💎','relics':'🏺','incubus':'👹'}
             res_str        = ' '.join(f"{res_emoji_map.get(r,'')}{a}" for r, a in resources_awarded.items() if a > 0)
             streak_str     = f"  🔥x{session['streak']}" if session['streak'] >= 3 else ""
             food_str       = f"  🥫+{food_bonus}" if food_bonus > 0 else ""
-            rare_str       = f"\n🎉 <b>RARE DROP!</b>" if rare_item else ""
+            rare_str       = f"\n🎉 <b>RARE DROP INCOMING!</b>" if rare_item else ""
             feedback_line  = (
                 f"✅ <b>{_safe_name(db_name)}</b>  <code>{guess.upper()}</code>"
                 f"  <b>+{pts}pt</b>  <i>({word_len_label})</i>"
@@ -10938,9 +10938,9 @@ async def on_group_message(message: types.Message):
                         # First word this round — send intro + dashboard to DM
                         try:
                             intro = (
-                                "🃏 <b>Fusion Match Started!</b>\n"
-                                "Your live scoreboard — resources accumulate here "
-                                "and are saved to your base after the round. 🏰\n"
+                                "🃏 <b>🪄 Spell Casting 🪄</b>\n"
+                                "Congratulations. You've joined your first spell casting match! Here's our live scoreboard, during the matches resources accumulate here "
+                                "and are saved to the warehouse after each round. 🏰\n"
                                 "━━━━━━━━━━━━━━━━━"
                             )
                             await bot.send_message(_dm_chat_id, intro, parse_mode="HTML")
@@ -11074,7 +11074,7 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
             
             if is_sunday_midnight and weekly_reset_done_for_week != current_week_id:
                 weekly_reset_done_for_week = current_week_id
-                print(f"Leaderboard has been reset at {now.isoformat()}")
+                print(f"The weekly leaderboard has been reset at {now.isoformat()}")
                 
                 try:
                     # 1. Get the final weekly leaderboard BEFORE resetting
@@ -11086,10 +11086,10 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                     medals = ["🥇", "🥈", "🥉"]
                     announcement = (
                         f"{divider()}\n"
-                        f"🏆 *WEEKLY RESET — FINAL STANDINGS* 🏆\n"
+                        f"🏆 *WE HAVE REACHED THE END OF THE WEEK* 🏆\n"
                         f"{divider()}\n\n"
-                        f"🃏 *GameMaster:* \"Another week concluded. "
-                        f"Let's see who proved themselves... and who wasted my time.\"\n\n"
+                        f"🃏 *GameMaster:* \"Another age concluded. "
+                        f"Let's see the new leaders of the new age.\"\n\n"
                     )
                     
                     if lb:
@@ -11136,8 +11136,8 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                     
                     announcement += (
                         f"\n{divider()}\n"
-                        f"📅 *All weekly points have been RESET to 0.*\n"
-                        f"A new week begins NOW. Prove yourself.\n"
+                        f"📅 *Indeed another era is upon us.*\n"
+                        f"A new age has begun. Prove yourself worthy.\n"
                         f"{divider()}"
                     )
                     
@@ -11179,7 +11179,7 @@ async def weekly_reset_task(bot: Bot, chat_id: int):
                     except Exception as bot_preload_err:
                         print(f"[WEEKLY RESET] Bot preload error: {bot_preload_err}")
                     
-                    # 5. Send announcement to Fusion topic (not general)
+                    # 5. Send announcement to Spellcaster's Hollow topic (not general)
                     if chat_id:
                         try:
                             await bot.send_message(
@@ -11358,7 +11358,7 @@ async def sheets_sync_background_task(bot: Bot, chat_id: int):
                 
                 # Post top 10 weekly to group
                 if weekly_lb:
-                    msg = "📊 *FUSION WEEKLY TOP 10*\n━━━━━━━━━━━━━━━\n"
+                    msg = "📊 *Spellcaster's Hollow top 10 leaders*\n━━━━━━━━━━━━━━━\n"
                     for i, p in enumerate(weekly_lb[:10], 1):
                         medal = ["🥇","🥈","🥉"][i-1] if i <= 3 else f"{i}."
                         msg += f"{medal} {p['username']} — {p['points']:,} pts\n"
@@ -11385,7 +11385,7 @@ async def gamemaster_announcement_task(bot: Bot, chat_id: int):
     
     # Static announcements (dramatic GameMaster messages)
     static_announcements = [
-        f"{divider()}\n🌀 *3 FREE TELEPORTS GRANTED*\n{divider()}\n\nCheck your `!claims` - I've given you **3 free teleports**. Use them wisely. Each sector offers different rewards, risks, and *opportunities*. \n\nType `!teleport [1-9]` to explore. Or be a coward and stay in Sector 1. Your choice. 🌍\n{divider()}",
+        f"{divider()}\n🌀 *3 FREE TELEPORT CHARGES*\n{divider()}\n\nCheck the teleports on your dashboard. You have received **3 free teleports**. Each sector offers different rewards, risks, and *opportunities*. \n\nGo to Sectors to teleport. [Sectors 🌍]\n{divider()}",
         
         f"{divider()}\n🌍 *DISCOVER THE SECTORS*\n{divider()}\n\n**SECTOR 1** (🏜️ Badlands): Easy pickings. For noobs.\n**SECTOR 6** (🔥 Molten Gorge): Legendary drops. Almost certain death.\n**SECTOR 9** (🌑 Void Canyon): The best resources. Only legends survive.\n\nType `!map` to see what's available. Type `!teleport [1-9]` to jump in. 🚀\n{divider()}",
         
@@ -11824,8 +11824,8 @@ async def hourly_leaderboard_broadcast_task(bot: Bot, chat_id: int):
             sections = [
                 ("🏆 OVERALL — WEEKLY",  get_weekly_leaderboard,       {"limit": 10}),
                 ("🏆 OVERALL — ALL-TIME",get_alltime_leaderboard,      {"limit": 10}),
-                ("🃏 FUSION — WEEKLY",   get_game_weekly_leaderboard,  {"game_type": "fusion",  "limit": 10}),
-                ("🃏 FUSION — ALL-TIME", get_game_alltime_leaderboard, {"game_type": "fusion",  "limit": 10}),
+                ("🃏 Spellcaster's Hollow — New World",   get_game_weekly_leaderboard,  {"game_type": "fusion",  "limit": 10}),
+                ("🃏 Spellcaster's Hollow — Legend", get_game_alltime_leaderboard, {"game_type": "fusion",  "limit": 10}),
                 ("🧠 TRIVIA — WEEKLY",   get_game_weekly_leaderboard,  {"game_type": "trivia",  "limit": 10}),
                 ("🧠 TRIVIA — ALL-TIME", get_game_alltime_leaderboard, {"game_type": "trivia",  "limit": 10}),
             ]
