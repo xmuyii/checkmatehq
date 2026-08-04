@@ -5818,7 +5818,7 @@ async def cb_backpack(callback: types.CallbackQuery):
             return
 
         # Load your actual system instances directly from user data
-        player_bag = PlayerBag.from_dict(user.get("inventory", {}))
+        player_bag = PlayerBag.from_dict(user.get("inventory", []))
         equipment = EquipmentManager.from_dict(user.get("equipment", {}))
         combat_stats = equipment.get_active_combat_stats()
 
