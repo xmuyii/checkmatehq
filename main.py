@@ -9,6 +9,7 @@ Game loop: simple asyncio.sleep ticks, force_stop flag.
 
 # ── Load environment variables FIRST ──────────────────────────────────────
 from dotenv import load_dotenv
+import supabase
 
 from wiring_hooks import on_user_action
 load_dotenv()
@@ -5917,7 +5918,7 @@ async def cb_backpack(callback: types.CallbackQuery):
         print(f"[CRITICAL] Operational Failure: {e}")
         traceback.print_exc()
         logging.error(f"Error executing cb_backpack: {e}", exc_info=True)
-        
+
 from aiogram import Router, types, F
 from inventory.item import Item
 
