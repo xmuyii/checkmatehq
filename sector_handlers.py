@@ -93,16 +93,13 @@ async def cb_sector_map(callback: types.CallbackQuery):
         builder.row(
             types.InlineKeyboardButton(text="⬅️ Prev Sector", callback_data=f"sec_map:{prev_sec}"),
             types.InlineKeyboardButton(text="🔄 Refresh", callback_data=f"sec_map:{sector_id}"),
-            types.InlineKeyboardButton(text="Next Sector ➡️", callback_data=f"sec_map:{next_sec}")
-            [
-                       
-                    ],  
-        )
+            types.InlineKeyboardButton(text="Next Sector ➡️", callback_data=f"sec_map:{next_sec}"))
+        
         builder.row(
             types.InlineKeyboardButton(text="[ 🕯 Sector 1 ]", callback_data="menu_fusion_info"),
             types.InlineKeyboardButton(text="[ 🪬 Sector 2 ]", callback_data="menu_trivia_info"),
             types.InlineKeyboardButton(text="⬅️ Main Menu", callback_data="menu_back"))
-
+    
         caption = sn.format_sector_map(
             sector_id=sector_id,
             sector_state=sector_state,
