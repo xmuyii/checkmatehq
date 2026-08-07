@@ -9,7 +9,7 @@ Game loop: simple asyncio.sleep ticks, force_stop flag.
 
 # ── Load environment variables FIRST ──────────────────────────────────────
 from dotenv import load_dotenv
-import supabase
+from supabase_db import supabase
 
 from wiring_hooks import on_user_action
 load_dotenv()
