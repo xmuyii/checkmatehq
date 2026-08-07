@@ -9,7 +9,6 @@ Game loop: simple asyncio.sleep ticks, force_stop flag.
 
 # ── Load environment variables FIRST ──────────────────────────────────────
 from dotenv import load_dotenv
-import supabase
 
 from wiring_hooks import on_user_action
 load_dotenv()
@@ -5760,23 +5759,23 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
     # ── Keyboard ──────────────────────────────────────────────────────────
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="[ 👤 Commander ]",   callback_data="menu_profile"),
-            InlineKeyboardButton(text="[ 🏰 My Base ]",     callback_data="menu_base"),
+            InlineKeyboardButton(text=" 👤 Commander ",   callback_data="menu_profile"),
+            InlineKeyboardButton(text=" 🏰 My Base ",     callback_data="menu_base"),
         ],
         [
-            InlineKeyboardButton(text="[ 👥 Alliance ]",    callback_data="menu_guild"),
-            InlineKeyboardButton(text="[ 🌍 Sectors ]",     callback_data=f"sec_map:{sector}"),
+            InlineKeyboardButton(text=" 👥 Alliance ",    callback_data="menu_guild"),
+            InlineKeyboardButton(text=" 🌍 Sectors ",     callback_data=f"sec_map:{sector}"),
         ],
         [
-            InlineKeyboardButton(text="[ 🎯 Inventory ]",  callback_data="user_backpack"),
+            InlineKeyboardButton(text=" 🎯 Inventory ",  callback_data="user_backpack"),
         ],
         [
-            InlineKeyboardButton(text="[ 🎯 Objectives ]",  callback_data="menu_objective"),
-            InlineKeyboardButton(text="[⚙️ Account ]",     callback_data="menu_account"),
+            InlineKeyboardButton(text=" 🎯 Objectives ",  callback_data="menu_objective"),
+            InlineKeyboardButton(text=" ⚙️ Account ",     callback_data="menu_account"),
         ],
         [
-            InlineKeyboardButton(text="[ 🌀 Claim 🌀 ]", callback_data="claim_daily_teleports"),
-            InlineKeyboardButton(text="[ 🎁 Claim 🎁 ]", callback_data="claim_free_gift"),
+            InlineKeyboardButton(text=" 🌀 Claim 🌀 ", callback_data="claim_daily_teleports"),
+            InlineKeyboardButton(text=" 🎁 Claim 🎁 ", callback_data="claim_free_gift"),
         ],
     ])
 
@@ -5800,102 +5799,125 @@ from inventory.equipment import EquipmentManager
 from inventory.player_bag import PlayerBag
 
 router = Router()
-
-@dp.callback_query(F.data == "user_backpack")
+@router.callback_query(F.data == "user_backpack")
 async def cb_backpack(callback: types.CallbackQuery):
     """Displays active carrying inventory and loadout using existing models."""
-    await callback.answer()
+    print(f"[DEBUG] cb_backpack triggered by user: {callback.from_user.id}")
+    
+    try:
+        await callback.answer()
+    except Exception as e:
+        print(f"[DEBUG] Failed to answer callback: {e}")
 
     try:
         u_id = str(callback.from_user.id)
+        u_id_int = callback.from_user.id
         
-        user = get_user(u_id)
+        user = get_user(u_id) 
         if not user:
-            await callback.answer("User record not found.", show_alert=True)
+            print(f"[WARN] User record {u_id} not found in DB.")
+            await callback.message.answer("⚠️ Operational Error: User record data missing.")
             return
 
-        # Load your actual system instances directly from user data
-        player_bag = PlayerBag.from_dict(user.get("inventory", []))
-        equipment = EquipmentManager.from_dict(user.get("equipment", {}))
+        # ── FIXED: INITIALIZE MODELS ACCORDING TO YOUR ACTUAL CLASSES ──
+        from inventory.warehouse import Warehouse
+        from inventory.equipment import EquipmentManager
+        from inventory.player_bag import PlayerBag
+
+        # 1. Initialize Warehouse
+        warehouse_data = user.get("warehouse", {"owner_id": u_id, "capacity": 50, "slots": {}})
+        warehouse = Warehouse.from_dict(warehouse_data)
+
+        # 2. FIXED: Construct PlayerBag using owner_id instead of from_dict
+        player_bag = PlayerBag(owner_id=u_id_int)
+        
+        # Manually rehydrate slots array from the user data dictionary
+        saved_slots = user.get("inventory", [])
+        for i, slot_data in enumerate(saved_slots[:player_bag.max_slots]):
+            if slot_data:
+                player_bag.slots[i] = slot_data
+
+        # 3. Initialize EquipmentManager
+        equip_data = user.get("equipment", {"owner_id": u_id, "equipped": {"weapon": [], "shield": [], "protection": []}, "cooldowns": {}})
+        equipment = EquipmentManager.from_dict(equip_data, warehouse=warehouse)
         combat_stats = equipment.get_active_combat_stats()
 
-        # ── 1. HEADER ──
-        caption = "🎒 *CARRIED INVENTORY*\n"
-        # Uses your existing PlayerBag methods directly
-        caption += f"📦 *Storage Capacity:* `{player_bag.used_slots}/{player_bag.capacity}` slots\n"
+        # ── 1. HEADER (HTML Mode) ──
+        caption = "🎒 <b>CARRIED INVENTORY</b>\n"
+        used_slots = sum(1 for slot in player_bag.slots if slot is not None)
+        caption += f"📦 <b>Storage Capacity:</b> <code>{used_slots}/{player_bag.max_slots}</code> slots\n"
         caption += "━━━━━━━━━━━━━━━━━\n\n"
 
         # Equipped Weapons / Loadout
-        caption += "⚔️ *Equipped Weapons:*\n"
-        if not combat_stats["active_weapons"]:
-            caption += "  └ _None_\n"
+        caption += "⚔️ <b>Equipped Weapons:</b>\n"
+        if not combat_stats.get("active_weapons"):
+            caption += "  └ <i>None Currently Active</i>\n"
         else:
             for w in combat_stats["active_weapons"]:
-                status = "✅ Ready" if w["is_ready"] else f"⏳ Cooldown ({w['cooldown_remaining']})"
-                caption += f"  ├ *{w['name']}*: {status}\n"
+                status = "✅ Ready" if w.get("is_ready") else f"⏳ Cooldown ({w.get('cooldown_remaining')})"
+                caption += f"  ├ <b>{w.get('name', 'Unknown Weapon')}</b>: {status}\n"
 
-        caption += "\n📦 *Carried Items:*\n"
-        items = player_bag.get_items()  # Using your built-in item fetching method
+        caption += "\n📦 <b>Carried Items:</b>\n"
+        
+        has_items = False
+        builder = InlineKeyboardBuilder()
 
-        if not items:
-            caption += "  _Your inventory is empty._\n"
-        else:
-            for item in items:
-                caption += f"  • *{item['name']}* (x`{item['qty']}`)\n"
+        for slot in player_bag.slots:
+            if slot:
+                has_items = True
+                obj = slot["object"]  # Item or Backpack instance
+                qty = slot["quantity"]
+                slot_type = slot["type"]
+                
+                name = obj.name if hasattr(obj, 'name') else "Unknown"
+                caption += f"  • <b>{name}</b> (x<code>{qty}</code>) [{slot_type.upper()}]\n"
+                
+                # Dynamic action buttons
+                if slot_type == "item":
+                    item_id = obj.item_id
+                    category = obj.category.value if hasattr(obj.category, 'value') else str(obj.category)
+                    
+                    if category in ("speedup", "consumable", "xp_point", "crates", "buff"):
+                        builder.button(text=f"⚡ Use {name}", callback_data=f"item_use:{item_id}")
+                    elif category in ("weapon", "shield", "protection"):
+                        builder.button(text=f"⚔️ Equip {name}", callback_data=f"item_equip:{item_id}")
+
+        if not has_items:
+            caption += "  <i>Your inventory bag is completely empty.</i>\n"
 
         caption += "\n━━━━━━━━━━━━━━━━━"
 
-        # ── 2. INLINE KEYBOARD ──
-        builder = InlineKeyboardBuilder()
-
-        # Item Action Buttons using your REGISTRY data
-        for item in items:
-            item_id = item["item_id"]
-
-            if item.get("category") in ("speedup", "consumable", "xp_point", "crates", "buff"):
-                builder.button(
-                    text=f"⚡ Use {item['name']}",
-                    callback_data=f"item_use:{item_id}"
-                )
-            elif item.get("category") in ("weapon", "shield", "protection") or item_id in WEAPONS:
-                builder.button(
-                    text=f"⚔️ Equip {item['name']}",
-                    callback_data=f"item_equip:{item_id}"
-                )
-
-        # Unequip Weapons/Gear Actions
-        for w in combat_stats["active_weapons"]:
+        # Unequip Actions
+        for w in combat_stats.get("active_weapons", []):
             builder.button(
-                text=f"❌ Unequip {w['name']}",
-                callback_data=f"item_unequip:{w['id']}"
+                text=f"❌ Unequip {w.get('name', 'Weapon')}",
+                callback_data=f"item_unequip:{w.get('id', 'none')}"
             )
 
         builder.adjust(1)
 
-        # ── NAVIGATION & WAREHOUSE BUTTON ──
+        # ── NAVIGATION & UTILITY BUTTONS ──
         nav_builder = InlineKeyboardBuilder()
-        
-        # Simple button to open the 10-slot Warehouse
         nav_builder.button(text="🏭 Warehouse", callback_data="view_warehouse")
         nav_builder.button(text="🔄 Refresh", callback_data="user_backpack")
-        nav_builder.button(text="⬅️ Main Menu", callback_data=f"menu_map")
-        
+        nav_builder.button(text="⬅️ Main Menu", callback_data="menu_back")
         nav_builder.adjust(1, 2)
 
         builder.attach(nav_builder)
 
         await callback.message.edit_text(
             text=caption,
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=builder.as_markup()
         )
 
-    except TelegramBadRequest as e:
-        if "message is not modified" not in str(e):
-            raise e
     except Exception as e:
+        import traceback
+        import logging
+        print(f"[CRITICAL] Operational Failure: {e}")
+        traceback.print_exc()
         logging.error(f"Error executing cb_backpack: {e}", exc_info=True)
-
+        
 from aiogram import Router, types, F
 from inventory.item import Item
 
@@ -9029,6 +9051,7 @@ async def cmd_teleport(message: types.Message):
     
     if should_attack:
         encounter = generate_bandit_encounter(target_sector, player_level)
+        user['commander_location'] = target_sector
         user['current_encounter'] = encounter
         save_user(u_id, user)
         
