@@ -5608,8 +5608,8 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
     gold        = user.get("gold", 0)
     credits     = user.get("credits", 0)
     bitcoin     = user.get("bitcoin", 0)
-    sector      = user.get("sector", 1)
-    commander_location = user.get("commander_location", 1)
+    sector      = user.get("sector", "Unknown")
+    commander_location = user.get("commander_location", "Unknown")
     base_name   = (user.get("base_name") or "Base")[:16]
     shield_raw  = user.get("shield_status") or "UNPROTECTED"
     military    = user.get("military", {}) or {}
@@ -5775,10 +5775,6 @@ async def _render_main_hud(message, user: dict, u_id: str, edit: bool = False):
             InlineKeyboardButton(text="[⚙️ Account ]",     callback_data="menu_account"),
         ],
         [
-            InlineKeyboardButton(text="[ 🕯 Sector 1 ]", callback_data="menu_fusion_info"),
-            InlineKeyboardButton(text="[ 🪬 Sector 2 ]",      callback_data="menu_trivia_info"),
-        ],
-        [
             InlineKeyboardButton(text="[ 🌀 Claim 🌀 ]", callback_data="claim_daily_teleports"),
             InlineKeyboardButton(text="[ 🎁 Claim 🎁 ]", callback_data="claim_free_gift"),
         ],
@@ -5805,13 +5801,14 @@ from inventory.player_bag import PlayerBag
 
 router = Router()
 
-@router.callback_query(F.data == "user_backpack")
+@dp.callback_query(F.data == "user_backpack")
 async def cb_backpack(callback: types.CallbackQuery):
     """Displays active carrying inventory and loadout using existing models."""
     await callback.answer()
 
     try:
         u_id = str(callback.from_user.id)
+        
         user = get_user(u_id)
         if not user:
             await callback.answer("User record not found.", show_alert=True)
@@ -5881,7 +5878,7 @@ async def cb_backpack(callback: types.CallbackQuery):
         # Simple button to open the 10-slot Warehouse
         nav_builder.button(text="🏭 Warehouse", callback_data="view_warehouse")
         nav_builder.button(text="🔄 Refresh", callback_data="user_backpack")
-        nav_builder.button(text="⬅️ Main Menu", callback_data=f"sec_map:{sector}")
+        nav_builder.button(text="⬅️ Main Menu", callback_data=f"menu_map")
         
         nav_builder.adjust(1, 2)
 
@@ -5902,7 +5899,7 @@ async def cb_backpack(callback: types.CallbackQuery):
 from aiogram import Router, types, F
 from inventory.item import Item
 
-@router.callback_query(F.data.startswith("item_use:"))
+@dp.callback_query(F.data.startswith("item_use:"))
 async def cb_use_item(callback: types.CallbackQuery):
     await callback.answer()
     item_id = callback.data.split(":")[1]  # e.g., "speedup_15m"
@@ -5937,7 +5934,7 @@ async def cb_use_item(callback: types.CallbackQuery):
 # ------------------------------------------------------------------
 # Dedicated Base Warehouse Handler (Your 10-Slot Warehouse class)
 # ------------------------------------------------------------------
-@router.callback_query(F.data == "view_warehouse")
+@dp.callback_query(F.data == "view_warehouse")
 async def cb_view_warehouse(callback: types.CallbackQuery):
     """Displays player's 10-slot Base Warehouse storage."""
     await callback.answer()
@@ -6067,11 +6064,11 @@ async def cmd_start(message: types.Message):
     user = get_user(u_id)
     
     # Send an initial greeting attached to our permanent physical controls
-    await message.answer(
-        "🚀 *NEURAL LINK ESTABLISHED*\n\nWelcome back, Operative. The Command Center console is active below.",
-        parse_mode="Markdown",
-        reply_markup=hud_controller
-    )
+    #await message.answer(
+    #    "🚀 *NEURAL LINK ESTABLISHED*\n\nWelcome back, Operative. The Command Center console is active below.",
+    #    parse_mode="Markdown",
+    #    reply_markup=hud_controller
+    #)
     
     # Render the dynamic text window on top
     await _render_main_hud(message, user, u_id, edit=False)
@@ -6903,6 +6900,7 @@ async def cb_menu_base(callback: types.CallbackQuery):
     res        = base_res.get("resources", {}) or {}
     buildings  = user.get("buildings", {}) or {}
     military   = user.get("military", {}) or {}
+    sector = user.get("sector", "Unknown") or "Unknown"
 
     # ── Resources ─────────────────────────────────────────────────────────
     wood   = res.get("wood", 0)
@@ -8119,6 +8117,8 @@ async def cb_map_explore(callback: types.CallbackQuery):
     """Explore sectors."""
     from wiring_hooks import on_user_action
     u_id = str(callback.from_user.id)
+    user = get_user(u_id)
+    sector = user.get("commander_location", "unknown")
     on_user_action(u_id, supabase)
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔍 Scout Sector 1", callback_data="scout_sector_1")],
@@ -8140,7 +8140,8 @@ async def cb_map_explore(callback: types.CallbackQuery):
 async def cb_map_attack(callback: types.CallbackQuery):
     """Attack options."""
     u_id = str(callback.from_user.id)
-    sector = "achievements", []
+    user = get_user(u_id)
+    sector = user.get("commander_location  ", "unknown")
     on_user_action(u_id, supabase)
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⚔️ Raid Nearby", callback_data="attack_raid")],

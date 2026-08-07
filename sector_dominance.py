@@ -445,7 +445,7 @@ def kb_sector_dashboard(sector_id: int, user: dict, sector_state: dict) -> Inlin
         ])
 
     buttons.append([
-        InlineKeyboardButton(text="« Back to Base", callback_data="base:dashboard"),
+        InlineKeyboardButton(text="« Back to Base", callback_data="menu_back"),
     ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
