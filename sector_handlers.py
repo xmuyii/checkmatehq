@@ -99,7 +99,7 @@ async def cb_sector_map(callback: types.CallbackQuery):
             types.InlineKeyboardButton(text="[ 🕯 Sector 1 ]", callback_data="menu_fusion_info"),
             types.InlineKeyboardButton(text="[ 🪬 Sector 2 ]", callback_data="menu_trivia_info"),
             types.InlineKeyboardButton(text="⬅️ Main Menu", callback_data="menu_back"))
-    
+
         caption = sn.format_sector_map(
             sector_id=sector_id,
             sector_state=sector_state,
@@ -156,7 +156,7 @@ async def cb_node_inspect(callback: types.CallbackQuery):
                 kb = kb_private_sector_resident(target_sector, u_id, private_sector)
             else:
                 text = format_outsider_view(private_sector)
-                kb = kb_private_sector_outsider(target_sector, private_sector)
+                kb = kb_private_sector_outsider(target_sector, private_sector, user)
 
             await callback.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")
             return

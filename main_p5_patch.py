@@ -206,7 +206,7 @@ async def handle_private_sector(cb: types.CallbackQuery):
         else:
             # Outsider view
             text = format_outsider_view(ps)
-            kb   = kb_private_sector_outsider(sector_id, ps)
+            kb   = kb_private_sector_outsider(sector_id, ps, user)
 
         try:
             await cb.message.edit_text(text, reply_markup=kb, parse_mode="Markdown")

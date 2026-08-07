@@ -1094,11 +1094,13 @@ def format_access_queue(private_sector: dict) -> str:
 #  INLINE KEYBOARDS
 # ═══════════════════════════════════════════════════════════════════════════
 
-def kb_private_sector_outsider(sector_id: int, private_sector: dict) -> InlineKeyboardMarkup:
+def kb_private_sector_outsider(sector_id: int, private_sector: dict,  user: dict) -> InlineKeyboardMarkup:
     """Keyboard shown to outsiders clicking the private sector node."""
     tier      = private_sector.get("tier", "settlement")
     tdata     = SETTLEMENT_TIERS.get(tier, {})
     tier_emoji = tdata.get("emoji", "🏕️")
+    
+    sector = user.get("commander_location", "unknown")
 
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
@@ -1117,7 +1119,7 @@ def kb_private_sector_outsider(sector_id: int, private_sector: dict) -> InlineKe
             text="🛡️ Reinforce Fortress",
             callback_data=f"ps:reinforce:{sector_id}"
         )],
-        [InlineKeyboardButton(text="⬅️ Back to Sector", callback_data=f"sector:dashboard:{sector_id}")],
+        [InlineKeyboardButton(text="⬅️ Back to Sector", callback_data=f"sec_map:{sector}")],
     ])
 
 
